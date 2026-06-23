@@ -1,0 +1,112 @@
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --panel-2: #1f232c;
+  --text: #e6e8ec;
+  --muted: #8b93a1;
+  --accent: #6ea8fe;
+  --danger: #e06c75;
+  --border: #2a2f3a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.screen { min-height: 100vh; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.center { text-align: center; margin-top: 4rem; }
+.error { color: var(--danger); }
+
+header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); }
+header h1 { margin: 0; font-size: 1.3rem; }
+header p { margin: .2rem 0 0; font-size: .85rem; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+/* Setup screen */
+#setup { display: flex; align-items: center; justify-content: center; }
+#setup .card { width: min(520px, 90vw); }
+.setup-item { display: flex; flex-direction: column; gap: .25rem; margin: .75rem 0; }
+.setup-item .bar { height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.setup-item .bar > span { display: block; height: 100%; background: var(--accent); width: 0; }
+
+/* Layout */
+.layout { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 64px); }
+.sidebar { border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
+.sidebar h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 1.25rem 0 .5rem; }
+.content { padding: 1.5rem; overflow-y: auto; }
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  transition: border-color .15s, background .15s;
+}
+.dropzone.drag { border-color: var(--accent); background: var(--panel-2); }
+
+.meeting-list, .speaker-list { list-style: none; margin: 0; padding: 0; }
+.meeting-list li {
+  padding: .55rem .6rem; border-radius: 8px; cursor: pointer; font-size: .9rem;
+  display: flex; justify-content: space-between; gap: .5rem;
+}
+.meeting-list li:hover { background: var(--panel-2); }
+.meeting-list li.active { background: var(--panel-2); outline: 1px solid var(--accent); }
+.meeting-list .status { font-size: .72rem; color: var(--muted); }
+
+.speaker-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .35rem .5rem; font-size: .85rem;
+}
+.speaker-list button { background: none; border: none; color: var(--danger); cursor: pointer; }
+
+.toolbar { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.toolbar h2 { flex: 1; margin: 0; }
+
+button {
+  background: var(--accent); color: #0b0d10; border: none; border-radius: 8px;
+  padding: .45rem .8rem; font-weight: 600; cursor: pointer;
+}
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+
+.summary { margin-bottom: 1.5rem; }
+.summary h3 { margin: 1rem 0 .35rem; font-size: .9rem; color: var(--accent); }
+.summary h3:first-child { margin-top: 0; }
+
+.stages { display: flex; flex-direction: column; gap: .4rem; margin-top: .75rem; }
+.stage { display: flex; align-items: center; gap: .5rem; font-size: .9rem; color: var(--muted); }
+.stage.active { color: var(--text); font-weight: 600; }
+.stage.done { color: var(--accent); }
+.stage .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border); }
+.stage.active .dot { background: var(--accent); }
+.stage.done .dot { background: var(--accent); }
+
+.legend { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+.legend .chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .25rem .5rem; border-radius: 999px; background: var(--panel-2); font-size: .8rem;
+}
+.legend .chip input { background: transparent; border: none; color: var(--text); width: 8rem; }
+.legend .chip .badge { font-size: .65rem; background: var(--accent); color: #0b0d10; padding: 0 .35rem; border-radius: 6px; }
+.legend .swatch { width: 10px; height: 10px; border-radius: 50%; }
+
+.transcript { display: flex; flex-direction: column; gap: .6rem; }
+.bubble { padding: .6rem .8rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); }
+.bubble .meta { font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
+.bubble .who { font-weight: 600; }

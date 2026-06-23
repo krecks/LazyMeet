@@ -1,0 +1,74 @@
+name: build
+
+# Builds the cross-platform desktop installers. Each OS runner freezes the
+# Python backend into a sidecar with PyInstaller, then tauri-action bundles the
+# native app (.dmg/.app, .msi/.exe, .AppImage/.deb). Artifacts are uploaded per
+# platform. (Tauri cannot cross-compile, hence the matrix.)
+
+on:
+  push:
+    branches: [main, claude/init-repo-3ynbbd]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: windows-latest
+          - os: ubuntu-22.04
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux system deps (webkit2gtk, etc.)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
+            file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Build backend sidecar
+        run: python scripts/build_sidecar.py
+
+      - name: Generate icons
+        run: |
+          pip install Pillow
+          python scripts/make_icons.py
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Tauri app
+        run: cargo tauri build
+        working-directory: src-tauri
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazymeet-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+          if-no-files-found: ignore

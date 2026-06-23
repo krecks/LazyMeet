@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+*.spec.bak
+
+# PyInstaller sidecar output (built per-platform in CI / locally)
+src-tauri/binaries/lazymeet-backend-*
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# App data & downloaded models (never committed)
+data/
+models/
+*.wav
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Env
+.env

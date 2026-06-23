@@ -1,0 +1,20 @@
+# LazyMeet backend (Python sidecar) dependencies.
+# Heavy AI deps are imported lazily so FAKE mode runs without them.
+
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+platformdirs>=4.0
+python-dotenv>=1.0
+
+# Audio / ASR / diarization / identification (sherpa-onnx ships ONNX runtime).
+sherpa-onnx>=1.10
+soundfile>=0.12
+numpy>=1.24
+imageio-ffmpeg>=0.4.9
+
+# In-process summarization LLM (no Ollama).
+llama-cpp-python>=0.2.79
+
+# Packaging the sidecar into a standalone binary.
+pyinstaller>=6.0

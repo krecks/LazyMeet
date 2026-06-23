@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LazyMeet</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- First-run model download screen -->
+  <section id="setup" class="screen hidden">
+    <div class="card">
+      <h1>LazyMeet</h1>
+      <p class="muted">Setting up local AI models (one-time, no account needed)…</p>
+      <div id="setup-items"></div>
+      <p id="setup-error" class="error hidden"></p>
+    </div>
+  </section>
+
+  <!-- Main app -->
+  <section id="app" class="screen hidden">
+    <header>
+      <h1>LazyMeet</h1>
+      <p class="muted">Private, local meeting transcription &amp; summaries</p>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div id="dropzone" class="dropzone">
+          <strong>Drop a recording here</strong>
+          <span class="muted">or click to choose a video file</span>
+          <input id="file-input" type="file" accept="video/*,audio/*" hidden />
+        </div>
+        <h2>Meetings</h2>
+        <ul id="meeting-list" class="meeting-list"></ul>
+
+        <h2>Known speakers</h2>
+        <ul id="speaker-list" class="speaker-list"></ul>
+      </aside>
+
+      <main class="content">
+        <div id="empty" class="muted center">Select or upload a meeting to begin.</div>
+
+        <div id="processing" class="hidden card">
+          <h2 id="proc-title">Processing…</h2>
+          <div class="stages" id="stages"></div>
+        </div>
+
+        <article id="result" class="hidden">
+          <div class="toolbar">
+            <h2 id="result-title"></h2>
+            <button id="export-btn">Export Markdown</button>
+            <button id="delete-btn" class="danger">Delete</button>
+          </div>
+
+          <div class="summary card">
+            <h3>Summary</h3>
+            <p id="summary-text"></p>
+            <h3>Key takeaways</h3>
+            <ul id="takeaways"></ul>
+            <h3>Action items</h3>
+            <ul id="action-items"></ul>
+          </div>
+
+          <h3>Transcript</h3>
+          <div id="speaker-legend" class="legend"></div>
+          <div id="transcript" class="transcript"></div>
+        </article>
+      </main>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
