@@ -296,6 +296,29 @@ def rename_speakers(meeting_id: str, body: SpeakerRename):
     return store.public_meeting(updated)
 
 
+class SpeakerVerify(BaseModel):
+    correct: bool
+
+
+@app.post("/api/meetings/{meeting_id}/speakers/{diarized_id}/verify")
+def verify_speaker(meeting_id: str, diarized_id: str, body: SpeakerVerify):
+    """Confirm or reject an auto-recognized speaker.
+
+    Confirming enrols this recording's voice as another sample for the person,
+    so recognition learns from every confirmed file. Rejecting unlinks the
+    name without touching the library — a bad match can't poison the saved
+    voiceprint — and reverts the display name to a fresh "Speaker N".
+    """
+    try:
+        action = store.confirm_speaker if body.correct else store.reject_speaker
+        updated = action(meeting_id, diarized_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    if updated is None:
+        raise HTTPException(404, "meeting not found")
+    return store.public_meeting(updated)
+
+
 @app.delete("/api/meetings/{meeting_id}")
 def delete_meeting(meeting_id: str):
     if not store.delete_meeting(meeting_id):

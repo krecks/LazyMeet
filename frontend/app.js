@@ -289,6 +289,15 @@ async function refreshSpeakers() {
     showToast(`Couldn't load speakers: ${e.message}`);
     return;
   }
+  // Known names double as rename suggestions in the transcript legend, so an
+  // existing person can be picked instead of mistyped into a duplicate.
+  const datalist = $("speaker-names");
+  datalist.innerHTML = "";
+  for (const name of names) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    datalist.appendChild(opt);
+  }
   const list = $("speaker-list");
   list.innerHTML = "";
   if (!names.length) {
@@ -728,22 +737,63 @@ function renderLegend(m, colorOf) {
   legend.innerHTML = "";
   for (const id of Object.keys(colorOf)) {
     const recognized = (m.recognized || []).includes(id);
+    const confirmed = (m.confirmed || []).includes(id);
+    const name = m.speakers[id] || id;
     const chip = el("div", "chip");
+    chip.dataset.speakerId = id;
     chip.style.setProperty("--speaker-color", colorOf[id]);
     chip.innerHTML = `<span class="swatch"></span>`;
     const input = document.createElement("input");
-    input.value = m.speakers[id] || id;
+    input.value = name;
     input.title = "Rename — saves this voice for future recordings";
-    input.setAttribute("aria-label", `Rename ${m.speakers[id] || id}`);
+    input.setAttribute("aria-label", `Rename ${name}`);
+    input.setAttribute("list", "speaker-names");
     input.addEventListener("change", () => renameSpeaker(m.id, id, input.value));
     chip.appendChild(input);
-    if (recognized) {
+    if (recognized && confirmed) {
       const badge = el("span", "badge-recognized");
       badge.textContent = "known";
-      badge.title = "Recognized from a saved voice";
+      badge.title = "Confirmed — this recording refined their saved voice";
       chip.appendChild(badge);
+    } else if (recognized) {
+      // Auto-matched but unverified: ask before the name is trusted, so a
+      // wrong match can be unlinked without poisoning the saved voice.
+      const badge = el("span", "badge-recognized unconfirmed");
+      badge.textContent = "known?";
+      badge.title = `Auto-recognized as ${name} from a saved voice — is that right?`;
+      chip.appendChild(badge);
+      chip.appendChild(
+        iconBtn("i-check", `Yes, this is ${name}`, () => verifySpeaker(m.id, id, true), "icon-btn verify yes")
+      );
+      chip.appendChild(
+        iconBtn("i-x", `Not ${name} — unlink and pick another name`, () => verifySpeaker(m.id, id, false), "icon-btn verify no")
+      );
     }
     legend.appendChild(chip);
+  }
+}
+
+async function verifySpeaker(meetingId, diarizedId, correct) {
+  try {
+    const m = await api(
+      `/api/meetings/${meetingId}/speakers/${encodeURIComponent(diarizedId)}/verify`,
+      jsonOpts("POST", { correct })
+    );
+    renderResult(m);
+    refreshSpeakers();
+    if (!correct) {
+      // The name is back to "Speaker N" — put the cursor there so the right
+      // name (or a brand-new person) can be typed straight away.
+      const input = $("speaker-legend").querySelector(
+        `.chip[data-speaker-id="${CSS.escape(diarizedId)}"] input`
+      );
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+  } catch (e) {
+    showToast(`Couldn't update speaker: ${e.message}`);
   }
 }
 
@@ -1549,6 +1599,7 @@ function initApp() {
     renderMeetingList();
   });
   refreshMeetings();
+  refreshSpeakers();
 }
 
 async function main() {

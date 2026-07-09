@@ -211,6 +211,7 @@
               </button>
             </div>
             <div id="speaker-legend" class="legend"></div>
+            <datalist id="speaker-names"></datalist>
             <div id="transcript" class="transcript"></div>
           </section>
         </article>
@@ -292,8 +293,10 @@
       <section class="settings-section">
         <div class="settings-section-head">
           <p class="muted">Voices you've named. LazyMeet recognizes them in future
-            recordings; forget a voice to stop that. Renaming keeps the voice and
-            applies to future recordings — past transcripts keep their saved names.</p>
+            recordings and asks you to confirm each match — every confirmation
+            refines that person's voiceprint. Forget a voice to stop recognizing
+            it. Renaming keeps the voice and applies to future recordings — past
+            transcripts keep their saved names.</p>
         </div>
         <ul id="speaker-list" class="speaker-list"></ul>
       </section>

@@ -112,6 +112,7 @@ def create_meeting(filename: str, num_speakers: int = -1) -> dict:
         "num_speakers": num_speakers,  # -1 = auto-detect
         "speakers": {},      # diarized id -> display name
         "recognized": [],    # diarized ids auto-matched from the speaker library
+        "confirmed": [],     # recognized ids the user verified as correct
         "segments": [],      # [{start, end, speaker, text}]
         "summary": "",
         "takeaways": [],
@@ -242,6 +243,7 @@ def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
         if record is None:
             return None
         speakers = dict(record.get("speakers", {}))
+        recognized = list(record.get("recognized", []))
         voiceprints = record.get("voiceprints", {})
         for diarized_id, new_name in names.items():
             new_name = new_name.strip()
@@ -251,16 +253,84 @@ def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
             speakers[diarized_id] = new_name
             if old_name and old_name != new_name:
                 _rename_in_notes(record, old_name, new_name)
-                # Move the library entry rather than leaving a duplicate
-                # person behind under the old name. If the new name already
-                # exists, the voice merges into it and the old entry goes.
-                if rename_speaker(old_name, new_name) == "exists":
-                    delete_speaker(old_name)
+                if diarized_id in recognized:
+                    # The auto-match was wrong: the old name is a different
+                    # person, whose library entry must survive untouched.
+                    recognized.remove(diarized_id)
+                    record["confirmed"] = [
+                        c for c in record.get("confirmed", []) if c != diarized_id
+                    ]
+                else:
+                    # Manually named earlier: move the library entry rather
+                    # than leaving a duplicate person behind under the old
+                    # name. If the new name already exists, the voice merges
+                    # into it and the old entry goes.
+                    if rename_speaker(old_name, new_name) == "exists":
+                        delete_speaker(old_name)
             # Enrol this voice so the name follows it into future recordings.
             emb = voiceprints.get(diarized_id)
             if emb:
                 upsert_speaker(new_name, emb)
         record["speakers"] = speakers
+        record["recognized"] = recognized
+        _atomic_write(_meeting_path(meeting_id), record)
+        return record
+
+
+def confirm_speaker(meeting_id: str, diarized_id: str) -> Optional[dict]:
+    """User confirmed an auto-match: learn this recording's voice.
+
+    The meeting's voiceprint becomes another sample for the matched person,
+    so recognition improves with every confirmed file. Raises ``ValueError``
+    if the id wasn't auto-recognized (there is nothing to confirm).
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
+        record = get_meeting(meeting_id)
+        if record is None:
+            return None
+        if diarized_id not in record.get("recognized", []):
+            raise ValueError("speaker was not auto-recognized")
+        confirmed = list(record.get("confirmed", []))
+        if diarized_id not in confirmed:
+            confirmed.append(diarized_id)
+        name = record.get("speakers", {}).get(diarized_id)
+        emb = record.get("voiceprints", {}).get(diarized_id)
+        if name and emb:
+            upsert_speaker(name, emb)
+        record["confirmed"] = confirmed
+        _atomic_write(_meeting_path(meeting_id), record)
+        return record
+
+
+def reject_speaker(meeting_id: str, diarized_id: str) -> Optional[dict]:
+    """User said the auto-match is wrong: unlink without touching the library.
+
+    The display name reverts to a fresh "Speaker N" so the wrongly matched
+    person's voiceprint stays untouched, and the id stops counting as
+    recognized — ready to be renamed to the right (or a new) person.
+    Raises ``ValueError`` if the id wasn't auto-recognized.
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
+        record = get_meeting(meeting_id)
+        if record is None:
+            return None
+        recognized = list(record.get("recognized", []))
+        if diarized_id not in recognized:
+            raise ValueError("speaker was not auto-recognized")
+        speakers = dict(record.get("speakers", {}))
+        taken = set(speakers.values())
+        n = 1
+        while f"Speaker {n}" in taken:
+            n += 1
+        new_name = f"Speaker {n}"
+        old_name = speakers.get(diarized_id)
+        speakers[diarized_id] = new_name
+        if old_name:
+            _rename_in_notes(record, old_name, new_name)
+        recognized.remove(diarized_id)
+        record["speakers"] = speakers
+        record["recognized"] = recognized
+        record["confirmed"] = [c for c in record.get("confirmed", []) if c != diarized_id]
         _atomic_write(_meeting_path(meeting_id), record)
         return record
 
@@ -349,10 +419,24 @@ def get_speaker_names() -> list[str]:
     return sorted(load_speaker_library().keys())
 
 
+# Per-person cap on stored voice samples. The matching embedding is their
+# mean, so each confirmed recording refines the voiceprint instead of the
+# last-heard voice overwriting it; the cap keeps one person from growing
+# unbounded while still spanning different mics and rooms.
+_MAX_SAMPLES = 10
+
+
 def upsert_speaker(name: str, embedding: list[float]) -> None:
+    """Enrol one heard voice under ``name``, refining any existing voiceprint."""
     with _lock:
         lib = load_speaker_library()
-        lib[name] = {"embedding": list(embedding), "updated_at": _now()}
+        entry = lib.get(name) or {}
+        samples = entry.get("samples") or ([entry["embedding"]] if entry.get("embedding") else [])
+        # A changed embedding model means old samples can't be averaged in.
+        samples = [s for s in samples if len(s) == len(embedding)]
+        samples = (samples + [list(embedding)])[-_MAX_SAMPLES:]
+        centroid = [sum(vals) / len(samples) for vals in zip(*samples)]
+        lib[name] = {"embedding": centroid, "samples": samples, "updated_at": _now()}
         _atomic_write(config.SPEAKERS_FILE, lib)
 
 

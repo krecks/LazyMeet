@@ -24,7 +24,7 @@ def test_get_config_shape(client):
     for key in ("values", "overrides", "defaults", "env_locked", "limits"):
         assert key in data
     assert set(data["values"]) == set(config.TUNABLES)
-    assert data["defaults"]["SPEAKER_THRESHOLD"] == 0.5
+    assert data["defaults"]["SPEAKER_THRESHOLD"] == 0.6
     assert data["limits"]["DIAR_THRESHOLD"] == {"min": 0.0, "max": 1.0}
     assert data["limits"]["KEEP_AUDIO"] == {"min": None, "max": None}
     # conftest sets none of the tunable env vars
@@ -96,7 +96,7 @@ def test_precedence_env_beats_file_beats_default(monkeypatch):
 
     config.save_overrides({})
     config.refresh()
-    assert config.SPEAKER_THRESHOLD == 0.5
+    assert config.SPEAKER_THRESHOLD == 0.6
 
 
 def test_use_gpu_toggle_and_onnx_provider(monkeypatch):
@@ -135,7 +135,7 @@ def test_corrupt_config_json_is_tolerated():
     config.CONFIG_FILE.write_text("{not json", encoding="utf-8")
     assert config.load_overrides() == {}
     config.refresh()
-    assert config.SPEAKER_THRESHOLD == 0.5
+    assert config.SPEAKER_THRESHOLD == 0.6
 
 
 def test_unknown_and_invalid_file_values_ignored():

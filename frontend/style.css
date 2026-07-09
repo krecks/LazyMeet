@@ -656,6 +656,12 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   text-transform: uppercase;
   color: var(--success);
 }
+/* auto-matched but not yet user-verified */
+.legend .badge-recognized.unconfirmed { color: var(--warning); }
+.legend .icon-btn.verify { width: 22px; height: 22px; flex: none; }
+.legend .icon-btn.verify .icon { width: 13px; height: 13px; }
+.legend .icon-btn.verify.yes { color: var(--success); }
+.legend .icon-btn.verify.no { color: var(--danger); }
 
 .transcript { display: flex; flex-direction: column; }
 .seg {

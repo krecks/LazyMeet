@@ -52,9 +52,19 @@ Diarization numbers speakers per file (Speaker 1 here ≠ Speaker 1 next time).
 When you rename a speaker, LazyMeet saves that person's **voiceprint** to a local
 **speaker library** (`speakers.json` in the app-data folder). On every future
 upload, each detected speaker is matched against the library by voice similarity;
-known voices are auto-labelled (shown with a *recognized* badge), unknown ones
-stay `Speaker N` until you name them. Manage saved voices in the **Known
-speakers** panel.
+known voices are auto-labelled with a *known?* badge asking you to verify the
+match, unknown ones stay `Speaker N` until you name them.
+
+Auto-matches are treated as unverified until you act on the badge: confirming
+(✓) adds that recording's voice as another sample for the person — up to ten
+samples are averaged, so recognition **learns from every file you confirm**
+and gets better across microphones and rooms. Rejecting (✗) unlinks the name
+without touching the saved voiceprint, so a wrong match can't poison the
+library; the speaker reverts to `Speaker N`, ready to be renamed to the right
+(or a brand-new) person. Correcting a wrong match by typing over the name has
+the same safe behavior. If wrong names still appear, raise **Voice match
+strictness** in Settings; lower it if familiar voices go unrecognized. Manage
+saved voices in the **Known speakers** panel.
 
 ## Privacy
 
@@ -126,7 +136,7 @@ Environment variables (all optional):
 | Var | Default | Purpose |
 |---|---|---|
 | `LAZYMEET_DATA_DIR` | OS app-data dir | Where models + transcripts live |
-| `LAZYMEET_SPEAKER_THRESHOLD` | `0.5` | Voice-match strictness (cosine) |
+| `LAZYMEET_SPEAKER_THRESHOLD` | `0.6` | Voice-match strictness (cosine) |
 | `LAZYMEET_MERGE_THRESHOLD` | `0.6` | Voiceprint similarity at which over-split diarized labels merge |
 | `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Speakers with less speech fold into the closest main voice |
 | `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |

@@ -58,7 +58,10 @@ DIAR_EMB_MODEL = MODELS_DIR / "speaker_embedding.onnx"  # also used for identifi
 # name -> (env var, type, default, min, max). min/max are None for bools.
 # What each one means:
 #   SPEAKER_THRESHOLD       cosine similarity to match a diarized speaker to a
-#                           saved voice
+#                           saved voice (0.6 — 0.5 produced false "known"
+#                           matches on real meetings; raise it further if
+#                           wrong names still appear, lower it if familiar
+#                           voices go unrecognized)
 #   DIAR_THRESHOLD          auto-clustering threshold (higher => fewer speakers;
 #                           0.7 avoids the over-segmentation 0.5 produced)
 #   SPEAKER_MERGE_THRESHOLD auto clustering still over-splits real meetings (a
@@ -96,7 +99,7 @@ TUNABLES: dict[str, tuple[str, type, object, object, object]] = {
     "ASR_LANGUAGE": ("LAZYMEET_ASR_LANGUAGE", str, "auto", None, None),
     "SUMMARY_MODEL": ("LAZYMEET_SUMMARY_MODEL", str, "qwen3.5-4b", None, None),
     "SUMMARY_LANGUAGE": ("LAZYMEET_SUMMARY_LANGUAGE", str, "auto", None, None),
-    "SPEAKER_THRESHOLD": ("LAZYMEET_SPEAKER_THRESHOLD", float, 0.5, 0.0, 1.0),
+    "SPEAKER_THRESHOLD": ("LAZYMEET_SPEAKER_THRESHOLD", float, 0.6, 0.0, 1.0),
     "DIAR_THRESHOLD": ("LAZYMEET_DIAR_THRESHOLD", float, 0.7, 0.0, 1.0),
     "SPEAKER_MERGE_THRESHOLD": ("LAZYMEET_MERGE_THRESHOLD", float, 0.6, 0.0, 1.0),
     "MIN_SPEAKER_SECONDS": ("LAZYMEET_MIN_SPEAKER_SECONDS", float, 15.0, 0.0, 600.0),
