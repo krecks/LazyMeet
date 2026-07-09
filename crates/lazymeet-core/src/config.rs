@@ -346,10 +346,15 @@ pub fn env_num_speakers() -> i64 {
 /// Embedding dimension used by the deterministic fake embedder.
 pub const FAKE_EMBED_DIM: usize = 192;
 
-/// Execution provider for the sherpa-onnx models — always CPU (CoreML measured
-/// ~2x slower for these models; see backend/config.py history for numbers).
-pub fn onnx_provider() -> &'static str {
-    "cpu"
+/// Execution provider for the sherpa-onnx models. Defaults to CPU: CoreML
+/// measured ~2x slower for these models (onnxruntime places only a fraction
+/// of their ops on the ANE and the CPU<->CoreML hand-offs cost more than the
+/// acceleration saves). `LAZYMEET_ONNX_PROVIDER` overrides for benchmarking.
+pub fn onnx_provider() -> String {
+    std::env::var("LAZYMEET_ONNX_PROVIDER")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "cpu".into())
 }
 
 /// True when the upload is already audio-only (no video track to strip).

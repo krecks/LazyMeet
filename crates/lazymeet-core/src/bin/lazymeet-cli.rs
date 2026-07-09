@@ -17,12 +17,22 @@ use lazymeet_core::config::Paths;
 use lazymeet_core::events::Events;
 use lazymeet_core::{api, models, Ctx};
 
-struct StderrEvents;
+/// Prints each stage transition with elapsed seconds since the previous one,
+/// so per-stage durations can be compared across runs (providers, threads…).
+struct StderrEvents(std::sync::Mutex<Instant>);
 
 impl Events for StderrEvents {
     fn emit(&self, event: &str, payload: serde_json::Value) {
         if event == "meeting-updated" {
-            eprintln!("[{}] {}", payload["status"].as_str().unwrap_or("?"), payload["id"]);
+            let mut last = self.0.lock().unwrap();
+            let elapsed = last.elapsed();
+            *last = Instant::now();
+            eprintln!(
+                "[{:>12}] +{:6.2}s {}",
+                payload["status"].as_str().unwrap_or("?"),
+                elapsed.as_secs_f64(),
+                payload["id"]
+            );
         }
     }
 }
@@ -69,7 +79,11 @@ fn main() {
     eprintln!("models: {}", paths.models_dir.display());
     eprintln!("ffmpeg: {}", ffmpeg.as_deref().map(|p| p.display().to_string()).unwrap_or("NOT FOUND".into()));
 
-    let mut ctx = Ctx::new(paths, lazymeet_core::config::fake_mode_from_env(), Arc::new(StderrEvents));
+    let mut ctx = Ctx::new(
+        paths,
+        lazymeet_core::config::fake_mode_from_env(),
+        Arc::new(StderrEvents(std::sync::Mutex::new(Instant::now()))),
+    );
     Arc::get_mut(&mut ctx).unwrap().ffmpeg = ffmpeg;
     ctx.paths.ensure_dirs().expect("could not create data dirs");
     if !models::is_ready(&ctx) {

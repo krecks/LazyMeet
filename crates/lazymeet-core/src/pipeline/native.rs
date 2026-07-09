@@ -385,14 +385,16 @@ impl Llm {
         let path = crate::models::resolve_llm_at(ctx.models_dir, ctx.fake, &ctx.config.summary_model());
         // Offload all layers to the GPU (Metal on Apple Silicon) when built
         // with GPU support; if that load fails (driver/VRAM), fall back to a
-        // CPU-only load rather than failing the meeting.
+        // CPU-only load rather than failing the meeting. USE_GPU=false must
+        // set n_gpu_layers to 0 explicitly — llama.cpp's *default* on Metal
+        // builds is full offload.
+        let cpu = || LlamaModelParams::default().with_n_gpu_layers(0);
         let model = if ctx.config.use_gpu() {
             let gpu = LlamaModelParams::default().with_n_gpu_layers(1_000_000);
-            LlamaModel::load_from_file(backend, &path, &gpu).or_else(|_| {
-                LlamaModel::load_from_file(backend, &path, &LlamaModelParams::default())
-            })
+            LlamaModel::load_from_file(backend, &path, &gpu)
+                .or_else(|_| LlamaModel::load_from_file(backend, &path, &cpu()))
         } else {
-            LlamaModel::load_from_file(backend, &path, &LlamaModelParams::default())
+            LlamaModel::load_from_file(backend, &path, &cpu())
         }
         .map_err(|e| format!("llm load: {e}"))?;
         Ok(Self {
