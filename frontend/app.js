@@ -1,20 +1,23 @@
-// LazyMeet frontend — vanilla JS, talks to the Python sidecar over localhost.
+// LazyMeet frontend — vanilla JS over Tauri commands + events (the backend
+// runs in-process in Rust; there is no HTTP sidecar anymore).
 
-// API base is resolved at boot: inside Tauri we ask the Rust shell for the
-// sidecar port; in a plain browser we use the same origin that served the page.
-let API = "";
+const tauri = window.__TAURI__;
 
-async function resolveApiBase() {
-  const tauri = window.__TAURI__;
-  if (tauri && tauri.core && typeof tauri.core.invoke === "function") {
-    const port = await tauri.core.invoke("get_backend_port");
-    API = `http://127.0.0.1:${port}`;
-  } else if (window.__LAZYMEET_PORT__) {
-    API = `http://127.0.0.1:${window.__LAZYMEET_PORT__}`;
-  } else {
-    API = ""; // same-origin (FastAPI serves the static frontend in browser dev)
+// Invoke a backend command. Command errors arrive as a structured
+// { code, kind, message } object; surface it as an Error with `.status` so
+// existing 404/409/422 checks keep working.
+async function call(cmd, args) {
+  try {
+    return await tauri.core.invoke(cmd, args);
+  } catch (e) {
+    const err = new Error(e && e.message ? e.message : String(e));
+    err.status = e && e.code;
+    throw err;
   }
 }
+
+const listen = (event, handler) => tauri.event.listen(event, handler);
+const convertFileSrc = (path) => tauri.core.convertFileSrc(path);
 
 const STAGES = [
   ["extracting", "Extracting audio"],
@@ -32,8 +35,6 @@ const $ = (id) => document.getElementById(id);
 // instead of re-rendering (which would destroy the user's half-typed edit).
 // ---------------------------------------------------------------------------
 let activeId = null;
-let pollTimer = null;
-let pollFailures = 0;
 let uploading = false;
 let meetings = []; // cached list — search re-filters without refetching
 let searchQuery = "";
@@ -41,59 +42,42 @@ let currentMeeting = null;
 let editing = null; // "title" | "summary" | "seg:3" | "takeaways:1" | … | null
 let pendingMeeting = null;
 
-async function api(path, opts) {
-  const res = await fetch(API + path, opts);
-  if (!res.ok) {
-    const err = new Error(`${res.status} ${await res.text()}`);
-    err.status = res.status;
-    throw err;
-  }
-  const ct = res.headers.get("content-type") || "";
-  return ct.includes("application/json") ? res.json() : res.text();
-}
-
-const jsonOpts = (method, body) => ({
-  method,
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(body),
-});
-
 // --------------------------------------------------------------------------
-// First-run setup. The download runs server-side either way; the user can
+// First-run setup. The download runs in the backend either way; the user can
 // enter the app immediately ("Use the app while it downloads") and follow
 // progress in a header pill. Uploads made meanwhile wait in the processing
-// queue until the models are on disk.
+// queue until the models are on disk. Progress arrives as `setup-progress`
+// events (the old 1 s polling loop is gone).
 // --------------------------------------------------------------------------
 let modelsReady = false;
 
-async function watchSetup() {
-  let failures = 0;
-  while (true) {
-    let status;
-    try {
-      status = await api("/api/setup");
-      failures = 0;
-    } catch (e) {
-      if (++failures >= 30) throw e; // backend is gone — escalate to the fatal screen
-      await sleep(1000);
-      continue;
-    }
-    if (status.ready) {
-      modelsReady = true;
-      return;
-    }
-    if (appInitialized) {
-      renderDownloadPill(status);
-    } else {
-      $("setup").classList.remove("hidden");
-      renderSetup(status);
-      $("setup-error").textContent = status.error || "";
-      $("setup-error").classList.toggle("hidden", !status.error);
-      $("setup-retry").classList.toggle("hidden", !status.error);
-    }
-    await sleep(1000);
+function applySetupStatus(status) {
+  if (status.ready) {
+    modelsReady = true;
+    return;
+  }
+  if (appInitialized) {
+    renderDownloadPill(status);
+  } else {
+    $("setup").classList.remove("hidden");
+    renderSetup(status);
+    $("setup-error").textContent = status.error || "";
+    $("setup-error").classList.toggle("hidden", !status.error);
+    $("setup-retry").classList.toggle("hidden", !status.error);
   }
 }
+
+/// Resolves once all first-run models are on disk.
+async function watchSetup() {
+  const status = await call("get_setup");
+  applySetupStatus(status);
+  if (status.ready) return;
+  await new Promise((resolve) => {
+    setupReadyResolve = resolve;
+  });
+}
+
+let setupReadyResolve = null;
 
 let lastSetupStatus = null;
 
@@ -161,7 +145,7 @@ async function retrySetup() {
   $("setup-error").classList.add("hidden");
   $("setup-retry").classList.add("hidden");
   try {
-    await api("/api/setup/retry", { method: "POST" });
+    await call("retry_setup");
   } catch (e) {
     showToast(e.message);
   }
@@ -183,38 +167,39 @@ function renderSetup(status) {
 // --------------------------------------------------------------------------
 function setupDropzone() {
   const dz = $("dropzone");
-  const input = $("file-input");
-  dz.addEventListener("click", () => input.click());
+  // Click/keyboard opens a native file dialog (webview File objects have no
+  // filesystem path, so the old <input type="file"> can't feed the backend).
+  const browse = async () => {
+    try {
+      const path = await call("pick_recording");
+      if (path) upload(path);
+    } catch (e) {
+      showToast(`Couldn't open the file picker: ${e.message}`);
+    }
+  };
+  dz.addEventListener("click", browse);
   dz.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      input.click();
+      browse();
     }
   });
-  input.addEventListener("change", () => input.files[0] && upload(input.files[0]));
   // Drops are accepted anywhere in the window, not just on the dropzone.
-  // Tauri's native drag-drop interception is disabled (dragDropEnabled: false
-  // in tauri.conf.json) so these standard HTML5 events fire in the webview;
-  // preventDefault on document is also what stops a stray drop from making
-  // the webview navigate to the dropped file.
-  const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
-  ["dragover", "dragenter"].forEach((ev) =>
-    document.addEventListener(ev, (e) => {
-      e.preventDefault();
-      if (isFileDrag(e)) dz.classList.add("drag");
-    }));
-  document.addEventListener("dragleave", (e) => {
-    if (!e.relatedTarget) dz.classList.remove("drag"); // left the window
-  });
-  document.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dz.classList.remove("drag");
-    const file = e.dataTransfer.files[0];
-    if (file) upload(file);
+  // Tauri's native drag-drop gives real filesystem paths (the HTML5 events no
+  // longer fire once the native interception is on).
+  tauri.webview.getCurrentWebview().onDragDropEvent((event) => {
+    const type = event.payload.type;
+    if (type === "enter" || type === "over") dz.classList.add("drag");
+    else if (type === "leave") dz.classList.remove("drag");
+    else if (type === "drop") {
+      dz.classList.remove("drag");
+      const path = event.payload.paths && event.payload.paths[0];
+      if (path) upload(path);
+    }
   });
 }
 
-async function upload(file) {
+async function upload(path) {
   if (uploading) return;
   const dz = $("dropzone");
   const label = dz.querySelector("strong");
@@ -223,10 +208,11 @@ async function upload(file) {
   dz.classList.add("uploading");
   label.textContent = "Uploading…";
   try {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("num_speakers", $("num-speakers")?.value ?? "-1");
-    const { id } = await api("/api/meetings", { method: "POST", body: form });
+    const numSpeakers = parseInt($("num-speakers")?.value ?? "-1", 10);
+    const { id } = await call("create_meeting", {
+      path,
+      num_speakers: Number.isNaN(numSpeakers) ? -1 : numSpeakers,
+    });
     await refreshMeetings();
     selectMeeting(id);
   } catch (e) {
@@ -235,13 +221,12 @@ async function upload(file) {
     uploading = false;
     dz.classList.remove("uploading");
     label.textContent = originalLabel;
-    $("file-input").value = "";
   }
 }
 
 async function refreshMeetings() {
   try {
-    meetings = await api("/api/meetings");
+    meetings = await call("list_meetings");
   } catch (e) {
     showToast(`Couldn't load meetings: ${e.message}`);
     return;
@@ -284,7 +269,7 @@ function renderMeetingList() {
 async function refreshSpeakers() {
   let names;
   try {
-    names = await api("/api/speakers");
+    names = await call("get_speakers");
   } catch (e) {
     showToast(`Couldn't load speakers: ${e.message}`);
     return;
@@ -323,7 +308,7 @@ async function refreshSpeakers() {
     del.addEventListener("click", () => {
       confirmThen(del, "Sure?", async () => {
         try {
-          await api(`/api/speakers/${encodeURIComponent(name)}`, { method: "DELETE" });
+          await call("delete_speaker", { name });
           await refreshSpeakers();
         } catch (e) {
           showToast(`Couldn't forget voice: ${e.message}`);
@@ -366,7 +351,7 @@ function startSpeakerRename(name, nameSpan) {
         return;
       }
       try {
-        await api(`/api/speakers/${encodeURIComponent(name)}`, jsonOpts("PATCH", { name: value }));
+        await call("rename_known_speaker", { name, new_name: value });
         showToast(`Renamed to “${value}” — applies to future recordings.`, 3000, true);
       } catch (e) {
         showToast(
@@ -383,18 +368,17 @@ function startSpeakerRename(name, nameSpan) {
 }
 
 // --------------------------------------------------------------------------
-// Meeting view + polling
+// Meeting view. Progress arrives as `meeting-updated` events (no polling);
+// selecting a meeting does one fetch for the current state.
 // --------------------------------------------------------------------------
 function selectMeeting(id) {
   activeId = id;
   editing = null; // abandon any open edit — it belonged to the previous meeting
   pendingMeeting = null;
-  stopSegmentPlayback(); // the playing audio belonged to the previous meeting
-  if (pollTimer) clearInterval(pollTimer);
+  releasePlayer(); // the playing audio belonged to the previous meeting
   $("empty").classList.add("hidden");
   renderMeetingList();
-  poll();
-  pollTimer = setInterval(poll, 2000);
+  showActiveMeeting();
 }
 
 function showEmpty() {
@@ -402,42 +386,48 @@ function showEmpty() {
   currentMeeting = null;
   editing = null;
   pendingMeeting = null;
-  stopSegmentPlayback();
+  releasePlayer();
   $("processing").classList.add("hidden");
   $("result").classList.add("hidden");
   $("empty").classList.remove("hidden");
 }
 
-async function poll() {
+/// Fetch the active meeting and render whichever view its status calls for.
+async function showActiveMeeting() {
   const id = activeId;
   if (!id) return;
   let m;
   try {
-    m = await api(`/api/meetings/${id}`);
-    pollFailures = 0;
-    $("conn-banner").classList.add("hidden");
+    m = await call("get_meeting", { meeting_id: id });
   } catch (e) {
     if (id !== activeId) return; // stale response for a deselected meeting
     if (e.status === 404) {
-      clearInterval(pollTimer);
-      pollTimer = null;
       showEmpty();
       showToast("Meeting no longer exists");
       refreshMeetings();
-    } else if (++pollFailures >= 3) {
-      $("conn-banner").classList.remove("hidden");
+    } else {
+      showToast(`Couldn't load meeting: ${e.message}`);
     }
     return;
   }
   if (id !== activeId) return; // user selected another meeting mid-request
   if (m.status === "done" || m.status === "error") {
-    clearInterval(pollTimer);
-    pollTimer = null;
     renderResult(m);
   } else {
     renderProcessing(m);
   }
+}
+
+/// `meeting-updated` event: {id, status} on every stage transition, plus the
+/// full public meeting on done/error.
+function onMeetingUpdated({ id, status, meeting }) {
   refreshMeetings();
+  if (id !== activeId) return;
+  if (meeting) {
+    renderResult(meeting);
+  } else {
+    showActiveMeeting(); // intermediate stage — fetch for the stage render
+  }
 }
 
 function renderProcessing(m) {
@@ -480,15 +470,21 @@ function renderResult(m) {
   // meeting with nothing else to show.
   const deleteBtn = $("delete-btn");
   disarm(deleteBtn);
-  $("export-btn").onclick = () => {
-    window.open(`${API}/api/meetings/${m.id}/export`, "_blank");
+  $("export-btn").onclick = async () => {
+    try {
+      const path = await call("export_meeting", { meeting_id: m.id });
+      if (path) showToast(`Exported to ${path}`, 4000, true);
+    } catch (e) {
+      showToast(`Export failed: ${e.message}`);
+    }
   };
   $("copy-notes-btn").onclick = () => copyText(notesAsText(m), "Notes copied");
   $("copy-transcript-btn").onclick = () => copyText(transcriptAsText(m), "Transcript copied");
   deleteBtn.onclick = () => {
     confirmThen(deleteBtn, "Sure?", async () => {
       try {
-        await api(`/api/meetings/${m.id}`, { method: "DELETE" });
+        releasePlayer(); // let go of the audio file first (Windows locks it)
+        await call("delete_meeting", { meeting_id: m.id });
         showEmpty();
         refreshMeetings();
       } catch (e) {
@@ -569,7 +565,10 @@ function startTitleEdit() {
       return;
     }
     try {
-      const m = await api(`/api/meetings/${currentMeeting.id}`, jsonOpts("PATCH", { title: value }));
+      const m = await call("patch_meeting", {
+        meeting_id: currentMeeting.id,
+        fields: { title: value },
+      });
       settle(() => finishEdit(m));
       refreshMeetings();
     } catch (e) {
@@ -602,10 +601,10 @@ function startSummaryEdit() {
   };
   const commit = async () => {
     try {
-      const m = await api(
-        `/api/meetings/${currentMeeting.id}`,
-        jsonOpts("PATCH", { summary: ta.value })
-      );
+      const m = await call("patch_meeting", {
+        meeting_id: currentMeeting.id,
+        fields: { summary: ta.value },
+      });
       cleanup();
       finishEdit(m);
     } catch (e) {
@@ -713,7 +712,10 @@ function startItemEdit(field, index, li, span) {
 
 async function saveList(field, items, viaFinishEdit = false) {
   try {
-    const m = await api(`/api/meetings/${currentMeeting.id}`, jsonOpts("PATCH", { [field]: items }));
+    const m = await call("patch_meeting", {
+      meeting_id: currentMeeting.id,
+      fields: { [field]: items },
+    });
     if (viaFinishEdit) finishEdit(m);
     else renderResult(m);
   } catch (e) {
@@ -775,10 +777,11 @@ function renderLegend(m, colorOf) {
 
 async function verifySpeaker(meetingId, diarizedId, correct) {
   try {
-    const m = await api(
-      `/api/meetings/${meetingId}/speakers/${encodeURIComponent(diarizedId)}/verify`,
-      jsonOpts("POST", { correct })
-    );
+    const m = await call("verify_speaker", {
+      meeting_id: meetingId,
+      diarized_id: diarizedId,
+      correct,
+    });
     renderResult(m);
     refreshSpeakers();
     if (!correct) {
@@ -824,8 +827,9 @@ function renderTranscript(m, colorOf, editable) {
 
 // --------------------------------------------------------------------------
 // Segment playback — hear a section to decide who's speaking before naming.
-// One shared <audio> streams the kept recording; play seeks to the segment
-// start and pauses at its end. Clicking the playing segment stops it.
+// One shared <audio> streams the kept recording through the asset protocol
+// (Range/seek support); play seeks to the segment start and pauses at its
+// end. Clicking the playing segment stops it.
 // --------------------------------------------------------------------------
 let player = null;
 let playerSrc = "";
@@ -850,7 +854,18 @@ function stopSegmentPlayback() {
   playingSeg = null;
 }
 
-function playSegment(meetingId, seg, index, btn, segEl) {
+// Also drop the audio source so the OS file handle is released (deleting a
+// meeting on Windows fails while the webview holds its recording open).
+function releasePlayer() {
+  stopSegmentPlayback();
+  if (player) {
+    player.removeAttribute("src");
+    player.load();
+  }
+  playerSrc = "";
+}
+
+async function playSegment(meetingId, seg, index, btn, segEl) {
   if (playingIndex === index) {
     stopSegmentPlayback();
     return;
@@ -860,7 +875,16 @@ function playSegment(meetingId, seg, index, btn, segEl) {
     player = new Audio();
     player.preload = "auto";
   }
-  const src = `${API}/api/meetings/${meetingId}/audio`;
+  let src;
+  try {
+    const audio = await call("get_meeting_audio_path", { meeting_id: meetingId });
+    src = convertFileSrc(audio.path);
+  } catch (e) {
+    showToast(
+      e.status === 404 ? "The recording is no longer on disk." : `Couldn't load audio: ${e.message}`
+    );
+    return;
+  }
   if (playerSrc !== src) {
     player.src = src;
     playerSrc = src;
@@ -941,10 +965,11 @@ function startSegmentEdit(index, segEl) {
       return;
     }
     try {
-      const m = await api(
-        `/api/meetings/${currentMeeting.id}/segments/${index}`,
-        jsonOpts("PATCH", body)
-      );
+      const m = await call("patch_segment", {
+        meeting_id: currentMeeting.id,
+        index,
+        fields: body,
+      });
       cleanup();
       finishEdit(m);
     } catch (e) {
@@ -965,10 +990,9 @@ function startSegmentEdit(index, segEl) {
 
 async function renameSpeaker(meetingId, diarizedId, newName) {
   try {
-    const m = await api(`/api/meetings/${meetingId}/speakers`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names: { [diarizedId]: newName } }),
+    const m = await call("rename_speakers", {
+      meeting_id: meetingId,
+      names: { [diarizedId]: newName },
     });
     renderResult(m);
     refreshSpeakers();
@@ -1097,7 +1121,6 @@ const CONFIG_META = {
   },
 };
 
-let modelsPollTimer = null;
 let lastModels = null;
 
 async function openSettings() {
@@ -1105,21 +1128,18 @@ async function openSettings() {
   $("settings").classList.remove("hidden");
   try {
     const [cfg, data, models] = await Promise.all([
-      api("/api/config"),
-      api("/api/data"),
-      api("/api/models"),
+      call("get_config"),
+      call("get_data_info"),
+      call("get_models"),
     ]);
     renderConfigForm(cfg, models);
     renderDataSection(data);
-    maybePollModels();
   } catch (e) {
     showToast(`Couldn't load settings: ${e.message}`);
   }
 }
 
 function closeSettings() {
-  if (modelsPollTimer) clearInterval(modelsPollTimer);
-  modelsPollTimer = null;
   $("settings").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
@@ -1317,8 +1337,7 @@ function updateModelStatus(select, status) {
     retry.textContent = "Retry";
     retry.addEventListener("click", async () => {
       try {
-        await api("/api/models/download", jsonOpts("POST", { step, id: opt.id }));
-        maybePollModels(true);
+        await call("download_model", { step, id: opt.id });
       } catch (e) {
         showToast(`Couldn't start download: ${e.message}`);
       }
@@ -1336,38 +1355,25 @@ function refreshModelStatuses() {
   }
 }
 
-// Poll /api/models while any download is running so progress bars move.
-function maybePollModels(force = false) {
-  const anyDownloading = () =>
-    lastModels &&
-    ["asr", "summary"].some((s) => lastModels[s].options.some((o) => o.downloading));
-  if (modelsPollTimer || (!force && !anyDownloading())) return;
-  modelsPollTimer = setInterval(async () => {
-    let models;
-    try {
-      models = await api("/api/models");
-    } catch {
-      return; // transient — keep polling
-    }
-    const before = new Set(
-      ["asr", "summary"].flatMap((s) =>
-        lastModels[s].options.filter((o) => o.downloading).map((o) => `${s}:${o.id}`)
+// `models-progress` events keep the settings progress bars moving while any
+// on-demand download runs (replaces the old 1.2 s polling loop).
+function onModelsProgress(models) {
+  const before = lastModels
+    ? new Set(
+        ["asr", "summary"].flatMap((s) =>
+          lastModels[s].options.filter((o) => o.downloading).map((o) => `${s}:${o.id}`)
+        )
       )
-    );
-    lastModels = models;
-    refreshModelStatuses();
-    for (const s of ["asr", "summary"]) {
-      for (const o of models[s].options) {
-        if (before.has(`${s}:${o.id}`) && o.ready) {
-          showToast(`Model downloaded — it will be used for the next recording.`, 4000, true);
-        }
+    : new Set();
+  lastModels = models;
+  refreshModelStatuses();
+  for (const s of ["asr", "summary"]) {
+    for (const o of models[s].options) {
+      if (before.has(`${s}:${o.id}`) && o.ready) {
+        showToast(`Model downloaded — it will be used for the next recording.`, 4000, true);
       }
     }
-    if (!anyDownloading()) {
-      clearInterval(modelsPollTimer);
-      modelsPollTimer = null;
-    }
-  }, 1200);
+  }
 }
 
 function collectConfigValues() {
@@ -1385,10 +1391,9 @@ function collectConfigValues() {
 
 async function saveConfig() {
   try {
-    const cfg = await api("/api/config", jsonOpts("PUT", collectConfigValues()));
-    const models = await api("/api/models");
+    const cfg = await call("put_config", { fields: collectConfigValues() });
+    const models = await call("get_models");
     renderConfigForm(cfg, models);
-    maybePollModels();
     showToast("Settings saved — they apply to the next recording.", 3500, true);
   } catch (err) {
     showToast(`Couldn't save settings: ${err.message}`);
@@ -1399,8 +1404,8 @@ async function resetConfig() {
   const body = {};
   for (const name of Object.keys(CONFIG_META)) body[name] = null;
   try {
-    const cfg = await api("/api/config", jsonOpts("PUT", body));
-    const models = await api("/api/models");
+    const cfg = await call("put_config", { fields: body });
+    const models = await call("get_models");
     renderConfigForm(cfg, models);
     showToast("Settings reset to defaults.", 3000, true);
   } catch (err) {
@@ -1422,7 +1427,7 @@ function renderDataSection(data) {
 
 async function revealDataDir() {
   try {
-    await api("/api/data/reveal", { method: "POST" });
+    await call("reveal_data_dir");
   } catch (e) {
     showToast(`Couldn't open folder: ${e.message}`);
   }
@@ -1603,7 +1608,18 @@ function initApp() {
 }
 
 async function main() {
-  await resolveApiBase();
+  // Backend events replace the old polling loops; listeners must be armed
+  // before the first fetches so no transition slips between them.
+  await listen("meeting-updated", (e) => onMeetingUpdated(e.payload));
+  await listen("models-progress", (e) => onModelsProgress(e.payload));
+  await listen("setup-progress", (e) => {
+    applySetupStatus(e.payload);
+    if (e.payload.ready && setupReadyResolve) {
+      setupReadyResolve();
+      setupReadyResolve = null;
+    }
+  });
+
   $("boot").classList.add("hidden");
   $("setup-retry").addEventListener("click", retrySetup);
   $("setup-continue").addEventListener("click", initApp);

@@ -1,0 +1,44 @@
+[package]
+name = "lazymeet-core"
+version = "0.1.0"
+description = "LazyMeet backend: config, storage, model management, and the processing pipeline"
+edition = "2021"
+rust-version = "1.77"
+
+[features]
+# The real ML pipeline (sherpa-onnx + llama.cpp). Off => only the deterministic
+# FAKE pipeline is compiled, so the behavioral test suite builds in seconds:
+#   cargo test -p lazymeet-core --no-default-features
+default = ["native-pipeline"]
+native-pipeline = ["dep:sherpa-rs", "dep:llama-cpp-2"]
+
+[[bin]]
+name = "lazymeet-cli"
+required-features = ["native-pipeline"]
+
+[dependencies]
+# `static` builds sherpa-onnx from source and links it statically — no dylib
+# rpath issues, one self-contained binary. (Linux needs
+# RUSTFLAGS="-C relocation-model=dynamic-no-pic", set in CI.)
+sherpa-rs = { version = "0.6.8", default-features = false, features = ["static"], optional = true }
+llama-cpp-2 = { version = "0.1.151", optional = true }
+# preserve_order keeps JSON object key order stable across read-modify-write,
+# matching Python's dict semantics for records written by the old backend.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "5"
+regex = "1"
+sha2 = "0.10"
+ureq = "2"
+tar = "0.4"
+bzip2 = "0.4"
+
+# Metal offload for the summarizer LLM on Apple Silicon (the USE_GPU tunable
+# picks layer offload at runtime; elsewhere llama.cpp runs on the CPU).
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1.151", features = ["metal"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"

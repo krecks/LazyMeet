@@ -15,12 +15,15 @@
         "width": 1100,
         "height": 760,
         "minWidth": 800,
-        "minHeight": 600,
-        "dragDropEnabled": false
+        "minHeight": 600
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {
@@ -36,6 +39,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["binaries/backend"]
+    "externalBin": ["binaries/ffmpeg"]
   }
 }

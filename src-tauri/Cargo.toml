@@ -10,12 +10,10 @@ rust-version = "1.77"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+lazymeet-core = { path = "../crates/lazymeet-core" }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time"] }
 
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
+# [profile.release] lives in the workspace root Cargo.toml.

@@ -1,93 +1,99 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+mod commands;
 
-use tauri::{Emitter, Manager, RunEvent, State};
+use std::path::PathBuf;
+use std::sync::Arc;
 
-/// Holds the spawned Python backend's port (once it reports READY) and the
-/// child handle so we can terminate it cleanly on exit.
-#[derive(Default)]
-struct Backend {
-    port: Mutex<Option<u16>>,
-    child: Mutex<Option<Child>>,
+use tauri::{AppHandle, Emitter, Manager};
+
+use lazymeet_core::events::Events;
+use lazymeet_core::Ctx;
+
+/// Core events go straight to the webview: `meeting-updated`,
+/// `setup-progress`, `models-progress` (replaces the old HTTP polling).
+struct TauriEvents(AppHandle);
+
+impl Events for TauriEvents {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        let _ = self.0.emit(event, payload);
+    }
 }
 
-/// The frontend calls this to discover the backend port, waiting until the
-/// backend has started (it prints `READY <port>` on stdout).
-#[tauri::command]
-async fn get_backend_port(state: State<'_, Backend>) -> Result<u16, String> {
-    for _ in 0..240 {
-        if let Some(port) = *state.port.lock().unwrap() {
-            return Ok(port);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+/// The bundled ffmpeg (Tauri externalBin) sits next to the app executable —
+/// in dev builds Tauri copies it beside the debug binary too.
+fn find_ffmpeg() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("LAZYMEET_FFMPEG") {
+        return Some(PathBuf::from(p));
     }
-    Err("backend did not start in time".into())
-}
-
-/// The backend ships as a PyInstaller onedir tree in the app's resources (a
-/// onefile binary would re-extract ~70 MB on every launch, delaying startup by
-/// many seconds).
-fn backend_exe(app: &tauri::App) -> std::path::PathBuf {
-    let name = format!("lazymeet-backend{}", std::env::consts::EXE_SUFFIX);
-    if let Ok(dir) = app.path().resource_dir() {
-        let bundled = dir.join("binaries").join("backend").join(&name);
-        if bundled.exists() {
-            return bundled;
-        }
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let bundled = exe_dir.join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX));
+    if bundled.is_file() {
+        return Some(bundled);
     }
-    // Dev run: use the tree built by scripts/build_sidecar.py directly.
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Plain `cargo run` (no tauri-cli): use the fetched binary directly.
+    let triple = current_triple();
+    let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("binaries")
-        .join("backend")
-        .join(name)
+        .join(format!("ffmpeg-{triple}{}", std::env::consts::EXE_SUFFIX));
+    dev.is_file().then_some(dev)
+}
+
+fn current_triple() -> String {
+    format!(
+        "{}-{}",
+        std::env::consts::ARCH,
+        match std::env::consts::OS {
+            "macos" => "apple-darwin",
+            "windows" => "pc-windows-msvc",
+            _ => "unknown-linux-gnu",
+        }
+    )
 }
 
 fn main() {
-    let app = tauri::Builder::default()
-        .manage(Backend::default())
-        .invoke_handler(tauri::generate_handler![get_backend_port])
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::get_setup,
+            commands::retry_setup,
+            commands::get_config,
+            commands::put_config,
+            commands::get_models,
+            commands::download_model,
+            commands::create_meeting,
+            commands::pick_recording,
+            commands::list_meetings,
+            commands::get_meeting,
+            commands::get_meeting_audio_path,
+            commands::patch_meeting,
+            commands::patch_segment,
+            commands::rename_speakers,
+            commands::verify_speaker,
+            commands::delete_meeting,
+            commands::export_meeting,
+            commands::get_speakers,
+            commands::rename_known_speaker,
+            commands::delete_speaker,
+            commands::get_data_info,
+            commands::reveal_data_dir,
+        ])
         .setup(|app| {
-            let handle = app.handle().clone();
+            let events = Arc::new(TauriEvents(app.handle().clone()));
+            let mut ctx = Ctx::from_env(events);
+            Arc::get_mut(&mut ctx).expect("fresh ctx").ffmpeg = find_ffmpeg();
 
-            let mut child = Command::new(backend_exe(app))
-                // The backend watches this PID and tears its own process tree
-                // (server + worker subprocesses) down when we exit.
-                .env("LAZYMEET_PARENT_PID", std::process::id().to_string())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .expect("failed to spawn backend");
+            // Segment playback streams the kept audio through the asset
+            // protocol (Range/seek support); scope it to the uploads dir.
+            ctx.paths.ensure_dirs()?;
+            app.asset_protocol_scope().allow_directory(ctx.paths.uploads_dir(), true)?;
 
-            let stdout = child.stdout.take().expect("backend stdout not captured");
-            *app.state::<Backend>().child.lock().unwrap() = Some(child);
-
-            std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    if let Some(rest) = line.trim().strip_prefix("READY ") {
-                        if let Ok(port) = rest.trim().parse::<u16>() {
-                            let state = handle.state::<Backend>();
-                            *state.port.lock().unwrap() = Some(port);
-                            let _ = handle.emit("backend-ready", port);
-                        }
-                    }
-                }
-            });
-
+            // Dirs, first-run model downloads, orphaned-meeting sweep.
+            lazymeet_core::startup(&ctx)?;
+            app.manage(ctx);
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building LazyMeet");
-
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
-            // Terminate the backend when the app closes.
-            if let Some(mut child) = app_handle.state::<Backend>().child.lock().unwrap().take() {
-                let _ = child.kill();
-            }
-        }
-    });
+        .run(tauri::generate_context!())
+        .expect("error while running LazyMeet");
 }

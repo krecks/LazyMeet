@@ -1,0 +1,49 @@
+{
+  "id": "3947f994c55048d18270971edb40d77d",
+  "filename": "standup.mp4",
+  "title": "standup.mp4",
+  "created_at": "2026-07-09T14:45:34.229174+00:00",
+  "status": "done",
+  "error": null,
+  "num_speakers": -1,
+  "speakers": {
+    "SPEAKER_00": "Anna",
+    "SPEAKER_01": "Speaker 2"
+  },
+  "recognized": [
+    "SPEAKER_00"
+  ],
+  "confirmed": [],
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 3.2,
+      "speaker": "SPEAKER_00",
+      "text": "Hi everyone."
+    },
+    {
+      "start": 3.4,
+      "end": 7.1,
+      "speaker": "SPEAKER_01",
+      "text": "Status update."
+    }
+  ],
+  "summary": "Anna briefed the team.",
+  "takeaways": [
+    "Pipeline done."
+  ],
+  "action_items": [
+    "Anna: ship it."
+  ],
+  "voiceprints": {
+    "SPEAKER_00": [
+      0.1,
+      0.2
+    ],
+    "SPEAKER_01": [
+      0.3,
+      0.4
+    ]
+  },
+  "worker_pid": 12345
+}

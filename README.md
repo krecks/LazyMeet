@@ -12,8 +12,7 @@ voiceprint library that learns from every confirmed match.
 ## How it works
 
 ```
-Tauri desktop app
- └─ Python sidecar (FastAPI)
+Tauri desktop app — one binary, backend in Rust (no Python, no sidecar)
      1. ffmpeg (bundled)        → 16 kHz mono audio
      2. sherpa-onnx VAD         → speech utterances
      3. NVIDIA Parakeet (ONNX)  → transcript with timestamps
@@ -21,6 +20,9 @@ Tauri desktop app
      5. speaker identification  → match/name voices via a saved speaker library
      6. llama.cpp (in-process)  → summary, takeaways, action items
 ```
+
+sherpa-onnx and llama.cpp are linked statically into the app; ffmpeg ships as
+a bundled static binary. Progress streams to the UI as native events.
 
 All AI models are **token-free** and download once on first run, then run
 fully offline:
@@ -70,64 +72,61 @@ saved voices in the **Known speakers** panel.
 
 Audio, transcripts, summaries, and voiceprints never leave your machine. They
 live in the OS app-data directory (`~/Library/Application Support/LazyMeet`,
-`%APPDATA%\LazyMeet`, or `~/.local/share/LazyMeet`). After the one-time model
+`%LOCALAPPDATA%\LazyMeet`, or `~/.local/share/LazyMeet`). After the one-time model
 download the app needs no network at all. The recording's audio is kept on
 disk (locally, next to the transcript) so you can replay transcript sections —
-video uploads are reduced to their audio track after processing, so the bulky
+video uploads are reduced to their audio track during processing, so the bulky
 video itself never sticks around. Turn **Keep recording audio** off in Settings
 (or set `LAZYMEET_KEEP_AUDIO=0`) to delete each recording as soon as
 processing finishes instead.
 
 ## Development / building from source
 
-Requirements: Python 3.11+, Rust (stable) + Tauri CLI (`cargo install tauri-cli
---version "^2"`), and the platform webview libs (Linux: `libwebkit2gtk-4.1-dev`).
+Requirements: Rust (stable) + Tauri CLI (`cargo install tauri-cli --version
+"^2"`), cmake (sherpa-onnx and llama.cpp build from source), and the platform
+webview libs (Linux: `libwebkit2gtk-4.1-dev`). No Python.
 
 ```bash
-# 1. Backend deps
-pip install -r backend/requirements.txt
+# 1. Fetch the bundled ffmpeg for your platform (once)
+./scripts/fetch_ffmpeg.sh
 
-# 2. App icons (or: cargo tauri icon src-tauri/icons/icon.png)
-python scripts/make_icons.py
-
-# 3. Freeze the backend (PyInstaller onedir, bundled as an app resource)
-python scripts/build_sidecar.py
-
-# 4. Run the desktop app (dev)
+# 2. Run the desktop app (dev) — LAZYMEET_FAKE=1 skips the heavy models
 cd src-tauri && cargo tauri dev
 # ...or build installers:
 cd src-tauri && cargo tauri build
 ```
 
-### Backend-only / browser dev
+The workspace has two crates: `crates/lazymeet-core` (config, storage, model
+downloads, job queue, the ML pipeline — no Tauri dependency) and `src-tauri`
+(the desktop shell: thin Tauri commands + events over core).
 
-You can run just the Python backend and open the UI in a browser — handy for
-iterating without rebuilding the sidecar:
+On Linux, static sherpa-onnx needs
+`RUSTFLAGS="-C relocation-model=dynamic-no-pic"` (CI sets it).
+
+### CLI (process a file without the app)
+
+`lazymeet-cli` runs the full pipeline from the terminal against the same
+models and prints the meeting JSON — useful for debugging and benchmarks:
 
 ```bash
-# Fake mode skips the heavy models and returns canned data:
-LAZYMEET_FAKE=1 python -m backend.main
-# It prints "READY <port>"; open http://127.0.0.1:<port>/
+cargo run --release -p lazymeet-core --bin lazymeet-cli -- recording.mp4
 ```
-
-Without `LAZYMEET_FAKE`, the backend downloads real models on first run and does
-real transcription (all on the CPU; the summarizer LLM offloads to the GPU
-where llama.cpp supports it).
 
 ### Tests
 
-Smoke tests exercise the whole API over the stubbed (`LAZYMEET_FAKE`) pipeline:
+The behavioral test suite (a 1:1 port of the old pytest suite, plus event and
+Python-data-compat coverage) runs the stubbed (`LAZYMEET_FAKE`) pipeline and
+needs no models or cmake:
 
 ```bash
-pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-python -m pytest tests/
+cargo test -p lazymeet-core --no-default-features
 ```
 
 ### Cross-platform builds
 
-`.github/workflows/build.yml` builds installers for macOS, Windows, and Linux via
-a CI matrix (Tauri can't cross-compile). Each runner builds the PyInstaller
-sidecar, then bundles the app, and uploads the installer as an artifact.
+`.github/workflows/build.yml` runs the core test suite, then builds installers
+for macOS, Windows, and Linux via a CI matrix (Tauri can't cross-compile) and
+uploads them as artifacts.
 
 ## Configuration
 

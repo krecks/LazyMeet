@@ -1,20 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-build/
-dist/
-*.spec.bak
-.pytest_cache/
-
-# PyInstaller backend output (built per-platform in CI / locally)
-src-tauri/binaries/lazymeet-backend-*
-src-tauri/binaries/backend/
+# Bundled ffmpeg (fetched per-platform by scripts/fetch_ffmpeg.sh)
+src-tauri/binaries/ffmpeg-*
 
 # Rust / Tauri
-src-tauri/target/
+/target/
 src-tauri/gen/
 
 # App data & downloaded models (never committed)

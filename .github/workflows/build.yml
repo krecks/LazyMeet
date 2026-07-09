@@ -1,9 +1,10 @@
 name: build
 
-# Builds the cross-platform desktop installers. Each OS runner freezes the
-# Python backend into a sidecar with PyInstaller, then tauri-action bundles the
-# native app (.dmg/.app, .msi/.exe, .AppImage/.deb). Artifacts are uploaded per
-# platform. (Tauri cannot cross-compile, hence the matrix.)
+# Builds the cross-platform desktop installers. The backend is pure Rust
+# (lazymeet-core) compiled into the Tauri binary — sherpa-onnx and llama.cpp
+# build from source (cmake), ffmpeg is fetched as a pinned static binary and
+# bundled as a Tauri externalBin. (Tauri cannot cross-compile, hence the
+# matrix.)
 #
 # Pushing a version tag (v*) additionally publishes a GitHub Release with the
 # installers of all three platforms attached as downloadable assets.
@@ -15,7 +16,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Fast gate: the whole behavioral test suite runs without the native ML
+  # pipeline (no cmake, no llama.cpp build) in a couple of minutes.
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Core test suite (FAKE pipeline)
+        run: cargo test -p lazymeet-core --no-default-features
+
   build:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -26,16 +39,17 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      # sherpa-rs' static build needs this relocation model on Linux.
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || '' }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Linux system deps (webkit2gtk, etc.)
         if: matrix.os == 'ubuntu-22.04'
@@ -44,18 +58,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
             file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-
-      - name: Build backend sidecar
-        run: python scripts/build_sidecar.py
-
-      - name: Generate icons
-        run: |
-          pip install Pillow
-          python scripts/make_icons.py
+      - name: Fetch bundled ffmpeg
+        shell: bash
+        run: ./scripts/fetch_ffmpeg.sh
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
@@ -69,12 +74,12 @@ jobs:
         with:
           name: lazymeet-${{ matrix.os }}
           path: |
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.app
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
           if-no-files-found: ignore
 
   # On a version tag, gather the per-platform artifacts into one release.
