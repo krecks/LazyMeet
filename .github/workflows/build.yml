@@ -4,10 +4,14 @@ name: build
 # Python backend into a sidecar with PyInstaller, then tauri-action bundles the
 # native app (.dmg/.app, .msi/.exe, .AppImage/.deb). Artifacts are uploaded per
 # platform. (Tauri cannot cross-compile, hence the matrix.)
+#
+# Pushing a version tag (v*) additionally publishes a GitHub Release with the
+# installers of all three platforms attached as downloadable assets.
 
 on:
   push:
     branches: [main, claude/init-repo-3ynbbd]
+    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
@@ -72,3 +76,30 @@ jobs:
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
           if-no-files-found: ignore
+
+  # On a version tag, gather the per-platform artifacts into one release.
+  # Only installer files are attached (the bare .app directory stays a CI
+  # artifact — macOS users download the .dmg).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LazyMeet ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
