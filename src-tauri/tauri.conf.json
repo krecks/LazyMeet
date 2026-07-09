@@ -39,6 +39,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/ffmpeg"]
+    "externalBin": ["binaries/ffmpeg"],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }
