@@ -34,6 +34,19 @@ def test_full_lifecycle(client):
     assert "voiceprints" not in meeting
     assert "worker_pid" not in meeting
 
+    # The audio is kept (KEEP_AUDIO default) and served for playback. Video
+    # uploads are reduced to their extracted audio track; the video is gone.
+    from backend import config, store
+
+    assert meeting["has_audio"] is True
+    res = client.get(f"/api/meetings/{meeting_id}/audio")
+    assert res.status_code == 200
+    assert res.content == b"fake video bytes"
+    assert "standup.m4a" in res.headers["content-disposition"]
+    upload_dir = config.UPLOADS_DIR / meeting_id
+    assert (upload_dir / store.PLAYBACK_FILENAME).is_file()
+    assert not (upload_dir / "standup.mp4").exists()
+
     speaker_id = next(iter(meeting["speakers"]))
     res = client.patch(
         f"/api/meetings/{meeting_id}/speakers",
@@ -56,6 +69,30 @@ def test_full_lifecycle(client):
     assert client.delete("/api/speakers/Alice").status_code == 200
 
 
+def test_audio_upload_kept_unchanged(client):
+    """An audio-only upload is already just audio — no extraction, no deletion."""
+    from backend import config, store
+
+    res = client.post(
+        "/api/meetings",
+        files={"file": ("standup.m4a", b"fake audio bytes")},
+        data={"num_speakers": "-1"},
+    )
+    meeting_id = res.json()["id"]
+    meeting = _wait_terminal(client, meeting_id)
+    assert meeting["status"] == "done", meeting.get("error")
+    assert meeting["has_audio"] is True
+
+    upload_dir = config.UPLOADS_DIR / meeting_id
+    assert (upload_dir / "standup.m4a").is_file()
+    assert store.audio_path(store.get_meeting(meeting_id)) == upload_dir / "standup.m4a"
+    res = client.get(f"/api/meetings/{meeting_id}/audio")
+    assert res.status_code == 200
+    assert res.content == b"fake audio bytes"
+
+    assert client.delete(f"/api/meetings/{meeting_id}").status_code == 200
+
+
 def test_worker_write_preserves_user_renames(client):
     from backend import store
 
@@ -69,6 +106,26 @@ def test_worker_write_preserves_user_renames(client):
     )
     meeting = store.get_meeting(record["id"])
     assert meeting["speakers"] == {"spk_0": "Alice", "spk_1": "Speaker 2"}
+    store.delete_meeting(record["id"])
+
+
+def test_rename_updates_generated_notes(client):
+    from backend import store
+
+    record = store.create_meeting("notes.mp4")
+    store.update_meeting(
+        record["id"],
+        speakers={"spk_0": "Speaker 1", "spk_1": "Speaker 10"},
+        summary="Speaker 1 briefs Speaker 10 on the launch.",
+        takeaways=["Speaker 1 owns the rollout."],
+        action_items=["Speaker 1 sends the recap to Speaker 10."],
+    )
+    store.merge_speaker_names(record["id"], {"spk_0": "Anna"})
+    meeting = store.get_meeting(record["id"])
+    # "Speaker 10" must survive the "Speaker 1" rename untouched.
+    assert meeting["summary"] == "Anna briefs Speaker 10 on the launch."
+    assert meeting["takeaways"] == ["Anna owns the rollout."]
+    assert meeting["action_items"] == ["Anna sends the recap to Speaker 10."]
     store.delete_meeting(record["id"])
 
 

@@ -304,6 +304,26 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   background: var(--danger-soft);
 }
 .dl-pill.failed::before { animation: none; }
+.dl-wrap { position: relative; }
+.dl-popover {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  width: 320px;
+  padding: 0.9rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-1);
+  z-index: 40;
+}
+.dl-popover .setup-item { font-size: 0.8rem; }
+.dl-popover .dl-error {
+  margin: 0.6rem 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
 .brand .wordmark { font-size: 1.25rem; line-height: 1.15; }
 .brand-tag {
   margin: 0;
@@ -498,7 +518,10 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .stage.done .dot { background: var(--accent); border-color: var(--accent); animation: none; }
 
 /* -------------------------------------------------------------- result */
-#result { max-width: 780px; }
+/* Fluid: tracks the window so fullscreen has no dead right margin, while a
+   generous cap keeps note paragraphs from becoming unreadably long lines
+   (any leftover space splits evenly around the centered column). */
+#result { max-width: min(100%, 1280px); margin-inline: auto; }
 
 .toolbar { margin-bottom: 0.4rem; }
 .title-wrap { display: flex; align-items: baseline; gap: 0.4rem; }
@@ -669,7 +692,8 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   opacity: 0;
   transition: opacity 0.12s;
 }
-.seg:hover .seg-actions, .seg .seg-actions:focus-within { opacity: 1; }
+.seg:hover .seg-actions, .seg .seg-actions:focus-within, .seg.playing .seg-actions { opacity: 1; }
+.seg.playing { background: var(--accent-soft); border-radius: 0 var(--radius-m) var(--radius-m) 0; }
 .seg.editing { background: var(--accent-soft); border-radius: 0 var(--radius-m) var(--radius-m) 0; }
 .seg .editor select { font-size: 0.82rem; }
 

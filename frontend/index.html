@@ -43,6 +43,8 @@
         <path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h5" />
       </symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" /></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" /></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></symbol>
     </defs>
   </svg>
 
@@ -94,8 +96,15 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="dl-pill" class="dl-pill hidden" title="Models are downloading — click to retry a failed download">
-          Downloading models…
+        <div class="dl-wrap">
+          <button id="dl-pill" class="dl-pill hidden" title="Models are downloading — click to see each download"
+            aria-haspopup="true" aria-expanded="false" aria-controls="dl-popover">
+            Downloading models…
+          </button>
+          <div id="dl-popover" class="dl-popover hidden" role="dialog" aria-label="Model download progress"></div>
+        </div>
+        <button id="speakers-btn" class="icon-btn" title="Known speakers" aria-label="Open known speakers">
+          <svg class="icon"><use href="#i-user" /></svg>
         </button>
         <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Open settings">
           <svg class="icon"><use href="#i-gear" /></svg>
@@ -253,16 +262,6 @@
 
       <section class="settings-section">
         <div class="settings-section-head">
-          <h2 class="serif">Known speakers</h2>
-          <p class="muted">Voices you've named. LazyMeet recognizes them in future
-            recordings; forget a voice to stop that. Renaming keeps the voice and
-            applies to future recordings — past transcripts keep their saved names.</p>
-        </div>
-        <ul id="speaker-list" class="speaker-list"></ul>
-      </section>
-
-      <section class="settings-section">
-        <div class="settings-section-head">
           <h2 class="serif">Your data</h2>
           <p class="muted">Everything LazyMeet knows lives in this folder — transcripts,
             voices, and the downloaded models. Nothing ever leaves this computer.</p>
@@ -274,6 +273,29 @@
           </button>
         </div>
         <p id="data-usage" class="muted small"></p>
+      </section>
+    </main>
+  </section>
+
+  <!-- Known speakers -->
+  <section id="speakers" class="screen hidden">
+    <header class="app-header">
+      <div class="brand">
+        <button id="speakers-back" class="icon-btn" title="Back" aria-label="Back to meetings">
+          <svg class="icon"><use href="#i-back" /></svg>
+        </button>
+        <h1 class="wordmark">Known speakers</h1>
+      </div>
+    </header>
+
+    <main class="settings-body">
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <p class="muted">Voices you've named. LazyMeet recognizes them in future
+            recordings; forget a voice to stop that. Renaming keeps the voice and
+            applies to future recordings — past transcripts keep their saved names.</p>
+        </div>
+        <ul id="speaker-list" class="speaker-list"></ul>
       </section>
     </main>
   </section>

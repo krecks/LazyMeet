@@ -95,26 +95,66 @@ async function watchSetup() {
   }
 }
 
+let lastSetupStatus = null;
+
 function renderDownloadPill(status) {
+  lastSetupStatus = status;
   const pill = $("dl-pill");
   pill.classList.remove("hidden");
   if (status.error) {
     pill.classList.add("failed");
-    pill.textContent = "Model download failed — click to retry";
-    return;
-  }
-  pill.classList.remove("failed");
-  const done = status.items.filter((i) => i.ready).length;
-  let downloaded = 0;
-  let total = 0;
-  for (const item of status.items) {
-    if (!item.ready && item.total) {
-      downloaded += item.downloaded;
-      total += item.total;
+    pill.textContent = "Model download failed — click for details";
+  } else {
+    pill.classList.remove("failed");
+    const done = status.items.filter((i) => i.ready).length;
+    let downloaded = 0;
+    let total = 0;
+    for (const item of status.items) {
+      if (!item.ready && item.total) {
+        downloaded += item.downloaded;
+        total += item.total;
+      }
     }
+    const pct = total ? ` · ${Math.round((downloaded / total) * 100)}%` : "";
+    pill.textContent = `Downloading models ${done}/${status.items.length}${pct}`;
   }
-  const pct = total ? ` · ${Math.round((downloaded / total) * 100)}%` : "";
-  pill.textContent = `Downloading models ${done}/${status.items.length}${pct}`;
+  if (!$("dl-popover").classList.contains("hidden")) renderDownloadPopover(status);
+}
+
+const fmtMB = (bytes) => `${Math.round(bytes / (1 << 20))} MB`;
+
+function renderDownloadPopover(status) {
+  const pop = $("dl-popover");
+  pop.innerHTML = "";
+  for (const item of status.items) {
+    const pct = item.total ? Math.round((item.downloaded / item.total) * 100) : (item.ready ? 100 : 0);
+    const label = item.ready
+      ? "✓"
+      : item.total
+        ? `${fmtMB(item.downloaded)} / ${fmtMB(item.total)} · ${pct}%`
+        : "starting…";
+    const div = el("div", "setup-item");
+    div.innerHTML = `<div class="setup-name"><span>${escapeHtml(item.name)}</span><span>${label}</span></div>
+      <div class="bar"><span style="width:${pct}%"></span></div>`;
+    pop.appendChild(div);
+  }
+  if (status.error) {
+    const err = el("p", "dl-error");
+    err.textContent = status.error;
+    pop.appendChild(err);
+    const retry = el("button", "btn ghost");
+    retry.textContent = "Retry download";
+    retry.addEventListener("click", retrySetup);
+    pop.appendChild(retry);
+  }
+}
+
+function toggleDownloadPopover(open) {
+  const pop = $("dl-popover");
+  const show = open !== undefined ? open : pop.classList.contains("hidden");
+  pop.classList.toggle("hidden", !show);
+  $("dl-pill").setAttribute("aria-expanded", String(show));
+  if (show && lastSetupStatus) renderDownloadPopover(lastSetupStatus);
 }
 
 async function retrySetup() {
@@ -340,6 +380,7 @@ function selectMeeting(id) {
   activeId = id;
   editing = null; // abandon any open edit — it belonged to the previous meeting
   pendingMeeting = null;
+  stopSegmentPlayback(); // the playing audio belonged to the previous meeting
   if (pollTimer) clearInterval(pollTimer);
   $("empty").classList.add("hidden");
   renderMeetingList();
@@ -352,6 +393,7 @@ function showEmpty() {
   currentMeeting = null;
   editing = null;
   pendingMeeting = null;
+  stopSegmentPlayback();
   $("processing").classList.add("hidden");
   $("result").classList.add("hidden");
   $("empty").classList.remove("hidden");
@@ -706,6 +748,7 @@ function renderLegend(m, colorOf) {
 }
 
 function renderTranscript(m, colorOf, editable) {
+  stopSegmentPlayback(); // the buttons owning the playing state are re-created
   const t = $("transcript");
   t.innerHTML = "";
   (m.segments || []).forEach((seg, i) => {
@@ -714,13 +757,95 @@ function renderTranscript(m, colorOf, editable) {
     const name = m.speakers[seg.speaker] || seg.speaker;
     div.innerHTML = `<div class="meta"><span class="who">${escapeHtml(name)}</span><span class="ts">${fmtTs(seg.start)}</span></div>
       <div class="seg-text">${escapeHtml(seg.text)}</div>`;
-    if (editable) {
+    if (m.has_audio || editable) {
       const actions = el("div", "seg-actions");
-      actions.appendChild(iconBtn("i-pencil", "Edit segment", () => startSegmentEdit(i, div)));
+      if (m.has_audio) {
+        const btn = iconBtn("i-play", "Play this section", () => playSegment(m.id, seg, i, btn, div));
+        actions.appendChild(btn);
+      }
+      if (editable) {
+        actions.appendChild(iconBtn("i-pencil", "Edit segment", () => startSegmentEdit(i, div)));
+      }
       div.appendChild(actions);
     }
     t.appendChild(div);
   });
+}
+
+// --------------------------------------------------------------------------
+// Segment playback — hear a section to decide who's speaking before naming.
+// One shared <audio> streams the kept recording; play seeks to the segment
+// start and pauses at its end. Clicking the playing segment stops it.
+// --------------------------------------------------------------------------
+let player = null;
+let playerSrc = "";
+let playingIndex = null;
+let playingBtn = null;
+let playingSeg = null; // the .seg element, for the highlight class
+
+function stopSegmentPlayback() {
+  if (player) {
+    player.pause();
+    player.ontimeupdate = null;
+    player.onended = null;
+  }
+  if (playingBtn) {
+    playingBtn.querySelector("use").setAttribute("href", "#i-play");
+    playingBtn.title = "Play this section";
+    playingBtn.setAttribute("aria-label", "Play this section");
+  }
+  if (playingSeg) playingSeg.classList.remove("playing");
+  playingIndex = null;
+  playingBtn = null;
+  playingSeg = null;
+}
+
+function playSegment(meetingId, seg, index, btn, segEl) {
+  if (playingIndex === index) {
+    stopSegmentPlayback();
+    return;
+  }
+  stopSegmentPlayback();
+  if (!player) {
+    player = new Audio();
+    player.preload = "auto";
+  }
+  const src = `${API}/api/meetings/${meetingId}/audio`;
+  if (playerSrc !== src) {
+    player.src = src;
+    playerSrc = src;
+  }
+  playingIndex = index;
+  playingBtn = btn;
+  playingSeg = segEl;
+  btn.querySelector("use").setAttribute("href", "#i-stop");
+  btn.title = "Stop";
+  btn.setAttribute("aria-label", "Stop");
+  segEl.classList.add("playing");
+
+  const begin = () => {
+    player.currentTime = seg.start || 0;
+    // Stop at the segment boundary (with a whisker of slack — timeupdate
+    // fires only a few times a second).
+    player.ontimeupdate = () => {
+      if (seg.end && player.currentTime >= seg.end) stopSegmentPlayback();
+    };
+    player.onended = stopSegmentPlayback;
+    player.play().catch((e) => {
+      stopSegmentPlayback();
+      showToast(`Couldn't play audio: ${e.message}`);
+    });
+  };
+  // Seeking needs the media metadata; wait for it on first load.
+  if (player.readyState >= 1) {
+    begin();
+  } else {
+    player.onloadedmetadata = begin;
+    player.onerror = () => {
+      stopSegmentPlayback();
+      showToast("Couldn't load the recording for playback.");
+    };
+  }
 }
 
 function startSegmentEdit(index, segEl) {
@@ -916,8 +1041,8 @@ const CONFIG_META = {
   },
   KEEP_AUDIO: {
     section: "config-processing",
-    label: "Keep original recordings",
-    help: "Keep uploaded audio/video files after processing instead of deleting them.",
+    label: "Keep recording audio",
+    help: "Keep each recording's audio after processing so transcript sections can be played back. Video files are replaced by their audio track to save space. Turn off to delete everything once the notes are ready.",
     toggle: true,
   },
 };
@@ -928,7 +1053,6 @@ let lastModels = null;
 async function openSettings() {
   $("app").classList.add("hidden");
   $("settings").classList.remove("hidden");
-  refreshSpeakers();
   try {
     const [cfg, data, models] = await Promise.all([
       api("/api/config"),
@@ -947,6 +1071,17 @@ function closeSettings() {
   if (modelsPollTimer) clearInterval(modelsPollTimer);
   modelsPollTimer = null;
   $("settings").classList.add("hidden");
+  $("app").classList.remove("hidden");
+}
+
+function openSpeakers() {
+  $("app").classList.add("hidden");
+  $("speakers").classList.remove("hidden");
+  refreshSpeakers();
+}
+
+function closeSpeakers() {
+  $("speakers").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
 
@@ -1298,6 +1433,7 @@ function showFatal(err) {
   $("setup").classList.add("hidden");
   $("app").classList.add("hidden");
   $("settings").classList.add("hidden");
+  $("speakers").classList.add("hidden");
   $("fatal").classList.remove("hidden");
   $("fatal-msg").textContent = err && err.message ? err.message : String(err);
 }
@@ -1403,6 +1539,8 @@ function initApp() {
   setupDropzone();
   $("settings-btn").addEventListener("click", openSettings);
   $("settings-back").addEventListener("click", closeSettings);
+  $("speakers-btn").addEventListener("click", openSpeakers);
+  $("speakers-back").addEventListener("click", closeSpeakers);
   $("config-save").addEventListener("click", saveConfig);
   $("config-reset").addEventListener("click", resetConfig);
   $("reveal-btn").addEventListener("click", revealDataDir);
@@ -1418,11 +1556,15 @@ async function main() {
   $("boot").classList.add("hidden");
   $("setup-retry").addEventListener("click", retrySetup);
   $("setup-continue").addEventListener("click", initApp);
-  $("dl-pill").addEventListener("click", retrySetup); // no-op unless a download failed
+  $("dl-pill").addEventListener("click", () => toggleDownloadPopover());
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".dl-wrap")) toggleDownloadPopover(false);
+  });
   await watchSetup();
   const backgrounded = appInitialized;
   initApp();
   $("dl-pill").classList.add("hidden");
+  toggleDownloadPopover(false);
   if (backgrounded) {
     showToast("All models ready — queued recordings are processing now.", 4000, true);
     refreshMeetings();

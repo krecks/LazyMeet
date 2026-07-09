@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -217,6 +218,19 @@ def update_segment(
         return record
 
 
+def _rename_in_notes(record: dict, old: str, new: str) -> None:
+    """Rewrite one speaker's display name inside the generated notes.
+
+    The summary text bakes in the names it was generated with, so a rename
+    must follow it there too. Guarded lookarounds keep "Speaker 1" from also
+    matching inside "Speaker 10".
+    """
+    pattern = re.compile(rf"(?<!\w){re.escape(old)}(?!\w)")
+    record["summary"] = pattern.sub(new, record.get("summary", ""))
+    record["takeaways"] = [pattern.sub(new, t) for t in record.get("takeaways", [])]
+    record["action_items"] = [pattern.sub(new, a) for a in record.get("action_items", [])]
+
+
 def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
     """Apply user renames and enrol those voices in the speaker library.
 
@@ -233,7 +247,15 @@ def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
             new_name = new_name.strip()
             if not new_name:
                 continue
+            old_name = speakers.get(diarized_id)
             speakers[diarized_id] = new_name
+            if old_name and old_name != new_name:
+                _rename_in_notes(record, old_name, new_name)
+                # Move the library entry rather than leaving a duplicate
+                # person behind under the old name. If the new name already
+                # exists, the voice merges into it and the old entry goes.
+                if rename_speaker(old_name, new_name) == "exists":
+                    delete_speaker(old_name)
             # Enrol this voice so the name follows it into future recordings.
             emb = voiceprints.get(diarized_id)
             if emb:
@@ -278,11 +300,34 @@ def delete_meeting(meeting_id: str) -> bool:
         return existed
 
 
+# Audio track extracted from a video upload once processing succeeds; the
+# original video is deleted then, so playback prefers this file.
+PLAYBACK_FILENAME = "playback.m4a"
+
+
+def audio_path(record: dict) -> Optional[Path]:
+    """The kept audio on disk (extracted track, or the original upload when it
+    was audio-only), or None if it was cleaned up."""
+    if not record.get("id"):
+        return None
+    upload_dir = config.UPLOADS_DIR / record["id"]
+    playback = upload_dir / PLAYBACK_FILENAME
+    if playback.is_file():
+        return playback
+    filename = record.get("filename")
+    if not filename:
+        return None
+    path = upload_dir / filename
+    return path if path.is_file() else None
+
+
 def public_meeting(record: dict) -> dict:
     """Strip internal fields (voiceprints, worker pid) before returning to the client."""
     out = {k: v for k, v in record.items() if k not in ("voiceprints", "worker_pid")}
     # fallback covers records created before titles existed (no disk migration)
     out["title"] = record.get("title") or record.get("filename") or "Meeting"
+    # whether segment playback is possible (recording still on disk)
+    out["has_audio"] = audio_path(record) is not None
     return out
 
 

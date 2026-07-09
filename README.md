@@ -61,9 +61,12 @@ speakers** panel.
 Audio, transcripts, summaries, and voiceprints never leave your machine. They
 live in the OS app-data directory (`~/Library/Application Support/LazyMeet`,
 `%APPDATA%\LazyMeet`, or `~/.local/share/LazyMeet`). After the one-time model
-download the app needs no network at all. The uploaded recording itself is
-deleted as soon as processing finishes — only the transcript and summary are
-kept (set `LAZYMEET_KEEP_AUDIO=1` to keep recordings).
+download the app needs no network at all. The recording's audio is kept on
+disk (locally, next to the transcript) so you can replay transcript sections —
+video uploads are reduced to their audio track after processing, so the bulky
+video itself never sticks around. Turn **Keep recording audio** off in Settings
+(or set `LAZYMEET_KEEP_AUDIO=0`) to delete each recording as soon as
+processing finishes instead.
 
 ## Development / building from source
 
@@ -128,5 +131,5 @@ Environment variables (all optional):
 | `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Speakers with less speech fold into the closest main voice |
 | `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
-| `LAZYMEET_KEEP_AUDIO` | unset | `1` = keep uploaded recordings after processing |
+| `LAZYMEET_KEEP_AUDIO` | `1` | `1` = keep only the audio track for playback (video files are deleted after processing); `0` = delete recordings entirely (disables segment playback) |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |

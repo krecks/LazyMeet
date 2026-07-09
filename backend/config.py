@@ -72,9 +72,12 @@ DIAR_EMB_MODEL = MODELS_DIR / "speaker_embedding.onnx"  # also used for identifi
 #                           llama.cpp supports it, falling back to the CPU
 #                           automatically; the ONNX models always run on the
 #                           CPU (see onnx_provider)
-#   KEEP_AUDIO              keep raw recordings after processing (default: they
-#                           are deleted for privacy + disk once a meeting is
-#                           fully processed)
+#   KEEP_AUDIO              keep the recording's audio after processing so
+#                           transcript segments can be replayed — video
+#                           uploads are reduced to their audio track, the
+#                           video itself is deleted (default on; disable to
+#                           delete everything once processed — the extracted
+#                           WAV intermediate is always deleted)
 #   ASR_MODEL / SUMMARY_MODEL      ids from models_setup.ASR_CATALOG/LLM_CATALOG
 #                                  (validated at the API layer; pipeline falls
 #                                  back to the default while not downloaded)
@@ -99,7 +102,7 @@ TUNABLES: dict[str, tuple[str, type, object, object, object]] = {
     "MIN_SPEAKER_SECONDS": ("LAZYMEET_MIN_SPEAKER_SECONDS", float, 15.0, 0.0, 600.0),
     "NUM_THREADS": ("LAZYMEET_NUM_THREADS", int, _DEFAULT_THREADS, 1, _MAX_THREADS),
     "USE_GPU": ("LAZYMEET_USE_GPU", bool, True, None, None),
-    "KEEP_AUDIO": ("LAZYMEET_KEEP_AUDIO", bool, False, None, None),
+    "KEEP_AUDIO": ("LAZYMEET_KEEP_AUDIO", bool, True, None, None),
 }
 
 CONFIG_FILE = DATA_DIR / "config.json"

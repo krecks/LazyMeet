@@ -205,3 +205,17 @@ def test_deleted_queued_meeting_is_skipped(client, monkeypatch):
     assert ids[1] not in started
     for i in (ids[0], ids[2]):
         client.delete(f"/api/meetings/{i}")
+
+
+def test_first_run_downloads_run_in_parallel(monkeypatch):
+    """_download_all fetches all missing models concurrently, not one by one."""
+    from backend import models_setup
+
+    # Every download blocks until all of them are in flight at once; a
+    # sequential implementation would trip the barrier timeout and error out.
+    barrier = threading.Barrier(len(models_setup.MODEL_SPECS), timeout=5)
+    monkeypatch.setattr(models_setup, "_download_one", lambda spec: barrier.wait())
+
+    models_setup._download_all()
+    assert models_setup._progress["state"] == "ready"
+    models_setup._progress["state"] = "idle"

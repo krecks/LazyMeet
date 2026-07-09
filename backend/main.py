@@ -25,7 +25,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -187,6 +187,27 @@ def get_meeting(meeting_id: str):
     if record is None:
         raise HTTPException(404, "meeting not found")
     return store.public_meeting(record)
+
+
+@app.get("/api/meetings/{meeting_id}/audio")
+def get_meeting_audio(meeting_id: str):
+    """The kept audio, for in-transcript segment playback.
+
+    404s when it is gone (pre-existing meetings, or KEEP_AUDIO turned off);
+    the UI only shows play buttons when ``has_audio`` says it is here.
+    FileResponse handles Range requests, which the webview needs to seek.
+    """
+    record = store.get_meeting(meeting_id)
+    if record is None:
+        raise HTTPException(404, "meeting not found")
+    path = store.audio_path(record)
+    if path is None:
+        raise HTTPException(404, "recording no longer on disk")
+    name = record.get("filename") or "recording"
+    if path.name == store.PLAYBACK_FILENAME:
+        # video uploads are reduced to their audio track after processing
+        name = str(Path(name).with_suffix(".m4a"))
+    return FileResponse(path, filename=name)
 
 
 class MeetingPatch(BaseModel):
@@ -552,11 +573,22 @@ def run_worker(meeting_id: str, upload_path: str) -> None:
                 action_items=[],
             )
 
-        # The recording is no longer needed (export works off the JSON record,
-        # re-enrolment off stored voiceprints) — drop it for privacy and disk.
-        # Kept on error so a failed run can be debugged or reprocessed.
+        # The extracted WAV is a processing intermediate either way. With
+        # KEEP_AUDIO (default) only the audio stays for segment playback: an
+        # audio-only upload is kept as-is, a video upload is reduced to its
+        # audio track and the much larger video deleted. With it off
+        # everything goes — export works off the JSON record, re-enrolment
+        # off stored voiceprints. Everything is kept on error so a failed
+        # run can be debugged or reprocessed.
+        wav.unlink(missing_ok=True)
         if not config.KEEP_AUDIO:
             shutil.rmtree(config.UPLOADS_DIR / meeting_id, ignore_errors=True)
+        elif path.is_file() and not audio.is_audio_file(path):
+            try:
+                audio.extract_playback_audio(path, path.parent / store.PLAYBACK_FILENAME)
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass  # keep the video rather than lose playback entirely
     except Exception as exc:
         store.update_meeting(meeting_id, status="error", error=str(exc))
 

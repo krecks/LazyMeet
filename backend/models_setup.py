@@ -2,9 +2,9 @@
 
 All weights are token-free: the ASR / VAD / diarization models come from
 sherpa-onnx GitHub releases and the summarization GGUF from an ungated Hugging
-Face repo. Downloads run on a background thread; the UI polls ``status()`` and
-shows a progress screen until everything is ready, after which the app is fully
-offline.
+Face repo. Missing models download concurrently, one thread per file; the UI
+polls ``status()`` and shows per-model progress until everything is ready,
+after which the app is fully offline.
 
 URLs are best-known defaults and can be overridden via environment variables
 (handy if a newer model release is preferred).
@@ -327,10 +327,26 @@ def ensure_models_async() -> None:
 def _download_all() -> None:
     try:
         config.ensure_dirs()
-        for spec in MODEL_SPECS:
-            if _marker_path(spec).exists():
-                continue
-            _download_one(spec)
+        errors: list[str] = []
+
+        def _run(spec: ModelSpec) -> None:
+            try:
+                _download_one(spec)
+            except Exception as exc:
+                with _lock:
+                    errors.append(f"{spec.name}: {exc}")
+
+        threads = [
+            threading.Thread(target=_run, args=(spec,), daemon=True)
+            for spec in MODEL_SPECS
+            if not _marker_path(spec).exists()
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        if errors:
+            raise RuntimeError("; ".join(errors))
         with _lock:
             _progress["state"] = "ready"
         if _ready_callback is not None:

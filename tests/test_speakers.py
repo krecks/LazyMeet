@@ -39,3 +39,47 @@ def test_rename_invalid_names_are_422(client):
     assert client.patch("/api/speakers/Alice", json={"name": "   "}).status_code == 422
     assert client.patch("/api/speakers/Alice", json={"name": "x" * 101}).status_code == 422
     store.delete_speaker("Alice")
+
+
+def test_meeting_rename_moves_library_entry(client):
+    """Renaming an enrolled speaker in a meeting must not leave a duplicate."""
+    from backend import store
+
+    record = store.create_meeting("lib.mp4")
+    store.update_meeting(
+        record["id"],
+        speakers={"spk_0": "Speaker 1"},
+        voiceprints={"spk_0": [0.1, 0.2]},
+    )
+    store.merge_speaker_names(record["id"], {"spk_0": "Christine Schneider"})
+    assert "Christine Schneider" in store.get_speaker_names()
+
+    store.merge_speaker_names(record["id"], {"spk_0": "Christine Weber"})
+    names = store.get_speaker_names()
+    assert "Christine Weber" in names
+    assert "Christine Schneider" not in names  # renamed, not duplicated
+
+    store.delete_meeting(record["id"])
+    store.delete_speaker("Christine Weber")
+
+
+def test_meeting_rename_merges_into_existing_entry(client):
+    """Renaming a voice to a name already in the library keeps one entry."""
+    from backend import store
+
+    store.upsert_speaker("Anna", [0.9, 0.9])
+    record = store.create_meeting("merge.mp4")
+    store.update_meeting(
+        record["id"],
+        speakers={"spk_0": "Speaker 1"},
+        voiceprints={"spk_0": [0.1, 0.2]},
+    )
+    store.merge_speaker_names(record["id"], {"spk_0": "Nana"})
+    store.merge_speaker_names(record["id"], {"spk_0": "Anna"})
+    names = store.get_speaker_names()
+    assert "Anna" in names and "Nana" not in names
+    # the freshly heard voice wins the entry
+    assert store.load_speaker_library()["Anna"]["embedding"] == [0.1, 0.2]
+
+    store.delete_meeting(record["id"])
+    store.delete_speaker("Anna")
