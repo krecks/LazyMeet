@@ -34,7 +34,10 @@ jobs:
       # different macOS deployment target would produce cache entries the tag
       # build can't (or worse, shouldn't) reuse. 12.0 matches
       # bundle.macOS.minimumSystemVersion, which `cargo tauri build` exports.
-      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C link-arg=advapi32.lib' || '' }}
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C target-feature=+crt-static -C link-arg=advapi32.lib' || '' }}
+      # sherpa-onnx's static build uses the static CRT (/MT) on Windows; llama.cpp
+      # must match or the two can't link into one binary (LNK2038).
+      LLAMA_STATIC_CRT: ${{ matrix.os == 'windows-latest' && '1' || '' }}
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.os == 'macos-latest' && '12.0' || '' }}
 
     steps:

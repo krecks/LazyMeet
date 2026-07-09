@@ -48,7 +48,10 @@ jobs:
 
     env:
       # sherpa-rs' static build needs this relocation model on Linux.
-      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C link-arg=advapi32.lib' || '' }}
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C target-feature=+crt-static -C link-arg=advapi32.lib' || '' }}
+      # sherpa-onnx's static build uses the static CRT (/MT) on Windows; llama.cpp
+      # must match or the two can't link into one binary (LNK2038).
+      LLAMA_STATIC_CRT: ${{ matrix.os == 'windows-latest' && '1' || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +112,10 @@ jobs:
   # Only installer files are attached (the bare .app directory stays a CI
   # artifact — macOS users download the .dmg).
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publish whatever platforms built — one failed platform must not block
+    # the others' installers. Re-running the tag later updates the same
+    # release with the missing assets.
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
     needs: build
     runs-on: ubuntu-latest
     permissions:
