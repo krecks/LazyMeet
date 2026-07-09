@@ -48,7 +48,7 @@ jobs:
 
     env:
       # sherpa-rs' static build needs this relocation model on Linux.
-      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || '' }}
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C link-arg=advapi32.lib' || '' }}
 
     steps:
       - uses: actions/checkout@v4
