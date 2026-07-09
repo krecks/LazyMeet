@@ -1,20 +1,13 @@
 name: warm-cache
 
 # Release builds run only on tags, but GitHub cache scoping means a tag run
-# can restore caches only from its own ref or from main. This workflow keeps
-# the expensive release target dir (sherpa-onnx + llama.cpp compile from
-# source) warm on main — and runs only when dependencies actually change, so
-# ordinary pushes to main still just run the fast test job.
+# can restore caches only from its own ref or from main. This MANUAL workflow
+# fills the release cache (sherpa-onnx + llama.cpp compile from source) from
+# main — run it from the Actions tab before tagging a release whenever
+# dependencies changed, and the tag build restores it instead of compiling
+# cold. Pushes to main never build anything; they only run the test job.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/**/Cargo.toml"
-      - "src-tauri/Cargo.toml"
-      - ".github/workflows/warm-cache.yml"
   workflow_dispatch:
 
 jobs:
