@@ -82,7 +82,14 @@ jobs:
 
       - name: Fetch bundled ffmpeg
         shell: bash
-        run: ./scripts/fetch_ffmpeg.sh
+        # On macOS fetch both architectures: a Rosetta tauri-cli resolves the
+        # externalBin suffix from its own arch, not the build target's.
+        run: |
+          ./scripts/fetch_ffmpeg.sh
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            ./scripts/fetch_ffmpeg.sh aarch64-apple-darwin
+            ./scripts/fetch_ffmpeg.sh x86_64-apple-darwin
+          fi
 
       # Prebuilt binary in seconds — `cargo install` compiled the CLI from
       # source for ~5-10 min per platform. Falls back to a source build if no
