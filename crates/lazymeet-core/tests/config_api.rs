@@ -33,14 +33,14 @@ fn put_config_persists_and_applies() {
         &obj(&[
             ("SPEAKER_THRESHOLD", json!(0.8)),
             ("KEEP_AUDIO", json!(true)),
-            ("NUM_THREADS", json!(2)),
+            ("NUM_THREADS", json!(1)), // valid on any host (bound = core count)
         ]),
     )
     .unwrap();
     assert_eq!(data["values"]["SPEAKER_THRESHOLD"], 0.8);
     assert_eq!(
         data["overrides"],
-        json!({"SPEAKER_THRESHOLD": 0.8, "KEEP_AUDIO": true, "NUM_THREADS": 2})
+        json!({"SPEAKER_THRESHOLD": 0.8, "KEEP_AUDIO": true, "NUM_THREADS": 1})
     );
     assert!(app.ctx.paths.config_file().exists());
     let snapshot = app.ctx.config.read().unwrap();
@@ -99,14 +99,16 @@ fn corrupt_config_json_is_tolerated() {
 
 #[test]
 fn unknown_and_invalid_file_values_ignored() {
+    // NUM_THREADS: 1 is valid on any host — the upper bound tracks the
+    // machine's core count (a 2-core CI runner rejects 3, correctly).
     let app = TestApp::fake();
     std::fs::write(
         app.ctx.paths.config_file(),
-        r#"{"BOGUS": 1, "DIAR_THRESHOLD": 5.0, "NUM_THREADS": 3}"#,
+        r#"{"BOGUS": 1, "DIAR_THRESHOLD": 5.0, "NUM_THREADS": 1}"#,
     )
     .unwrap();
     let overrides = config::load_overrides(&app.ctx.paths);
-    assert_eq!(serde_json::Value::Object(overrides), json!({"NUM_THREADS": 3}));
+    assert_eq!(serde_json::Value::Object(overrides), json!({"NUM_THREADS": 1}));
 }
 
 #[test]
