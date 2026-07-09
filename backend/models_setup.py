@@ -73,9 +73,12 @@ MODEL_SPECS: list[ModelSpec] = [
     ),
     ModelSpec(
         name="Speaker embedding",
+        # English TitaNet — discriminates English/German voices far better than
+        # the zh-cn model (which over-segmented real meetings into dozens of
+        # spurious speakers).
         url=_env(
             "LAZYMEET_DIAR_EMB_URL",
-            f"{REL}/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+            f"{REL}/speaker-recongition-models/nemo_en_titanet_small.onnx",
         ),
         marker=Path("speaker_embedding.onnx"),
     ),
@@ -183,15 +186,38 @@ def _download_one(spec: ModelSpec) -> None:
 
 
 def _extract_archive(archive_path: Path, spec: ModelSpec) -> None:
-    with tarfile.open(archive_path, "r:bz2") as tar:
-        members = tar.getmembers()
-        for member in members:
-            base = os.path.basename(member.name)
-            for needle, dest_rel in spec.extract_map.items():
-                if base == needle or (needle in base and base.endswith(".onnx")):
-                    dest = config.MODELS_DIR / dest_rel
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    extracted = tar.extractfile(member)
-                    if extracted is not None:
-                        with open(dest, "wb") as out:
+    """Extract the mapped files, committing them atomically.
+
+    Everything is staged as ``*.part`` first and only renamed into place once
+    the whole archive extracted, with the marker file renamed last — a crash
+    mid-extract must never leave a truncated model that satisfies ``is_ready()``.
+    """
+    staged: dict = {}  # dest path relative to MODELS_DIR -> staged .part path
+    try:
+        with tarfile.open(archive_path, "r:bz2") as tar:
+            for member in tar.getmembers():
+                base = os.path.basename(member.name)
+                for needle, dest_rel in spec.extract_map.items():
+                    if dest_rel in staged:
+                        continue
+                    if base == needle or (needle in base and base.endswith(".onnx")):
+                        extracted = tar.extractfile(member)
+                        if extracted is None:
+                            continue
+                        dest = config.MODELS_DIR / dest_rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        part = dest.with_suffix(dest.suffix + ".part")
+                        with open(part, "wb") as out:
                             out.write(extracted.read())
+                        staged[dest_rel] = part
+        missing = [str(d) for d in spec.extract_map.values() if d not in staged]
+        if missing:
+            raise RuntimeError(f"{spec.name}: archive is missing {', '.join(missing)}")
+        for dest_rel, part in staged.items():
+            if dest_rel != spec.marker:
+                os.replace(part, config.MODELS_DIR / dest_rel)
+        os.replace(staged[spec.marker], config.MODELS_DIR / spec.marker)
+    except BaseException:
+        for part in staged.values():
+            part.unlink(missing_ok=True)
+        raise

@@ -29,10 +29,16 @@ const SPEAKER_COLORS = ["#6ea8fe", "#7ee787", "#f0883e", "#d2a8ff", "#79c0ff", "
 const $ = (id) => document.getElementById(id);
 let activeId = null;
 let pollTimer = null;
+let pollFailures = 0;
+let uploading = false;
 
 async function api(path, opts) {
   const res = await fetch(API + path, opts);
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const err = new Error(`${res.status} ${await res.text()}`);
+    err.status = res.status;
+    throw err;
+  }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
@@ -41,19 +47,34 @@ async function api(path, opts) {
 // First-run setup
 // --------------------------------------------------------------------------
 async function waitForSetup() {
+  let failures = 0;
   while (true) {
     let status;
     try {
       status = await api("/api/setup");
+      failures = 0;
     } catch (e) {
+      if (++failures >= 30) throw e; // backend is gone — escalate to the fatal screen
       await sleep(1000);
       continue;
     }
     if (status.ready) return;
     $("setup").classList.remove("hidden");
     renderSetup(status);
-    if (status.error) $("setup-error").textContent = status.error, $("setup-error").classList.remove("hidden");
+    $("setup-error").textContent = status.error || "";
+    $("setup-error").classList.toggle("hidden", !status.error);
+    $("setup-retry").classList.toggle("hidden", !status.error);
     await sleep(1000);
+  }
+}
+
+async function retrySetup() {
+  $("setup-error").classList.add("hidden");
+  $("setup-retry").classList.add("hidden");
+  try {
+    await api("/api/setup/retry", { method: "POST" });
+  } catch (e) {
+    showToast(e.message);
   }
 }
 
@@ -76,6 +97,12 @@ function setupDropzone() {
   const dz = $("dropzone");
   const input = $("file-input");
   dz.addEventListener("click", () => input.click());
+  dz.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      input.click();
+    }
+  });
   input.addEventListener("change", () => input.files[0] && upload(input.files[0]));
   ["dragover", "dragenter"].forEach((ev) =>
     dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
@@ -88,39 +115,86 @@ function setupDropzone() {
 }
 
 async function upload(file) {
-  const form = new FormData();
-  form.append("file", file);
-  const { id } = await api("/api/meetings", { method: "POST", body: form });
-  await refreshMeetings();
-  selectMeeting(id);
+  if (uploading) return;
+  const dz = $("dropzone");
+  const label = dz.querySelector("strong");
+  const originalLabel = label.textContent;
+  uploading = true;
+  dz.classList.add("uploading");
+  label.textContent = "Uploading…";
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("num_speakers", $("num-speakers")?.value ?? "-1");
+    const { id } = await api("/api/meetings", { method: "POST", body: form });
+    await refreshMeetings();
+    selectMeeting(id);
+  } catch (e) {
+    showToast(`Upload failed: ${e.message}`);
+  } finally {
+    uploading = false;
+    dz.classList.remove("uploading");
+    label.textContent = originalLabel;
+    $("file-input").value = "";
+  }
 }
 
 async function refreshMeetings() {
-  const meetings = await api("/api/meetings");
+  let meetings;
+  try {
+    meetings = await api("/api/meetings");
+  } catch (e) {
+    showToast(`Couldn't load meetings: ${e.message}`);
+    return;
+  }
   const list = $("meeting-list");
   list.innerHTML = "";
+  if (!meetings.length) {
+    list.innerHTML = `<li class="list-empty muted">No meetings yet</li>`;
+    return;
+  }
   for (const m of meetings) {
     const li = document.createElement("li");
-    if (m.id === activeId) li.classList.add("active");
-    li.innerHTML = `<span>${escapeHtml(m.filename)}</span><span class="status">${m.status}</span>`;
-    li.addEventListener("click", () => selectMeeting(m.id));
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (m.id === activeId) btn.classList.add("active");
+    btn.innerHTML = `<span>${escapeHtml(m.filename)}</span><span class="status">${m.status}</span>`;
+    btn.addEventListener("click", () => selectMeeting(m.id));
+    li.appendChild(btn);
     list.appendChild(li);
   }
 }
 
 async function refreshSpeakers() {
-  const names = await api("/api/speakers");
+  let names;
+  try {
+    names = await api("/api/speakers");
+  } catch (e) {
+    showToast(`Couldn't load speakers: ${e.message}`);
+    return;
+  }
   const list = $("speaker-list");
   list.innerHTML = "";
+  if (!names.length) {
+    list.innerHTML = `<li class="list-empty muted">No saved voices yet</li>`;
+    return;
+  }
   for (const name of names) {
     const li = document.createElement("li");
     li.innerHTML = `<span>${escapeHtml(name)}</span>`;
     const del = document.createElement("button");
     del.textContent = "✕";
     del.title = "Forget this voice";
-    del.addEventListener("click", async () => {
-      await api(`/api/speakers/${encodeURIComponent(name)}`, { method: "DELETE" });
-      refreshSpeakers();
+    del.setAttribute("aria-label", `Forget voice ${name}`);
+    del.addEventListener("click", () => {
+      confirmThen(del, "Sure?", async () => {
+        try {
+          await api(`/api/speakers/${encodeURIComponent(name)}`, { method: "DELETE" });
+          await refreshSpeakers();
+        } catch (e) {
+          showToast(`Couldn't forget voice: ${e.message}`);
+        }
+      });
     });
     li.appendChild(del);
     list.appendChild(li);
@@ -140,13 +214,30 @@ function selectMeeting(id) {
 }
 
 async function poll() {
-  if (!activeId) return;
+  const id = activeId;
+  if (!id) return;
   let m;
   try {
-    m = await api(`/api/meetings/${activeId}`);
+    m = await api(`/api/meetings/${id}`);
+    pollFailures = 0;
+    $("conn-banner").classList.add("hidden");
   } catch (e) {
+    if (id !== activeId) return; // stale response for a deselected meeting
+    if (e.status === 404) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      activeId = null;
+      $("processing").classList.add("hidden");
+      $("result").classList.add("hidden");
+      $("empty").classList.remove("hidden");
+      showToast("Meeting no longer exists");
+      refreshMeetings();
+    } else if (++pollFailures >= 3) {
+      $("conn-banner").classList.remove("hidden");
+    }
     return;
   }
+  if (id !== activeId) return; // user selected another meeting mid-request
   if (m.status === "done" || m.status === "error") {
     clearInterval(pollTimer);
     pollTimer = null;
@@ -177,7 +268,29 @@ function renderResult(m) {
   $("result").classList.remove("hidden");
   $("result-title").textContent = m.filename;
 
-  if (m.status === "error") {
+  // Wire the toolbar first so Delete/Export always work — even for an errored
+  // meeting that takes the early-return path below.
+  const deleteBtn = $("delete-btn");
+  disarm(deleteBtn);
+  $("export-btn").onclick = () => {
+    window.open(`${API}/api/meetings/${m.id}/export`, "_blank");
+  };
+  deleteBtn.onclick = () => {
+    confirmThen(deleteBtn, "Confirm delete", async () => {
+      try {
+        await api(`/api/meetings/${m.id}`, { method: "DELETE" });
+        activeId = null;
+        $("result").classList.add("hidden");
+        $("empty").classList.remove("hidden");
+        refreshMeetings();
+      } catch (e) {
+        showToast(`Delete failed: ${e.message}`);
+      }
+    });
+  };
+
+  // On error, still show whatever transcript was produced before the failure.
+  if (m.status === "error" && (!m.segments || m.segments.length === 0)) {
     $("summary-text").textContent = "Error: " + (m.error || "unknown");
     $("takeaways").innerHTML = "";
     $("action-items").innerHTML = "";
@@ -186,24 +299,14 @@ function renderResult(m) {
     return;
   }
 
-  $("summary-text").textContent = m.summary || "";
+  $("summary-text").textContent =
+    m.status === "error" ? "Error: " + (m.error || "unknown") : (m.summary || "");
   fillList($("takeaways"), m.takeaways);
   fillList($("action-items"), m.action_items);
 
   const colorOf = buildColorMap(m.segments);
   renderLegend(m, colorOf);
   renderTranscript(m, colorOf);
-
-  $("export-btn").onclick = () => {
-    window.open(`${API}/api/meetings/${m.id}/export?format=md`, "_blank");
-  };
-  $("delete-btn").onclick = async () => {
-    await api(`/api/meetings/${m.id}`, { method: "DELETE" });
-    activeId = null;
-    $("result").classList.add("hidden");
-    $("empty").classList.remove("hidden");
-    refreshMeetings();
-  };
 }
 
 function buildColorMap(segments) {
@@ -225,6 +328,7 @@ function renderLegend(m, colorOf) {
     const input = document.createElement("input");
     input.value = m.speakers[id] || id;
     input.title = "Rename — saves this voice for future recordings";
+    input.setAttribute("aria-label", `Rename ${m.speakers[id] || id}`);
     input.addEventListener("change", () => renameSpeaker(m.id, id, input.value));
     chip.appendChild(input);
     if (recognized) {
@@ -252,13 +356,17 @@ function renderTranscript(m, colorOf) {
 }
 
 async function renameSpeaker(meetingId, diarizedId, newName) {
-  const m = await api(`/api/meetings/${meetingId}/speakers`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ names: { [diarizedId]: newName } }),
-  });
-  renderResult({ ...m, status: "done" });
-  refreshSpeakers();
+  try {
+    const m = await api(`/api/meetings/${meetingId}/speakers`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names: { [diarizedId]: newName } }),
+    });
+    renderResult({ ...m, status: "done" });
+    refreshSpeakers();
+  } catch (e) {
+    showToast(`Rename failed: ${e.message}`);
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -266,11 +374,52 @@ async function renameSpeaker(meetingId, diarizedId, newName) {
 // --------------------------------------------------------------------------
 function fillList(ul, items) {
   ul.innerHTML = "";
-  for (const it of items || []) {
+  if (!items || !items.length) {
+    ul.innerHTML = `<li class="list-empty muted">None</li>`;
+    return;
+  }
+  for (const it of items) {
     const li = document.createElement("li");
     li.textContent = it;
     ul.appendChild(li);
   }
+}
+
+function showToast(msg, ttl = 5000) {
+  const div = document.createElement("div");
+  div.className = "toast";
+  div.textContent = msg;
+  $("toasts").appendChild(div);
+  setTimeout(() => div.remove(), ttl);
+}
+
+function showFatal(err) {
+  $("setup").classList.add("hidden");
+  $("app").classList.add("hidden");
+  $("fatal").classList.remove("hidden");
+  $("fatal-msg").textContent = err && err.message ? err.message : String(err);
+}
+
+// Two-click guard for destructive buttons: the first click arms the button for
+// 3 s, the second runs the action. (Native confirm() is unreliable in webviews.)
+function confirmThen(btn, armedText, action) {
+  if (btn.dataset.armed !== undefined) {
+    clearTimeout(+btn.dataset.timer);
+    disarm(btn);
+    action();
+    return;
+  }
+  btn.dataset.armed = btn.textContent;
+  btn.dataset.timer = setTimeout(() => disarm(btn), 3000);
+  btn.classList.add("armed");
+  btn.textContent = armedText;
+}
+
+function disarm(btn) {
+  if (btn.dataset.armed !== undefined) btn.textContent = btn.dataset.armed;
+  delete btn.dataset.armed;
+  delete btn.dataset.timer;
+  btn.classList.remove("armed");
 }
 
 function fmtTs(seconds) {
@@ -292,6 +441,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // --------------------------------------------------------------------------
 async function main() {
   await resolveApiBase();
+  $("setup-retry").addEventListener("click", retrySetup);
   await waitForSetup();
   $("setup").classList.add("hidden");
   $("app").classList.remove("hidden");
@@ -300,4 +450,4 @@ async function main() {
   await refreshSpeakers();
 }
 
-main();
+main().catch(showFatal);

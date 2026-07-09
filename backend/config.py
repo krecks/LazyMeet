@@ -49,6 +49,21 @@ LLM_MODEL = MODELS_DIR / "summarizer.gguf"
 # Cosine-similarity threshold for matching a diarized speaker to a saved voice.
 SPEAKER_THRESHOLD = float(os.environ.get("LAZYMEET_SPEAKER_THRESHOLD", "0.5"))
 NUM_THREADS = int(os.environ.get("LAZYMEET_NUM_THREADS", "4"))
+
+# Diarization clustering. DIAR_NUM_SPEAKERS > 0 forces an exact speaker count;
+# -1 means "auto", in which case DIAR_THRESHOLD decides (higher => fewer
+# speakers). Default 0.7 avoids the over-segmentation that 0.5 produced.
+DIAR_NUM_SPEAKERS = int(os.environ.get("LAZYMEET_NUM_SPEAKERS", "-1"))
+DIAR_THRESHOLD = float(os.environ.get("LAZYMEET_DIAR_THRESHOLD", "0.7"))
+
+# Summarization LLM context window. The transcript is chunked to fit, but a
+# larger window means fewer chunks (and faster, more coherent summaries).
+LLM_N_CTX = int(os.environ.get("LAZYMEET_LLM_N_CTX", "16384"))
+
+# Raw recordings are deleted once a meeting is fully processed (privacy + disk).
+# ``LAZYMEET_KEEP_AUDIO=1`` keeps them, e.g. to re-run a pipeline while debugging.
+KEEP_AUDIO = os.environ.get("LAZYMEET_KEEP_AUDIO") == "1"
+
 # Whisper-equivalent embedding dimension used by the deterministic fake embedder.
 FAKE_EMBED_DIM = 192
 

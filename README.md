@@ -61,7 +61,9 @@ speakers** panel.
 Audio, transcripts, summaries, and voiceprints never leave your machine. They
 live in the OS app-data directory (`~/Library/Application Support/LazyMeet`,
 `%APPDATA%\LazyMeet`, or `~/.local/share/LazyMeet`). After the one-time model
-download the app needs no network at all.
+download the app needs no network at all. The uploaded recording itself is
+deleted as soon as processing finishes — only the transcript and summary are
+kept (set `LAZYMEET_KEEP_AUDIO=1` to keep recordings).
 
 ## Development / building from source
 
@@ -98,6 +100,15 @@ LAZYMEET_FAKE=1 python -m backend.main
 Without `LAZYMEET_FAKE`, the backend downloads real models on first run and does
 real transcription (CPU works; a GPU is faster).
 
+### Tests
+
+Smoke tests exercise the whole API over the stubbed (`LAZYMEET_FAKE`) pipeline:
+
+```bash
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+python -m pytest tests/
+```
+
 ### Cross-platform builds
 
 `.github/workflows/build.yml` builds installers for macOS, Windows, and Linux via
@@ -114,4 +125,5 @@ Environment variables (all optional):
 | `LAZYMEET_SPEAKER_THRESHOLD` | `0.5` | Voice-match strictness (cosine) |
 | `LAZYMEET_NUM_THREADS` | `4` | ONNX/LLM CPU threads |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
+| `LAZYMEET_KEEP_AUDIO` | unset | `1` = keep uploaded recordings after processing |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |

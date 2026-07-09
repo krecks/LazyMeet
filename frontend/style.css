@@ -35,9 +35,11 @@ header p { margin: .2rem 0 0; font-size: .85rem; }
   padding: 1.25rem;
 }
 
-/* Setup screen */
-#setup { display: flex; align-items: center; justify-content: center; }
-#setup .card { width: min(520px, 90vw); }
+/* Setup + fatal screens */
+#setup, #fatal { display: flex; align-items: center; justify-content: center; }
+#setup .card, #fatal .card { width: min(520px, 90vw); }
+#setup-retry { margin-top: .5rem; }
+#fatal-msg { white-space: pre-wrap; word-break: break-word; font-size: .8rem; }
 .setup-item { display: flex; flex-direction: column; gap: .25rem; margin: .75rem 0; }
 .setup-item .bar { height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
 .setup-item .bar > span { display: block; height: 100%; background: var(--accent); width: 0; }
@@ -60,15 +62,24 @@ header p { margin: .2rem 0 0; font-size: .85rem; }
   transition: border-color .15s, background .15s;
 }
 .dropzone.drag { border-color: var(--accent); background: var(--panel-2); }
+.dropzone:focus-visible { border-color: var(--accent); outline: none; }
+.dropzone.uploading { border-color: var(--accent); cursor: progress; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .5; } }
+
+.speakers-field { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .6rem; font-size: .85rem; }
+.speakers-field select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .4rem; }
 
 .meeting-list, .speaker-list { list-style: none; margin: 0; padding: 0; }
-.meeting-list li {
+.meeting-list button {
+  width: 100%; background: none; border: none; color: var(--text); font: inherit;
+  font-weight: 400; text-align: left;
   padding: .55rem .6rem; border-radius: 8px; cursor: pointer; font-size: .9rem;
-  display: flex; justify-content: space-between; gap: .5rem;
+  display: flex; justify-content: space-between; align-items: center; gap: .5rem;
 }
-.meeting-list li:hover { background: var(--panel-2); }
-.meeting-list li.active { background: var(--panel-2); outline: 1px solid var(--accent); }
+.meeting-list button:hover { background: var(--panel-2); }
+.meeting-list button.active { background: var(--panel-2); outline: 1px solid var(--accent); }
 .meeting-list .status { font-size: .72rem; color: var(--muted); }
+.list-empty { padding: .45rem .6rem; font-size: .85rem; }
 
 .speaker-list li {
   display: flex; justify-content: space-between; align-items: center;
@@ -84,6 +95,8 @@ button {
   padding: .45rem .8rem; font-weight: 600; cursor: pointer;
 }
 button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+button.armed { background: var(--danger); color: #0b0d10; }
+button.danger.armed { border-color: var(--danger); }
 
 .summary { margin-bottom: 1.5rem; }
 .summary h3 { margin: 1rem 0 .35rem; font-size: .9rem; color: var(--accent); }
@@ -110,3 +123,19 @@ button.danger { background: transparent; color: var(--danger); border: 1px solid
 .bubble { padding: .6rem .8rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); }
 .bubble .meta { font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
 .bubble .who { font-weight: 600; }
+
+/* Error surfacing */
+.banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  background: var(--danger); color: #0b0d10; text-align: center;
+  padding: .4rem .8rem; font-size: .85rem; font-weight: 600;
+}
+#toasts {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 60;
+  display: flex; flex-direction: column; gap: .5rem; max-width: 340px;
+}
+.toast {
+  background: var(--panel-2); border: 1px solid var(--danger); color: var(--text);
+  border-radius: 10px; padding: .6rem .8rem; font-size: .85rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .4);
+}

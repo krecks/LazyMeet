@@ -39,7 +39,10 @@ fn main() {
             let sidecar = app
                 .shell()
                 .sidecar("lazymeet-backend")
-                .expect("failed to create sidecar command");
+                .expect("failed to create sidecar command")
+                // The sidecar watches this PID and tears its own process tree
+                // (server + worker subprocesses) down when we exit.
+                .env("LAZYMEET_PARENT_PID", std::process::id().to_string());
             let (mut rx, child) = sidecar.spawn().expect("failed to spawn backend sidecar");
 
             // Keep the child handle so it isn't dropped (and so we can kill it).

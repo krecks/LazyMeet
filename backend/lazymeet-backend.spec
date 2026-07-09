@@ -15,7 +15,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))
 ENTRY = os.path.join(ROOT, "scripts", "sidecar_entry.py")
 
 datas, binaries, hiddenimports = [], [], []
-for pkg in ("sherpa_onnx", "llama_cpp", "imageio_ffmpeg", "soundfile"):
+for pkg in ("sherpa_onnx", "sherpa_onnx_core", "llama_cpp", "imageio_ffmpeg", "soundfile"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

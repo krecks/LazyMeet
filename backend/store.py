@@ -2,8 +2,10 @@
 
 There is no database: each meeting is a single JSON file under ``meetings/`` and
 the speaker library is one ``speakers.json``. Writes are atomic (temp file +
-``os.replace``) and guarded by a re-entrant lock so the request handlers and the
-background worker never see a half-written file.
+``os.replace``) so readers never see a half-written file, and read-modify-writes
+are guarded by an in-process lock *and* a per-file lock file — the pipeline
+worker runs in a separate OS process, where a ``threading`` lock alone would not
+prevent lost updates (e.g. a speaker rename landing while the worker writes).
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +25,42 @@ from typing import Any, Optional
 from . import config
 
 _lock = threading.RLock()
+
+
+@contextmanager
+def _os_lock(path: Path, timeout: float = 10.0, stale: float = 30.0):
+    """Cross-process mutual exclusion for one file's read-modify-write.
+
+    Uses an ``O_CREAT | O_EXCL`` lock file, which is portable (``fcntl`` is
+    POSIX-only). Lock files older than ``stale`` seconds are treated as left
+    behind by a crashed holder and broken. Best-effort by design: on timeout we
+    proceed unlocked rather than deadlock the UI.
+    """
+    lock = path.with_suffix(path.suffix + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    acquired = False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > stale:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                continue
+            time.sleep(0.05)
+            continue
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        acquired = True
+        break
+    try:
+        yield
+    finally:
+        if acquired:
+            lock.unlink(missing_ok=True)
 
 
 def _now() -> str:
@@ -47,7 +87,7 @@ def _meeting_path(meeting_id: str) -> Path:
 # --------------------------------------------------------------------------- #
 # Meetings
 # --------------------------------------------------------------------------- #
-def create_meeting(filename: str) -> dict:
+def create_meeting(filename: str, num_speakers: int = -1) -> dict:
     meeting_id = uuid.uuid4().hex
     record = {
         "id": meeting_id,
@@ -55,6 +95,7 @@ def create_meeting(filename: str) -> dict:
         "created_at": _now(),
         "status": "queued",
         "error": None,
+        "num_speakers": num_speakers,  # -1 = auto-detect
         "speakers": {},      # diarized id -> display name
         "recognized": [],    # diarized ids auto-matched from the speaker library
         "segments": [],      # [{start, end, speaker, text}]
@@ -76,16 +117,56 @@ def get_meeting(meeting_id: str) -> Optional[dict]:
     if not path.exists():
         return None
     with _lock:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
 
 
-def update_meeting(meeting_id: str, **changes: Any) -> Optional[dict]:
-    with _lock:
+def update_meeting(
+    meeting_id: str, *, preserve_speakers: bool = False, **changes: Any
+) -> Optional[dict]:
+    """Re-read, apply ``changes``, and write back under both locks.
+
+    ``preserve_speakers=True`` makes existing ``speakers`` entries win over the
+    passed ones — used by the worker so its diarization defaults never overwrite
+    names the user set in the meantime.
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
         record = get_meeting(meeting_id)
         if record is None:
             return None
+        if preserve_speakers and "speakers" in changes:
+            changes = dict(changes)
+            changes["speakers"] = {**changes["speakers"], **record.get("speakers", {})}
         record.update(changes)
+        _atomic_write(_meeting_path(meeting_id), record)
+        return record
+
+
+def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
+    """Apply user renames and enrol those voices in the speaker library.
+
+    The whole read-modify-write happens under the locks so concurrent renames
+    (or a worker write) can't drop each other's names.
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
+        record = get_meeting(meeting_id)
+        if record is None:
+            return None
+        speakers = dict(record.get("speakers", {}))
+        voiceprints = record.get("voiceprints", {})
+        for diarized_id, new_name in names.items():
+            new_name = new_name.strip()
+            if not new_name:
+                continue
+            speakers[diarized_id] = new_name
+            # Enrol this voice so the name follows it into future recordings.
+            emb = voiceprints.get(diarized_id)
+            if emb:
+                upsert_speaker(new_name, emb)
+        record["speakers"] = speakers
         _atomic_write(_meeting_path(meeting_id), record)
         return record
 
@@ -112,7 +193,7 @@ def list_meetings() -> list[dict]:
 
 
 def delete_meeting(meeting_id: str) -> bool:
-    with _lock:
+    with _lock, _os_lock(_meeting_path(meeting_id)):
         path = _meeting_path(meeting_id)
         existed = path.exists()
         if existed:
@@ -124,8 +205,8 @@ def delete_meeting(meeting_id: str) -> bool:
 
 
 def public_meeting(record: dict) -> dict:
-    """Strip internal fields (voiceprints) before returning to the client."""
-    return {k: v for k, v in record.items() if k != "voiceprints"}
+    """Strip internal fields (voiceprints, worker pid) before returning to the client."""
+    return {k: v for k, v in record.items() if k not in ("voiceprints", "worker_pid")}
 
 
 # --------------------------------------------------------------------------- #

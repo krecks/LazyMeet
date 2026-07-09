@@ -14,6 +14,17 @@
       <p class="muted">Setting up local AI models (one-time, no account needed)…</p>
       <div id="setup-items"></div>
       <p id="setup-error" class="error hidden"></p>
+      <button id="setup-retry" class="hidden">Retry download</button>
+    </div>
+  </section>
+
+  <!-- Shown when the backend can't be reached at all -->
+  <section id="fatal" class="screen hidden">
+    <div class="card">
+      <h1>LazyMeet</h1>
+      <p class="error">LazyMeet couldn't start.</p>
+      <pre id="fatal-msg" class="muted"></pre>
+      <p class="muted">Try restarting the app. If this keeps happening, check the logs.</p>
     </div>
   </section>
 
@@ -26,11 +37,26 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <div id="dropzone" class="dropzone">
+        <div id="dropzone" class="dropzone" role="button" tabindex="0"
+             aria-label="Upload a recording">
           <strong>Drop a recording here</strong>
           <span class="muted">or click to choose a video file</span>
           <input id="file-input" type="file" accept="video/*,audio/*" hidden />
         </div>
+        <label class="speakers-field">
+          <span class="muted">Speakers</span>
+          <select id="num-speakers">
+            <option value="-1">Auto-detect</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
         <h2>Meetings</h2>
         <ul id="meeting-list" class="meeting-list"></ul>
 
@@ -41,7 +67,7 @@
       <main class="content">
         <div id="empty" class="muted center">Select or upload a meeting to begin.</div>
 
-        <div id="processing" class="hidden card">
+        <div id="processing" class="hidden card" aria-live="polite">
           <h2 id="proc-title">Processing…</h2>
           <div class="stages" id="stages"></div>
         </div>
@@ -69,6 +95,11 @@
       </main>
     </div>
   </section>
+
+  <div id="conn-banner" class="banner hidden" role="alert">
+    Backend not responding — retrying…
+  </div>
+  <div id="toasts" aria-live="polite"></div>
 
   <script src="app.js"></script>
 </body>
