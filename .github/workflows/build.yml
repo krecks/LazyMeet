@@ -80,6 +80,14 @@ jobs:
         shell: pwsh
         run: DISM /Online /Add-Capability /CapabilityName:WMIC~~~~
 
+      # llama.cpp ignores the cmake crate's static_crt knob (its cmake
+      # predates policy CMP0091) and stays on /MD while sherpa-onnx is /MT.
+      # A toolchain file forces /MT everywhere (see the file for details).
+      - name: Force static MSVC runtime for cmake deps (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: echo "CMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/scripts/windows-static-crt.cmake" >> $GITHUB_ENV
+
       - name: Fetch bundled ffmpeg
         shell: bash
         # On macOS fetch both architectures: a Rosetta tauri-cli resolves the
