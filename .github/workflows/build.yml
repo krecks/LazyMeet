@@ -1,13 +1,13 @@
 name: build
 
-# Builds the cross-platform desktop installers. The backend is pure Rust
-# (lazymeet-core) compiled into the Tauri binary — sherpa-onnx and llama.cpp
-# build from source (cmake), ffmpeg is fetched as a pinned static binary and
-# bundled as a Tauri externalBin. (Tauri cannot cross-compile, hence the
-# matrix.)
+# Pushes to main run the (fast, model-free) core test suite only. The
+# expensive installer builds — sherpa-onnx and llama.cpp compile from source
+# (cmake), ffmpeg is fetched as a pinned static binary and bundled as a Tauri
+# externalBin — run on version tags (v*) and manual dispatch, across a
+# three-OS matrix (Tauri cannot cross-compile).
 #
-# Pushing a version tag (v*) additionally publishes a GitHub Release with the
-# installers of all three platforms attached as downloadable assets.
+# A version tag additionally publishes a GitHub Release with the installers
+# of all three platforms attached as downloadable assets.
 
 on:
   push:
@@ -28,6 +28,9 @@ jobs:
         run: cargo test -p lazymeet-core --no-default-features
 
   build:
+    # Installers only for version tags (and manual runs) — plain pushes to
+    # main stop after the test job.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     strategy:
       fail-fast: false
