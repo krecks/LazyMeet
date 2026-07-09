@@ -1,6 +1,8 @@
-# PyInstaller spec for the LazyMeet backend sidecar.
-# Freezes the FastAPI app + AI stack into a single self-contained executable that
-# Tauri ships as a sidecar. Build via: python scripts/build_sidecar.py
+# PyInstaller spec for the LazyMeet backend.
+# Freezes the FastAPI app + AI stack in onedir mode: a onefile binary would
+# re-extract ~70 MB to a temp dir on every launch, adding many seconds before
+# the app window shows anything. The directory is shipped as a Tauri bundle
+# resource. Build via: python scripts/build_sidecar.py
 #
 # collect_all pulls in the native libraries and data files that sherpa-onnx,
 # llama-cpp-python, imageio-ffmpeg and soundfile load at runtime.
@@ -50,9 +52,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="lazymeet-backend",
     debug=False,
     bootloader_ignore_signals=False,
@@ -63,4 +64,13 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="lazymeet-backend",
 )

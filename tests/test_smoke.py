@@ -43,8 +43,12 @@ def test_full_lifecycle(client):
     assert res.json()["speakers"][speaker_id] == "Alice"
     assert "Alice" in client.get("/api/speakers").json()
 
+    res = client.patch(f"/api/meetings/{meeting_id}", json={"title": "Daily Standup"})
+    assert res.status_code == 200
+
     res = client.get(f"/api/meetings/{meeting_id}/export")
     assert res.status_code == 200
+    assert res.text.startswith("# Daily Standup")
     assert "Alice" in res.text
 
     assert client.delete(f"/api/meetings/{meeting_id}").status_code == 200

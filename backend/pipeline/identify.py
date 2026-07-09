@@ -28,6 +28,7 @@ def _load_extractor():
     cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
         model=str(config.DIAR_EMB_MODEL),
         num_threads=config.NUM_THREADS,
+        provider=config.onnx_provider(),
     )
     _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
     return _extractor
@@ -82,6 +83,82 @@ def _real_voiceprints(wav_path: Path, turns: list[dict]) -> dict[str, list[float
         if embs:
             voiceprints[spk] = np.mean(embs, axis=0).tolist()
     return voiceprints
+
+
+_TINY_MERGE_FLOOR = 0.4   # a short speaker folds into a main speaker above this
+_NOISE_MAX_SECONDS = 5.0  # below the floor and shorter than this => dropped as noise
+
+
+def consolidate_speakers(
+    turns: list[dict], voiceprints: dict[str, list[float]]
+) -> tuple[list[dict], dict[str, list[float]]]:
+    """Collapse over-split diarization labels into real speakers.
+
+    Auto clustering works on short, noisy per-segment embeddings and routinely
+    splits one voice into many labels. The averaged long-window voiceprints are
+    far more reliable, so: (1) greedily merge labels whose voiceprints match at
+    ``SPEAKER_MERGE_THRESHOLD``, folding the shorter speaker into the longer one
+    (the survivor keeps its own voiceprint, which prevents chain-merging two
+    real speakers); (2) fold remaining sub-``MIN_SPEAKER_SECONDS`` speakers into
+    the closest main speaker; (3) drop tiny fragments that resemble no one
+    (laughs, music, cross-talk) — their transcript segments reattach to the
+    nearest surviving turn in ``merge.assign_speakers``.
+    """
+    dur: dict[str, float] = {}
+    for t in turns:
+        dur[t["speaker"]] = dur.get(t["speaker"], 0.0) + (t["end"] - t["start"])
+
+    vp = dict(voiceprints)
+    alias: dict[str, str] = {}  # folded label -> surviving label
+
+    def fold(loser: str, winner: str) -> None:
+        for k, v in alias.items():
+            if v == loser:
+                alias[k] = winner
+        alias[loser] = winner
+        dur[winner] = dur.get(winner, 0.0) + dur.pop(loser, 0.0)
+        vp.pop(loser, None)
+
+    # Stage 1: merge matching voiceprints, highest similarity first. Survivors
+    # keep their voiceprints, so pair scores never change and one sorted pass
+    # over the precomputed pairs is exact greedy merging.
+    spks = sorted(vp)
+    pairs = sorted(
+        ((cosine(vp[a], vp[b]), a, b) for i, a in enumerate(spks) for b in spks[i + 1 :]),
+        reverse=True,
+    )
+    for score, a, b in pairs:
+        if score < config.SPEAKER_MERGE_THRESHOLD:
+            break
+        if a in alias or b in alias:
+            continue
+        loser, winner = (a, b) if dur.get(a, 0.0) < dur.get(b, 0.0) else (b, a)
+        fold(loser, winner)
+
+    # Stages 2+3: deal with what's left below MIN_SPEAKER_SECONDS. Without any
+    # main speaker (e.g. a very short clip) everything is kept as-is.
+    cores = [s for s in vp if dur.get(s, 0.0) >= config.MIN_SPEAKER_SECONDS]
+    dropped: set[str] = set()
+    if cores:
+        for spk in [s for s in vp if s not in cores]:
+            best = max(cores, key=lambda c: cosine(vp[spk], vp[c]))
+            if cosine(vp[spk], vp[best]) >= _TINY_MERGE_FLOOR:
+                fold(spk, best)
+            elif dur.get(spk, 0.0) < _NOISE_MAX_SECONDS:
+                dropped.add(spk)
+                del vp[spk]
+        # Labels with no usable voiceprint at all can't be compared to anyone.
+        for spk in {t["speaker"] for t in turns} - set(vp) - set(alias):
+            if dur.get(spk, 0.0) < _NOISE_MAX_SECONDS:
+                dropped.add(spk)
+
+    out = []
+    for t in turns:
+        spk = alias.get(t["speaker"], t["speaker"])
+        if spk in dropped:
+            continue
+        out.append({**t, "speaker": spk})
+    return out, vp
 
 
 def match_speakers(voiceprints: dict[str, list[float]]) -> tuple[dict[str, str], list[str]]:

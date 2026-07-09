@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 import re
 
-from .. import config
+from .. import config, models_setup
 
 _llm = None
+_llm_path = None
 
 _SYSTEM = (
     "You are a meeting assistant. Given a transcript with speaker labels, produce "
@@ -29,23 +30,60 @@ _NOTES_SYSTEM = (
     "Return plain text bullets only."
 )
 
+LANGUAGE_NAMES = {
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ru": "Russian",
+    "uk": "Ukrainian",
+    "tr": "Turkish",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+}
+
+
+def _lang_instruction() -> str:
+    code = config.SUMMARY_LANGUAGE
+    if code and code != "auto":
+        return f" Write everything in {LANGUAGE_NAMES.get(code, code)}."
+    return " Write in the same language the meeting was held in."
+
 # Tokens reserved for the model's response plus prompt scaffolding.
 _RESERVE = 2560
 
 
 def _load_llm():
-    global _llm
-    if _llm is not None:
+    global _llm, _llm_path
+    path = str(models_setup.resolve_llm(config.SUMMARY_MODEL))
+    if _llm is not None and _llm_path == path:
         return _llm
+    _llm_path = path
 
+    import llama_cpp
     from llama_cpp import Llama
 
-    _llm = Llama(
-        model_path=str(config.LLM_MODEL),
+    kwargs = dict(
+        model_path=path,
         n_ctx=config.LLM_N_CTX,
         n_threads=config.NUM_THREADS,
         verbose=False,
     )
+    # Offload all layers to the GPU (Metal on Apple Silicon) when the wheel was
+    # built with GPU support; if that init still fails (driver/VRAM issues),
+    # fall back to a CPU-only load rather than failing the meeting.
+    if config.USE_GPU and llama_cpp.llama_supports_gpu_offload():
+        try:
+            _llm = Llama(n_gpu_layers=-1, **kwargs)
+            return _llm
+        except Exception:
+            pass
+    _llm = Llama(**kwargs)
     return _llm
 
 
@@ -108,20 +146,20 @@ def summarize(segments: list[dict], speakers: dict[str, str]) -> dict:
 def _chunk_notes(llm, chunk: str) -> str:
     resp = llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": _NOTES_SYSTEM},
+            {"role": "system", "content": _NOTES_SYSTEM + _lang_instruction()},
             {"role": "user", "content": chunk},
         ],
         temperature=0.2,
         max_tokens=512,
     )
-    return resp["choices"][0]["message"]["content"].strip()
+    return _strip_thinking(resp["choices"][0]["message"]["content"])
 
 
 def _final_summary(llm, body: str, from_notes: bool = False) -> dict:
     label = "Meeting notes" if from_notes else "Transcript"
     resp = llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": _SYSTEM},
+            {"role": "system", "content": _SYSTEM + _lang_instruction()},
             {"role": "user", "content": f"{label}:\n{body}"},
         ],
         temperature=0.2,
@@ -130,7 +168,13 @@ def _final_summary(llm, body: str, from_notes: bool = False) -> dict:
     return _parse(resp["choices"][0]["message"]["content"])
 
 
+def _strip_thinking(content: str) -> str:
+    """Drop <think>…</think> blocks some Qwen variants emit before the answer."""
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+
 def _parse(content: str) -> dict:
+    content = _strip_thinking(content)
     data = None
     try:
         data = json.loads(content)

@@ -24,10 +24,12 @@ def _build_diarizer(num_speakers: int):
                 model=str(config.DIAR_SEG_MODEL)
             ),
             num_threads=config.NUM_THREADS,
+            provider=config.onnx_provider(),
         ),
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=str(config.DIAR_EMB_MODEL),
             num_threads=config.NUM_THREADS,
+            provider=config.onnx_provider(),
         ),
         # num_clusters>0 forces an exact speaker count; -1 lets `threshold`
         # decide (higher threshold => fewer speakers). min_duration_* smooth out

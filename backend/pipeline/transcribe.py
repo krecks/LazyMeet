@@ -10,32 +10,53 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from .. import config
+from .. import config, models_setup
 
 _recognizer = None
 _vad = None
+_loaded_key = None  # (model paths kind, language) the cached recognizer was built for
 
 
 def _load_models():
-    global _recognizer, _vad
-    if _recognizer is not None:
+    global _recognizer, _vad, _loaded_key
+
+    spec = models_setup.resolve_asr(config.ASR_MODEL)
+    language = "" if config.ASR_LANGUAGE == "auto" else config.ASR_LANGUAGE
+    key = (str(spec["encoder"]), language)
+    if _recognizer is not None and _loaded_key == key:
         return _recognizer, _vad
 
     import sherpa_onnx
 
-    model_dir = config.ASR_MODEL_DIR
-    _recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-        encoder=str(model_dir / "encoder.onnx"),
-        decoder=str(model_dir / "decoder.onnx"),
-        joiner=str(model_dir / "joiner.onnx"),
-        tokens=str(model_dir / "tokens.txt"),
-        num_threads=config.NUM_THREADS,
-        model_type="nemo_transducer",
-    )
-    vad_config = sherpa_onnx.VadModelConfig()
-    vad_config.silero_vad.model = str(config.VAD_MODEL)
-    vad_config.sample_rate = 16000
-    _vad = sherpa_onnx.VoiceActivityDetector(vad_config, buffer_size_in_seconds=100)
+    if spec["kind"] == "whisper":
+        _recognizer = sherpa_onnx.OfflineRecognizer.from_whisper(
+            encoder=str(spec["encoder"]),
+            decoder=str(spec["decoder"]),
+            tokens=str(spec["tokens"]),
+            language=language,  # "" lets Whisper detect the language itself
+            task="transcribe",
+            num_threads=config.NUM_THREADS,
+            provider=config.onnx_provider(),
+        )
+    else:
+        # Parakeet (nemo_transducer) — multilingual, always auto-detects.
+        _recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=str(spec["encoder"]),
+            decoder=str(spec["decoder"]),
+            joiner=str(spec["joiner"]),
+            tokens=str(spec["tokens"]),
+            num_threads=config.NUM_THREADS,
+            provider=config.onnx_provider(),
+            model_type="nemo_transducer",
+        )
+    _loaded_key = key
+
+    if _vad is None:
+        vad_config = sherpa_onnx.VadModelConfig()
+        vad_config.silero_vad.model = str(config.VAD_MODEL)
+        vad_config.sample_rate = 16000
+        vad_config.provider = config.onnx_provider()
+        _vad = sherpa_onnx.VoiceActivityDetector(vad_config, buffer_size_in_seconds=100)
     return _recognizer, _vad
 
 

@@ -27,6 +27,18 @@ from . import config
 _lock = threading.RLock()
 
 
+class StatusConflict(Exception):
+    """A mutation was rejected because the meeting is in the wrong status."""
+
+    def __init__(self, status: Optional[str]):
+        super().__init__(f"meeting status is {status!r}")
+        self.status = status
+
+
+class UnknownSpeaker(ValueError):
+    """A segment was assigned a speaker id the meeting doesn't know."""
+
+
 @contextmanager
 def _os_lock(path: Path, timeout: float = 10.0, stale: float = 30.0):
     """Cross-process mutual exclusion for one file's read-modify-write.
@@ -92,6 +104,7 @@ def create_meeting(filename: str, num_speakers: int = -1) -> dict:
     record = {
         "id": meeting_id,
         "filename": filename,
+        "title": filename,  # user-editable; filename stays the immutable original
         "created_at": _now(),
         "status": "queued",
         "error": None,
@@ -145,6 +158,65 @@ def update_meeting(
         return record
 
 
+def patch_meeting(
+    meeting_id: str,
+    *,
+    allowed_statuses: Optional[tuple[str, ...]] = None,
+    **changes: Any,
+) -> Optional[dict]:
+    """User-initiated edit: locked read-modify-write with a status guard.
+
+    The guard must run *inside* the locks — a route-level status check would
+    race the worker's terminal write (e.g. a summary edit landing just as the
+    worker writes its own summary would survive it and then be clobbered, or
+    worse, clobber it).
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
+        record = get_meeting(meeting_id)
+        if record is None:
+            return None
+        if allowed_statuses is not None and record.get("status") not in allowed_statuses:
+            raise StatusConflict(record.get("status"))
+        record.update(changes)
+        _atomic_write(_meeting_path(meeting_id), record)
+        return record
+
+
+def update_segment(
+    meeting_id: str,
+    index: int,
+    *,
+    text: Optional[str] = None,
+    speaker: Optional[str] = None,
+) -> Optional[dict]:
+    """Edit one transcript segment in place, under both locks.
+
+    Must own the whole read-modify-write: composing this from
+    ``update_meeting(segments=...)`` at the route would drop concurrent edits
+    to other segments. Reassigning a speaker deliberately leaves ``speakers``
+    and ``voiceprints`` untouched — an id whose last segment moves away simply
+    stops appearing in the legend (which derives from segments); deleting it
+    from the map would break ``recognized`` and rename history.
+    """
+    with _lock, _os_lock(_meeting_path(meeting_id)):
+        record = get_meeting(meeting_id)
+        if record is None:
+            return None
+        if record.get("status") != "done":
+            raise StatusConflict(record.get("status"))
+        segments = record.get("segments", [])
+        if not 0 <= index < len(segments):
+            raise IndexError(index)
+        if speaker is not None:
+            if speaker not in record.get("speakers", {}):
+                raise UnknownSpeaker(speaker)
+            segments[index]["speaker"] = speaker
+        if text is not None:
+            segments[index]["text"] = text
+        _atomic_write(_meeting_path(meeting_id), record)
+        return record
+
+
 def merge_speaker_names(meeting_id: str, names: dict) -> Optional[dict]:
     """Apply user renames and enrol those voices in the speaker library.
 
@@ -184,6 +256,8 @@ def list_meetings() -> list[dict]:
                 {
                     "id": rec.get("id"),
                     "filename": rec.get("filename"),
+                    # fallback covers records created before titles existed
+                    "title": rec.get("title") or rec.get("filename"),
                     "status": rec.get("status"),
                     "created_at": rec.get("created_at"),
                 }
@@ -206,7 +280,10 @@ def delete_meeting(meeting_id: str) -> bool:
 
 def public_meeting(record: dict) -> dict:
     """Strip internal fields (voiceprints, worker pid) before returning to the client."""
-    return {k: v for k, v in record.items() if k not in ("voiceprints", "worker_pid")}
+    out = {k: v for k, v in record.items() if k not in ("voiceprints", "worker_pid")}
+    # fallback covers records created before titles existed (no disk migration)
+    out["title"] = record.get("title") or record.get("filename") or "Meeting"
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +309,23 @@ def upsert_speaker(name: str, embedding: list[float]) -> None:
         lib = load_speaker_library()
         lib[name] = {"embedding": list(embedding), "updated_at": _now()}
         _atomic_write(config.SPEAKERS_FILE, lib)
+
+
+def rename_speaker(old: str, new: str) -> str:
+    """Move a voiceprint to a new name, keeping the embedding.
+
+    Only affects future recognition — meetings keep the names they were saved
+    with. Returns "ok" | "missing" | "exists".
+    """
+    with _lock:
+        lib = load_speaker_library()
+        if old not in lib:
+            return "missing"
+        if new in lib and new != old:
+            return "exists"
+        lib[new] = lib.pop(old)
+        _atomic_write(config.SPEAKERS_FILE, lib)
+        return "ok"
 
 
 def delete_speaker(name: str) -> bool:

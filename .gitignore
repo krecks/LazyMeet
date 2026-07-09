@@ -7,9 +7,11 @@ venv/
 build/
 dist/
 *.spec.bak
+.pytest_cache/
 
-# PyInstaller sidecar output (built per-platform in CI / locally)
+# PyInstaller backend output (built per-platform in CI / locally)
 src-tauri/binaries/lazymeet-backend-*
+src-tauri/binaries/backend/
 
 # Rust / Tauri
 src-tauri/target/
@@ -19,6 +21,11 @@ src-tauri/gen/
 data/
 models/
 *.wav
+
+# Binary build/model artifacts, wherever they end up
+*.dmg
+*.onnx
+*.gguf
 
 # OS / editor
 .DS_Store

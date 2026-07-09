@@ -7,44 +7,112 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- Inline icon sprite — the app is fully offline, no external assets. -->
+  <svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="i-mic" viewBox="0 0 24 24">
+        <rect x="9" y="2.5" width="6" height="11.5" rx="3" />
+        <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3.5" />
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="12" height="12" rx="2" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" />
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+        <path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h5" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" /></symbol>
+    </defs>
+  </svg>
+
+  <!-- Boot splash: visible from the first frame, hidden once the backend is up -->
+  <section id="boot" class="screen center-screen">
+    <div class="hero-card">
+      <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-mic" /></svg></span>
+      <h1 class="wordmark">LazyMeet</h1>
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="muted" role="status">Starting…</p>
+      <p class="muted small">The first launch can take a little longer.</p>
+    </div>
+  </section>
+
   <!-- First-run model download screen -->
-  <section id="setup" class="screen hidden">
-    <div class="card">
-      <h1>LazyMeet</h1>
-      <p class="muted">Setting up local AI models (one-time, no account needed)…</p>
+  <section id="setup" class="screen center-screen hidden">
+    <div class="hero-card">
+      <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-mic" /></svg></span>
+      <h1 class="wordmark">LazyMeet</h1>
+      <p class="muted">Preparing the on-device models — a one-time download.<br />
+        After this, everything stays on this computer.</p>
       <div id="setup-items"></div>
       <p id="setup-error" class="error hidden"></p>
-      <button id="setup-retry" class="hidden">Retry download</button>
+      <button id="setup-retry" class="btn hidden">Retry download</button>
+      <button id="setup-continue" class="btn ghost">Use the app while it downloads</button>
+      <p class="muted small">Recordings you add in the meantime are queued and start
+        processing as soon as the download finishes.</p>
     </div>
   </section>
 
   <!-- Shown when the backend can't be reached at all -->
-  <section id="fatal" class="screen hidden">
-    <div class="card">
-      <h1>LazyMeet</h1>
+  <section id="fatal" class="screen center-screen hidden">
+    <div class="hero-card">
+      <h1 class="wordmark">LazyMeet</h1>
       <p class="error">LazyMeet couldn't start.</p>
       <pre id="fatal-msg" class="muted"></pre>
-      <p class="muted">Try restarting the app. If this keeps happening, check the logs.</p>
+      <p class="muted small">Try restarting the app. If this keeps happening, check the logs.</p>
     </div>
   </section>
 
   <!-- Main app -->
   <section id="app" class="screen hidden">
-    <header>
-      <h1>LazyMeet</h1>
-      <p class="muted">Private, local meeting transcription &amp; summaries</p>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-mic" /></svg></span>
+        <div>
+          <h1 class="wordmark">LazyMeet</h1>
+          <p class="brand-tag">Private, on-device meeting notes</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="dl-pill" class="dl-pill hidden" title="Models are downloading — click to retry a failed download">
+          Downloading models…
+        </button>
+        <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Open settings">
+          <svg class="icon"><use href="#i-gear" /></svg>
+        </button>
+      </div>
     </header>
 
     <div class="layout">
       <aside class="sidebar">
-        <div id="dropzone" class="dropzone" role="button" tabindex="0"
-             aria-label="Upload a recording">
+        <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Upload a recording">
+          <svg class="icon dropzone-icon" aria-hidden="true"><use href="#i-download" /></svg>
           <strong>Drop a recording here</strong>
-          <span class="muted">or click to choose a video file</span>
+          <span class="muted small">or click to choose an audio or video file</span>
           <input id="file-input" type="file" accept="video/*,audio/*" hidden />
         </div>
         <label class="speakers-field">
-          <span class="muted">Speakers</span>
+          <span class="field-label">Speakers</span>
           <select id="num-speakers">
             <option value="-1">Auto-detect</option>
             <option value="1">1</option>
@@ -57,43 +125,157 @@
             <option value="8">8</option>
           </select>
         </label>
-        <h2>Meetings</h2>
-        <ul id="meeting-list" class="meeting-list"></ul>
 
-        <h2>Known speakers</h2>
-        <ul id="speaker-list" class="speaker-list"></ul>
+        <div class="side-head">
+          <h2>Meetings</h2>
+        </div>
+        <div class="search-field">
+          <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
+          <input id="meeting-search" type="search" placeholder="Search meetings" aria-label="Search meetings" />
+        </div>
+        <ul id="meeting-list" class="meeting-list"></ul>
       </aside>
 
       <main class="content">
-        <div id="empty" class="muted center">Select or upload a meeting to begin.</div>
+        <div id="empty" class="empty-state">
+          <svg class="icon empty-icon" aria-hidden="true"><use href="#i-doc" /></svg>
+          <p class="empty-title">Nothing open yet</p>
+          <p class="muted">Drop a recording on the left, or pick a meeting from the list.<br />
+            Everything is transcribed and summarized on this computer.</p>
+        </div>
 
-        <div id="processing" class="hidden card" aria-live="polite">
-          <h2 id="proc-title">Processing…</h2>
+        <div id="processing" class="hidden processing-card" aria-live="polite">
+          <h2 id="proc-title" class="serif">Processing…</h2>
           <div class="stages" id="stages"></div>
+          <p class="muted small">You can leave this running — it continues in the background.</p>
         </div>
 
         <article id="result" class="hidden">
           <div class="toolbar">
-            <h2 id="result-title"></h2>
-            <button id="export-btn">Export Markdown</button>
-            <button id="delete-btn" class="danger">Delete</button>
+            <div class="title-wrap">
+              <h2 id="result-title" class="serif" title="Click to rename"></h2>
+              <button id="title-edit-btn" class="icon-btn subtle" title="Rename meeting" aria-label="Rename meeting">
+                <svg class="icon"><use href="#i-pencil" /></svg>
+              </button>
+            </div>
+            <p id="result-meta" class="muted small"></p>
+            <div class="toolbar-actions">
+              <button id="copy-notes-btn" class="btn ghost">
+                <svg class="icon"><use href="#i-copy" /></svg><span>Copy notes</span>
+              </button>
+              <button id="export-btn" class="btn ghost">
+                <svg class="icon"><use href="#i-download" /></svg><span>Export</span>
+              </button>
+              <button id="delete-btn" class="btn danger">
+                <svg class="icon"><use href="#i-trash" /></svg><span>Delete</span>
+              </button>
+            </div>
           </div>
 
-          <div class="summary card">
-            <h3>Summary</h3>
-            <p id="summary-text"></p>
-            <h3>Key takeaways</h3>
-            <ul id="takeaways"></ul>
-            <h3>Action items</h3>
-            <ul id="action-items"></ul>
-          </div>
+          <div id="error-note" class="error-note hidden" role="alert"></div>
 
-          <h3>Transcript</h3>
-          <div id="speaker-legend" class="legend"></div>
-          <div id="transcript" class="transcript"></div>
+          <section class="notes">
+            <div class="note-block" id="summary-block">
+              <div class="note-head">
+                <h3>Summary</h3>
+                <button class="icon-btn subtle" id="summary-edit-btn" title="Edit summary" aria-label="Edit summary">
+                  <svg class="icon"><use href="#i-pencil" /></svg>
+                </button>
+              </div>
+              <p id="summary-text" class="serif"></p>
+            </div>
+            <div class="note-block">
+              <div class="note-head"><h3>Key takeaways</h3></div>
+              <ul id="takeaways" class="note-list"></ul>
+            </div>
+            <div class="note-block">
+              <div class="note-head"><h3>Action items</h3></div>
+              <ul id="action-items" class="note-list actions"></ul>
+            </div>
+          </section>
+
+          <section class="transcript-section">
+            <div class="note-head">
+              <h3>Transcript</h3>
+              <button class="icon-btn subtle" id="copy-transcript-btn" title="Copy transcript" aria-label="Copy transcript">
+                <svg class="icon"><use href="#i-copy" /></svg>
+              </button>
+            </div>
+            <div id="speaker-legend" class="legend"></div>
+            <div id="transcript" class="transcript"></div>
+          </section>
         </article>
       </main>
     </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="settings" class="screen hidden">
+    <header class="app-header">
+      <div class="brand">
+        <button id="settings-back" class="icon-btn" title="Back" aria-label="Back to meetings">
+          <svg class="icon"><use href="#i-back" /></svg>
+        </button>
+        <h1 class="wordmark">Settings</h1>
+      </div>
+    </header>
+
+    <main class="settings-body">
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2 class="serif">Transcription</h2>
+          <p class="muted">Which model listens, and how speakers are separated and
+            recognized. Changes apply to the <em>next</em> recording you process.</p>
+        </div>
+        <div id="config-transcription"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2 class="serif">Summary</h2>
+          <p class="muted">The on-device model that writes the notes, and the language
+            it writes them in.</p>
+        </div>
+        <div id="config-summary"></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2 class="serif">Processing</h2>
+          <p class="muted">How much of the computer LazyMeet may use, and what it keeps.</p>
+        </div>
+        <div id="config-processing"></div>
+        <div class="form-actions">
+          <button type="button" id="config-save" class="btn">Save settings</button>
+          <button type="button" id="config-reset" class="btn ghost">Reset to defaults</button>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2 class="serif">Known speakers</h2>
+          <p class="muted">Voices you've named. LazyMeet recognizes them in future
+            recordings; forget a voice to stop that. Renaming keeps the voice and
+            applies to future recordings — past transcripts keep their saved names.</p>
+        </div>
+        <ul id="speaker-list" class="speaker-list"></ul>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2 class="serif">Your data</h2>
+          <p class="muted">Everything LazyMeet knows lives in this folder — transcripts,
+            voices, and the downloaded models. Nothing ever leaves this computer.</p>
+        </div>
+        <div class="data-row">
+          <code id="data-dir" class="data-path"></code>
+          <button id="reveal-btn" class="btn ghost">
+            <svg class="icon"><use href="#i-folder" /></svg><span>Show folder</span>
+          </button>
+        </div>
+        <p id="data-usage" class="muted small"></p>
+      </section>
+    </main>
   </section>
 
   <div id="conn-banner" class="banner hidden" role="alert">

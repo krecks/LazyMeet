@@ -27,10 +27,10 @@ fully offline:
 
 | Component | Engine | Source |
 |---|---|---|
-| Transcription | NVIDIA Parakeet TDT (multilingual incl. German) | sherpa-onnx GitHub releases |
+| Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
 | Voice activity | Silero VAD | sherpa-onnx GitHub releases |
 | Diarization + speaker ID | pyannote-seg + speaker-embedding (ONNX) | sherpa-onnx GitHub releases |
-| Summarization | Qwen2.5-3B-Instruct (GGUF) via llama-cpp-python | Hugging Face (ungated) |
+| Summarization | Qwen 3.5 (0.8B–9B selectable, GGUF) via llama-cpp-python | Hugging Face (ungated) |
 | ffmpeg | static binary | `imageio-ffmpeg` wheel |
 
 ## Install (end users)
@@ -77,7 +77,7 @@ pip install -r backend/requirements.txt
 # 2. App icons (or: cargo tauri icon src-tauri/icons/icon.png)
 python scripts/make_icons.py
 
-# 3. Freeze the backend into a Tauri sidecar binary
+# 3. Freeze the backend (PyInstaller onedir, bundled as an app resource)
 python scripts/build_sidecar.py
 
 # 4. Run the desktop app (dev)
@@ -98,7 +98,8 @@ LAZYMEET_FAKE=1 python -m backend.main
 ```
 
 Without `LAZYMEET_FAKE`, the backend downloads real models on first run and does
-real transcription (CPU works; a GPU is faster).
+real transcription (all on the CPU; the summarizer LLM offloads to the GPU
+where llama.cpp supports it).
 
 ### Tests
 
@@ -123,7 +124,9 @@ Environment variables (all optional):
 |---|---|---|
 | `LAZYMEET_DATA_DIR` | OS app-data dir | Where models + transcripts live |
 | `LAZYMEET_SPEAKER_THRESHOLD` | `0.5` | Voice-match strictness (cosine) |
-| `LAZYMEET_NUM_THREADS` | `4` | ONNX/LLM CPU threads |
+| `LAZYMEET_MERGE_THRESHOLD` | `0.6` | Voiceprint similarity at which over-split diarized labels merge |
+| `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Speakers with less speech fold into the closest main voice |
+| `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
 | `LAZYMEET_KEEP_AUDIO` | unset | `1` = keep uploaded recordings after processing |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |
