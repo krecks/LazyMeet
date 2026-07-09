@@ -24,8 +24,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Save from main only: caches written under a tag ref are invisible
+          # to future tags and would eat into the repo's cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Core test suite (FAKE pipeline)
-        run: cargo test -p lazymeet-core --no-default-features
+        run: cargo test -p lazymeet-core --no-default-features --locked
 
   build:
     # Installers only for version tags (and manual runs) — plain pushes to
@@ -53,6 +57,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Restore the release cache the warm-cache workflow saves on main;
+          # never save here (tag-scoped caches can't be reused by later tags).
+          shared-key: release
+          save-if: false
 
       - name: Linux system deps (webkit2gtk, etc.)
         if: matrix.os == 'ubuntu-22.04'
@@ -65,8 +74,12 @@ jobs:
         shell: bash
         run: ./scripts/fetch_ffmpeg.sh
 
+      # Prebuilt binary in seconds — `cargo install` compiled the CLI from
+      # source for ~5-10 min per platform. Falls back to a source build if no
+      # prebuilt exists for the platform.
+      - uses: cargo-bins/cargo-binstall@main
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        run: cargo binstall tauri-cli --locked --no-confirm
 
       - name: Build Tauri app
         run: cargo tauri build

@@ -1,0 +1,55 @@
+name: warm-cache
+
+# Release builds run only on tags, but GitHub cache scoping means a tag run
+# can restore caches only from its own ref or from main. This workflow keeps
+# the expensive release target dir (sherpa-onnx + llama.cpp compile from
+# source) warm on main — and runs only when dependencies actually change, so
+# ordinary pushes to main still just run the fast test job.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**/Cargo.toml"
+      - "src-tauri/Cargo.toml"
+      - ".github/workflows/warm-cache.yml"
+  workflow_dispatch:
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: windows-latest
+          - os: ubuntu-22.04
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      # Must mirror the release build exactly — different RUSTFLAGS would
+      # produce cache entries the tag build can't reuse.
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      - name: Linux system deps (webkit2gtk, etc.)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
+            file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Build release workspace (fills the cache)
+        run: cargo build --release --workspace --locked
