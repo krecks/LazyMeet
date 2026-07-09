@@ -70,13 +70,12 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
             file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      # sherpa-onnx 1.12.9's cmake trips over CMake 4.x on MSVC
-      # (show-info.cmake string REPLACE arity error).
-      - name: Pin CMake 3.31 (Windows)
+      # sherpa-onnx 1.12.9's cmake calls wmic for OS info; new runner images
+      # removed it (deprecated), which crashes the configure step. Restore it.
+      - name: Restore wmic (Windows)
         if: matrix.os == 'windows-latest'
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: "3.31.x"
+        shell: pwsh
+        run: DISM /Online /Add-Capability /CapabilityName:WMIC~~~~
 
       - name: Fetch bundled ffmpeg
         shell: bash
