@@ -43,6 +43,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release
+          # A partial cache still saves the next run real time.
+          cache-on-failure: true
 
       - name: Linux system deps (webkit2gtk, etc.)
         if: matrix.os == 'ubuntu-22.04'
@@ -50,6 +52,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
             file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # tauri-build validates bundle.externalBin at compile time — the ffmpeg
+      # binary must exist even though nothing is bundled here.
+      - name: Fetch bundled ffmpeg
+        shell: bash
+        run: ./scripts/fetch_ffmpeg.sh
 
       - name: Build release workspace (fills the cache)
         run: cargo build --release --workspace --locked
