@@ -576,6 +576,137 @@ fn parse_summary(content: &str) -> Summary {
     }
 }
 
+// --------------------------------------------------------------------------
+// Built-in benchmark (explicit backends, driven by bench.rs)
+// --------------------------------------------------------------------------
+
+/// Deterministic pseudo-speech: band-limited noise with an amplitude wobble.
+/// Content doesn't matter for timing — the models process every frame either
+/// way — but it must not be pure silence or digital full-scale noise.
+fn synth_audio(seconds: f64) -> Vec<f32> {
+    let n = (seconds * SAMPLE_RATE as f64) as usize;
+    let mut state: u32 = 0x1234_5678;
+    let mut prev = 0.0f32;
+    (0..n)
+        .map(|i| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let white = (state >> 8) as f32 / (1 << 24) as f32 - 0.5;
+            prev = 0.8 * prev + 0.2 * white; // crude low-pass ≈ speech band
+            let wobble = 1.0 + 0.5 * (i as f32 * 3.0 / SAMPLE_RATE as f32).sin();
+            (prev * wobble * 0.6).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// Time the three ONNX stages on the given execution provider. Returns
+/// (stage name, seconds, seconds of audio processed).
+pub fn bench_onnx(
+    models_dir: &Path,
+    threads: i32,
+    provider: &str,
+) -> Result<Vec<(String, f64, f64)>, String> {
+    use std::time::Instant;
+    let mut rows = Vec::new();
+
+    // ASR: default model, 30 s of audio through the recognizer (no VAD — the
+    // recognizer cost is what differs between providers).
+    let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
+    let mut recognizer = TransducerRecognizer::new(TransducerConfig {
+        encoder: spec.encoder.to_string_lossy().into_owned(),
+        decoder: spec.decoder.to_string_lossy().into_owned(),
+        joiner: spec.joiner.to_string_lossy().into_owned(),
+        tokens: spec.tokens.to_string_lossy().into_owned(),
+        model_type: "nemo_transducer".into(),
+        num_threads: threads,
+        sample_rate: SAMPLE_RATE as i32,
+        feature_dim: 80,
+        decoding_method: "greedy_search".into(),
+        provider: Some(provider.into()),
+        ..Default::default()
+    })
+    .map_err(|e| format!("ASR load ({provider}): {e}"))?;
+    let audio = synth_audio(30.0);
+    // One warmup pass (first call pays one-time graph setup), then measure.
+    let _ = recognizer.transcribe(SAMPLE_RATE, &audio[..SAMPLE_RATE as usize]);
+    let t = Instant::now();
+    for chunk in audio.chunks((SAMPLE_RATE * 10) as usize) {
+        let _ = recognizer.transcribe(SAMPLE_RATE, chunk);
+    }
+    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), 30.0));
+    drop(recognizer);
+
+    // Diarization: 60 s.
+    let mut diarizer = Diarize::new(
+        models_dir.join("diarization_segmentation.onnx"),
+        models_dir.join("speaker_embedding.onnx"),
+        DiarizeConfig {
+            num_clusters: Some(-1),
+            threshold: Some(0.7),
+            min_duration_on: Some(0.3),
+            min_duration_off: Some(0.5),
+            provider: Some(provider.into()),
+            debug: false,
+        },
+    )
+    .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
+    let audio = synth_audio(60.0);
+    let t = Instant::now();
+    let _ = diarizer.compute(audio, None);
+    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), 60.0));
+    drop(diarizer);
+
+    // Speaker embeddings: 10 × 5 s windows (matches how voiceprints are made).
+    let mut extractor = EmbeddingExtractor::new(ExtractorConfig {
+        model: models_dir.join("speaker_embedding.onnx").to_string_lossy().into_owned(),
+        provider: Some(provider.into()),
+        num_threads: Some(threads as usize),
+        debug: false,
+    })
+    .map_err(|e| format!("extractor load ({provider}): {e}"))?;
+    let window = synth_audio(5.0);
+    let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
+    let t = Instant::now();
+    for _ in 0..10 {
+        let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
+    }
+    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), 50.0));
+
+    Ok(rows)
+}
+
+/// Time the summarizer LLM: (model load seconds, generated tokens/second).
+pub fn bench_llm(
+    models_dir: &Path,
+    threads: i32,
+    gpu: bool,
+    n_tokens: usize,
+) -> Result<(f64, f64), String> {
+    use std::time::Instant;
+    let backend = llama_backend()?;
+    let path = crate::models::resolve_llm_at(models_dir, false, crate::models::LLM_DEFAULT);
+    let params = if gpu {
+        LlamaModelParams::default().with_n_gpu_layers(1_000_000)
+    } else {
+        LlamaModelParams::default().with_n_gpu_layers(0)
+    };
+    let t = Instant::now();
+    let model =
+        LlamaModel::load_from_file(backend, &path, &params).map_err(|e| format!("llm load: {e}"))?;
+    let load_s = t.elapsed().as_secs_f64();
+
+    let llm = Llm { model, n_ctx: 2048, threads };
+    let t = Instant::now();
+    let out = llm.chat(
+        "You are a meeting assistant.",
+        "Write a long, detailed paragraph about effective meeting notes.",
+        n_tokens,
+    )?;
+    let gen_s = t.elapsed().as_secs_f64();
+    // chat() stops at EOG or the cap; count what actually came out.
+    let produced = llm.count_tokens(&out).max(1);
+    Ok((load_s, produced as f64 / gen_s))
+}
+
 /// Long meetings are chunked to fit the context window (map-reduce: summarize
 /// each chunk to notes, then summarize the notes). The final answer is strict
 /// JSON parsed defensively.

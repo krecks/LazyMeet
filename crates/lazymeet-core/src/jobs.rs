@@ -66,6 +66,11 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
     }
 }
 
+/// True while a meeting is being processed (the benchmark refuses to run then).
+pub fn is_busy(ctx: &Ctx) -> bool {
+    ctx.jobs.active.lock().unwrap().is_some()
+}
+
 fn finish_active(ctx: &Arc<Ctx>, meeting_id: &str) {
     {
         let mut active = ctx.jobs.active.lock().unwrap();

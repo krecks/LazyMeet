@@ -43,6 +43,7 @@
         <path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h5" />
       </symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" /></symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 14l4-6" /><path d="M5.6 18.6a9 9 0 1 1 12.8 0" /></symbol>
       <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" /></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></symbol>
     </defs>
@@ -103,6 +104,9 @@
           </button>
           <div id="dl-popover" class="dl-popover hidden" role="dialog" aria-label="Model download progress"></div>
         </div>
+        <button id="bench-btn" class="icon-btn" title="Hardware benchmark" aria-label="Open hardware benchmark">
+          <svg class="icon"><use href="#i-gauge" /></svg>
+        </button>
         <button id="speakers-btn" class="icon-btn" title="Known speakers" aria-label="Open known speakers">
           <svg class="icon"><use href="#i-user" /></svg>
         </button>
@@ -298,6 +302,40 @@
             transcripts keep their saved names.</p>
         </div>
         <ul id="speaker-list" class="speaker-list"></ul>
+      </section>
+    </main>
+  </section>
+
+  <!-- Hardware benchmark -->
+  <section id="bench" class="screen hidden">
+    <header class="app-header">
+      <div class="brand">
+        <button id="bench-back" class="icon-btn" title="Back" aria-label="Back to meetings">
+          <svg class="icon"><use href="#i-back" /></svg>
+        </button>
+        <h1 class="wordmark">Hardware benchmark</h1>
+      </div>
+    </header>
+
+    <main class="settings-body">
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <p class="muted">Measures each processing stage on every backend this
+            machine offers: the transcription, speaker-separation, and
+            voice-matching models on the CPU and — on Apple Silicon — the Neural
+            Engine (CoreML); the summarizer LLM on the GPU and the CPU. Takes a
+            few minutes and needs the models downloaded. LazyMeet always uses
+            the fastest configuration by default; this lets you verify it on
+            your hardware.</p>
+        </div>
+        <button id="bench-run" class="btn">Run benchmark</button>
+        <p id="bench-status" class="muted"></p>
+        <table id="bench-results" class="bench-table hidden">
+          <thead>
+            <tr><th>Stage</th><th>Backend</th><th>Time</th><th>Speed</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
       </section>
     </main>
   </section>

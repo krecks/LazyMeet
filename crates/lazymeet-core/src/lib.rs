@@ -8,6 +8,7 @@
 //! implements [`events::Events`] over its event system.
 
 pub mod api;
+pub mod bench;
 pub mod config;
 pub mod error;
 pub mod events;
@@ -37,6 +38,8 @@ pub struct Ctx {
     pub locks: store::StoreLocks,
     /// Bundled ffmpeg binary (native pipeline only; None in FAKE mode/tests).
     pub ffmpeg: Option<PathBuf>,
+    /// True while the built-in hardware benchmark runs (one at a time).
+    pub bench_running: std::sync::atomic::AtomicBool,
 }
 
 impl Ctx {
@@ -51,6 +54,7 @@ impl Ctx {
             jobs: jobs::JobsState::default(),
             locks: store::StoreLocks::default(),
             ffmpeg: None,
+            bench_running: std::sync::atomic::AtomicBool::new(false),
         })
     }
 

@@ -937,3 +937,27 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   from { transform: translateY(6px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
+
+/* Hardware benchmark */
+.bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+.bench-table th,
+.bench-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.bench-table th {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: inherit;
+  opacity: 0.7;
+}
+.bench-table td.bench-error {
+  opacity: 0.7;
+  font-style: italic;
+}

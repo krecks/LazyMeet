@@ -1144,6 +1144,74 @@ function closeSettings() {
   $("app").classList.remove("hidden");
 }
 
+let benchRunning = false;
+
+function openBench() {
+  $("app").classList.add("hidden");
+  $("bench").classList.remove("hidden");
+}
+
+function closeBench() {
+  $("bench").classList.add("hidden");
+  $("app").classList.remove("hidden");
+}
+
+async function runBenchmark() {
+  try {
+    $("bench-results").classList.add("hidden");
+    $("bench-results").querySelector("tbody").innerHTML = "";
+    await call("run_benchmark");
+    benchRunning = true;
+    $("bench-run").disabled = true;
+    $("bench-status").textContent = "Starting…";
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+// `benchmark-progress` events: rows accumulate as each measurement lands.
+function onBenchProgress(p) {
+  if (p.rows && p.rows.length) {
+    const tbody = $("bench-results").querySelector("tbody");
+    tbody.innerHTML = "";
+    for (const row of p.rows) {
+      const tr = document.createElement("tr");
+      const cell = (text, cls) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      };
+      cell(row.stage);
+      cell(row.backend);
+      if (row.error) {
+        const td = document.createElement("td");
+        td.colSpan = 2;
+        td.className = "bench-error";
+        td.textContent = row.error;
+        tr.appendChild(td);
+      } else {
+        cell(`${row.seconds} s`);
+        cell(row.speed);
+      }
+      tbody.appendChild(tr);
+    }
+    $("bench-results").classList.remove("hidden");
+  }
+  if (p.status === "running") {
+    $("bench-status").textContent = p.step || "Measuring…";
+  } else if (p.status === "done") {
+    benchRunning = false;
+    $("bench-run").disabled = false;
+    $("bench-status").textContent =
+      "Done. LazyMeet already uses the fastest backend for each stage by default.";
+  } else if (p.status === "error") {
+    benchRunning = false;
+    $("bench-run").disabled = false;
+    $("bench-status").textContent = `Benchmark failed: ${p.message}`;
+  }
+}
+
 function openSpeakers() {
   $("app").classList.add("hidden");
   $("speakers").classList.remove("hidden");
@@ -1596,6 +1664,9 @@ function initApp() {
   $("settings-back").addEventListener("click", closeSettings);
   $("speakers-btn").addEventListener("click", openSpeakers);
   $("speakers-back").addEventListener("click", closeSpeakers);
+  $("bench-btn").addEventListener("click", openBench);
+  $("bench-back").addEventListener("click", closeBench);
+  $("bench-run").addEventListener("click", runBenchmark);
   $("config-save").addEventListener("click", saveConfig);
   $("config-reset").addEventListener("click", resetConfig);
   $("reveal-btn").addEventListener("click", revealDataDir);
@@ -1612,6 +1683,7 @@ async function main() {
   // before the first fetches so no transition slips between them.
   await listen("meeting-updated", (e) => onMeetingUpdated(e.payload));
   await listen("models-progress", (e) => onModelsProgress(e.payload));
+  await listen("benchmark-progress", (e) => onBenchProgress(e.payload));
   await listen("setup-progress", (e) => {
     applySetupStatus(e.payload);
     if (e.payload.ready && setupReadyResolve) {

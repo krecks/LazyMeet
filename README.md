@@ -68,6 +68,39 @@ the same safe behavior. If wrong names still appear, raise **Voice match
 strictness** in Settings; lower it if familiar voices go unrecognized. Manage
 saved voices in the **Known speakers** panel.
 
+## Performance
+
+Measured on a real 28.5-minute, 1.23 GB OBS recording (HEVC 1728×1122@60,
+170 transcript segments, 2 speakers, full notes produced) on an **Apple M1
+Pro with 7 CPU threads** (the default: ~75 % of cores). Each cell is the
+stage duration.
+
+**ONNX models — CPU vs CoreML (ANE/NPU):**
+
+| Stage | CPU | CoreML | Verdict |
+|---|---|---|---|
+| Transcription (Parakeet) | 104 s | 212 s | CoreML 2.0× slower |
+| Diarization | 227 s | 246 s | CoreML 1.08× slower |
+| Speaker ID | 7.9 s | 18.0 s | CoreML 2.3× slower |
+
+**Summarizer LLM (Qwen3.5-4B) — Metal GPU vs CPU:**
+
+| Stage | Metal GPU | CPU | Verdict |
+|---|---|---|---|
+| Summarization | 34 s | 84 s | GPU 2.5× faster |
+
+The defaults follow from these numbers: the ONNX models always run on the
+**CPU** (onnxruntime can only place a fraction of their ops on the Neural
+Engine, and the CPU↔ANE hand-offs cost more than the acceleration saves),
+while the summarizer LLM runs on the **GPU** where llama.cpp supports it
+(the *Hardware acceleration* setting toggles this). End to end the meeting
+above processes in ~7 minutes — about 4× faster than realtime.
+
+Hardware differs, so the app includes a built-in benchmark (gauge icon, top
+right) that measures ASR, diarization, speaker ID, and the summarizer on
+your machine across the available backends. Power users can also force an
+ONNX execution provider with `LAZYMEET_ONNX_PROVIDER` (default `cpu`).
+
 ## Privacy
 
 Audio, transcripts, summaries, and voiceprints never leave your machine. They

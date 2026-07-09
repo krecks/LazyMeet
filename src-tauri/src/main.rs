@@ -78,6 +78,7 @@ fn main() {
             commands::delete_speaker,
             commands::get_data_info,
             commands::reveal_data_dir,
+            commands::run_benchmark,
         ])
         .setup(|app| {
             let events = Arc::new(TauriEvents(app.handle().clone()));
