@@ -205,8 +205,8 @@ pub async fn delete_speaker(ctx: State<'_, App>, name: String) -> ApiResult<Valu
 /// `benchmark-progress` events. 409s while models download, a meeting is
 /// processing, or a benchmark is already running.
 #[tauri::command(rename_all = "snake_case")]
-pub async fn run_benchmark(ctx: State<'_, App>) -> ApiResult<Value> {
-    lazymeet_core::bench::start(&ctx)
+pub async fn run_benchmark(ctx: State<'_, App>, path: Option<String>) -> ApiResult<Value> {
+    lazymeet_core::bench::start(&ctx, path.map(PathBuf::from))
 }
 
 // --- Data management ----------------------------------------------------------

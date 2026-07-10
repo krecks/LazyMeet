@@ -135,6 +135,7 @@ impl Recognizer {
 fn load_recognizer(ctx: &PipelineCtx) -> Result<Recognizer, String> {
     let spec = resolve_asr_at(ctx.models_dir, ctx.fake, &ctx.config.asr_model());
     let threads = ctx.config.num_threads() as i32;
+    let provider = ctx.config.asr_provider();
     let language = match ctx.config.asr_language().as_str() {
         "auto" => String::new(), // "" lets Whisper detect the language itself
         code => code.to_string(),
@@ -147,7 +148,7 @@ fn load_recognizer(ctx: &PipelineCtx) -> Result<Recognizer, String> {
             language,
             bpe_vocab: None,
             tail_paddings: None,
-            provider: Some(config::onnx_provider().into()),
+            provider: Some(provider.clone()),
             num_threads: Some(threads),
             debug: false,
         })
@@ -165,7 +166,7 @@ fn load_recognizer(ctx: &PipelineCtx) -> Result<Recognizer, String> {
             sample_rate: SAMPLE_RATE as i32,
             feature_dim: 80,
             decoding_method: "greedy_search".into(),
-            provider: Some(config::onnx_provider().into()),
+            provider: Some(provider),
             ..Default::default()
         })
         .map(Recognizer::Transducer)
@@ -196,7 +197,7 @@ pub fn transcribe(ctx: &PipelineCtx, wav: &Path) -> Result<Vec<Segment>, String>
             max_speech_duration: 20.0,
             sample_rate: SAMPLE_RATE,
             window_size: 512,
-            provider: Some(config::onnx_provider().into()),
+            provider: Some(ctx.config.asr_provider()),
             num_threads: Some(ctx.config.num_threads() as i32),
             debug: false,
         },
@@ -254,7 +255,7 @@ pub fn diarize(ctx: &PipelineCtx, wav: &Path, num_speakers: i64) -> Result<Vec<T
             // hundreds of spurious speakers
             min_duration_on: Some(0.3),
             min_duration_off: Some(0.5),
-            provider: Some(config::onnx_provider().into()),
+            provider: Some(ctx.config.diar_provider()),
             debug: false,
         },
     )
@@ -288,7 +289,7 @@ pub fn compute_voiceprints(
     let samples = load_wav(wav)?;
     let mut extractor = EmbeddingExtractor::new(ExtractorConfig {
         model: ctx.models_dir.join("speaker_embedding.onnx").to_string_lossy().into_owned(),
-        provider: Some(config::onnx_provider().into()),
+        provider: Some(ctx.config.speaker_provider()),
         num_threads: Some(ctx.config.num_threads() as usize),
         debug: false,
     })
@@ -598,17 +599,55 @@ fn synth_audio(seconds: f64) -> Vec<f32> {
         .collect()
 }
 
-/// Time the three ONNX stages on the given execution provider. Returns
-/// (stage name, seconds, seconds of audio processed).
+/// 300 s (5 min) of synthetic benchmark audio (the default source).
+pub fn bench_audio_synth() -> Vec<f32> {
+    synth_audio(300.0)
+}
+
+/// Decode (up to) the first 300 s (5 min) of a user-picked recording to
+/// benchmark samples. Decoding happens locally via the bundled ffmpeg; the
+/// scratch WAV is deleted immediately after reading.
+pub fn bench_audio_from_file(
+    ffmpeg: &Path,
+    src: &Path,
+    scratch_dir: &Path,
+) -> Result<Vec<f32>, String> {
+    let wav = scratch_dir.join(".bench-audio.wav");
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(ffmpeg);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.arg("-y")
+        .arg("-i")
+        .arg(src)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-t", "300", "-f", "wav"])
+        .arg(&wav);
+    run_ffmpeg(cmd)?;
+    let result = load_wav(&wav);
+    let _ = std::fs::remove_file(&wav);
+    let samples = result?;
+    if samples.len() < SAMPLE_RATE as usize {
+        return Err("the recording has less than one second of audio".into());
+    }
+    Ok(samples)
+}
+
+/// Time the three ONNX stages on the given execution provider over `samples`
+/// (16 kHz mono). Returns (stage name, seconds, seconds of audio processed).
 pub fn bench_onnx(
     models_dir: &Path,
     threads: i32,
     provider: &str,
+    samples: &[f32],
 ) -> Result<Vec<(String, f64, f64)>, String> {
     use std::time::Instant;
     let mut rows = Vec::new();
+    let sr = SAMPLE_RATE as usize;
 
-    // ASR: default model, 120 s of audio through the recognizer (no VAD — the
+    // ASR: default model, up to 120 s through the recognizer (no VAD — the
     // recognizer cost is what differs between providers).
     let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
     let mut recognizer = TransducerRecognizer::new(TransducerConfig {
@@ -625,17 +664,17 @@ pub fn bench_onnx(
         ..Default::default()
     })
     .map_err(|e| format!("ASR load ({provider}): {e}"))?;
-    let audio = synth_audio(120.0);
+    let asr = &samples[..samples.len().min(120 * sr)];
     // One warmup pass (first call pays one-time graph setup), then measure.
-    let _ = recognizer.transcribe(SAMPLE_RATE, &audio[..SAMPLE_RATE as usize]);
+    let _ = recognizer.transcribe(SAMPLE_RATE, &asr[..sr.min(asr.len())]);
     let t = Instant::now();
-    for chunk in audio.chunks((SAMPLE_RATE * 10) as usize) {
+    for chunk in asr.chunks(10 * sr) {
         let _ = recognizer.transcribe(SAMPLE_RATE, chunk);
     }
-    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), 120.0));
+    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), asr.len() as f64 / sr as f64));
     drop(recognizer);
 
-    // Diarization: 240 s.
+    // Diarization: up to 300 s.
     let mut diarizer = Diarize::new(
         models_dir.join("diarization_segmentation.onnx"),
         models_dir.join("speaker_embedding.onnx"),
@@ -649,10 +688,11 @@ pub fn bench_onnx(
         },
     )
     .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
-    let audio = synth_audio(240.0);
+    let diar = samples[..samples.len().min(300 * sr)].to_vec();
+    let diar_secs = diar.len() as f64 / sr as f64;
     let t = Instant::now();
-    let _ = diarizer.compute(audio, None);
-    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), 240.0));
+    let _ = diarizer.compute(diar, None);
+    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), diar_secs));
     drop(diarizer);
 
     // Speaker embeddings: 40 × 5 s windows (matches how voiceprints are made).
@@ -663,13 +703,17 @@ pub fn bench_onnx(
         debug: false,
     })
     .map_err(|e| format!("extractor load ({provider}): {e}"))?;
-    let window = synth_audio(5.0);
+    // A 5 s window from the middle of the source (whole clip if shorter).
+    let win_len = (5 * sr).min(samples.len());
+    let start = (samples.len() - win_len) / 2;
+    let window = samples[start..start + win_len].to_vec();
     let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
     let t = Instant::now();
     for _ in 0..40 {
         let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
     }
-    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), 200.0));
+    let spk_secs = 40.0 * win_len as f64 / sr as f64;
+    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), spk_secs));
 
     Ok(rows)
 }

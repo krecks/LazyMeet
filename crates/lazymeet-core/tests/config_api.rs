@@ -132,10 +132,21 @@ fn worker_picks_up_config_changes() {
 }
 
 #[test]
-fn onnx_provider_is_cpu() {
-    // The ONNX models always run on the CPU: CoreML measured ~2x slower for
-    // them, so USE_GPU deliberately does not affect the provider.
-    assert_eq!(config::onnx_provider(), "cpu");
+fn onnx_providers_default_to_cpu_and_validate() {
+    // CPU measures fastest for the ONNX models on every machine tested; the
+    // per-stage providers default there and only accept known values.
+    let app = TestApp::fake();
+    let snapshot = app.ctx.config.read().unwrap();
+    assert_eq!(snapshot.asr_provider(), "cpu");
+    assert_eq!(snapshot.diar_provider(), "cpu");
+    assert_eq!(snapshot.speaker_provider(), "cpu");
+    drop(snapshot);
+
+    let err = api::put_config(&app.ctx, &obj(&[("DIAR_PROVIDER", json!("cuda"))])).unwrap_err();
+    assert_eq!(err.code, 422);
+    api::put_config(&app.ctx, &obj(&[("DIAR_PROVIDER", json!("coreml"))])).unwrap();
+    assert_eq!(app.ctx.config.read().unwrap().diar_provider(), "coreml");
+    assert_eq!(app.ctx.config.read().unwrap().asr_provider(), "cpu"); // untouched
 }
 
 #[test]

@@ -1068,6 +1068,24 @@ const CONFIG_META = {
     help: "Hint for Whisper models — Parakeet always detects the language itself.",
     languages: "Auto-detect",
   },
+  ASR_PROVIDER: {
+    section: "config-transcription",
+    label: "Transcription compute",
+    help: "Where the speech-to-text model runs. CPU measures fastest on most machines — verify with the benchmark (gauge icon).",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+  },
+  DIAR_PROVIDER: {
+    section: "config-transcription",
+    label: "Speaker separation compute",
+    help: "Where the who-spoke-when model runs.",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+  },
+  SPEAKER_PROVIDER: {
+    section: "config-transcription",
+    label: "Voice matching compute",
+    help: "Where the voiceprint model runs.",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+  },
   SPEAKER_THRESHOLD: {
     section: "config-transcription",
     label: "Voice match strictness",
@@ -1145,6 +1163,7 @@ function closeSettings() {
 }
 
 let benchRunning = false;
+let benchRec = null; // recommendation from the last completed run
 
 function openBench() {
   $("app").classList.add("hidden");
@@ -1156,21 +1175,41 @@ function closeBench() {
   $("app").classList.remove("hidden");
 }
 
-async function runBenchmark() {
+async function startBenchmark(path) {
   try {
     $("bench-results").classList.add("hidden");
     $("bench-results").querySelector("tbody").innerHTML = "";
-    await call("run_benchmark");
+    $("bench-rec").classList.add("hidden");
+    $("bench-apply").classList.add("hidden");
+    await call("run_benchmark", { path: path || null });
     benchRunning = true;
     $("bench-run").disabled = true;
+    $("bench-run-file").disabled = true;
     $("bench-status").textContent = "Starting…";
   } catch (e) {
     showToast(e.message);
   }
 }
 
+async function pickBenchmarkFile() {
+  try {
+    const path = await call("pick_recording");
+    if (path) startBenchmark(path);
+  } catch (e) {
+    showToast(`Couldn't open the file picker: ${e.message}`);
+  }
+}
+
 // `benchmark-progress` events: rows accumulate as each measurement lands.
 function onBenchProgress(p) {
+  if (p.threads) {
+    const env = $("bench-env");
+    const cores = p.cores
+      ? `Using ${p.threads} of ${p.cores} CPU cores`
+      : `Using ${p.threads} CPU threads`;
+    env.textContent = `${cores} (change under Settings → CPU threads) · Source: ${p.source || "synthetic audio"}.`;
+    env.classList.remove("hidden");
+  }
   if (p.rows && p.rows.length) {
     const tbody = $("bench-results").querySelector("tbody");
     tbody.innerHTML = "";
@@ -1203,12 +1242,54 @@ function onBenchProgress(p) {
   } else if (p.status === "done") {
     benchRunning = false;
     $("bench-run").disabled = false;
-    $("bench-status").textContent =
-      "Done. LazyMeet already uses the fastest backend for each stage by default.";
+    $("bench-run-file").disabled = false;
+    $("bench-status").textContent = "Done.";
+    renderBenchRecommendation(p.recommendation, p.current);
   } else if (p.status === "error") {
     benchRunning = false;
     $("bench-run").disabled = false;
+    $("bench-run-file").disabled = false;
     $("bench-status").textContent = `Benchmark failed: ${p.message}`;
+  }
+}
+
+const PROVIDER_LABELS = { cpu: "CPU", coreml: "Neural Engine" };
+
+function benchSummaryText(rec) {
+  return (
+    `Fastest on this machine: transcription ${PROVIDER_LABELS[rec.ASR_PROVIDER]}` +
+    ` · speaker separation ${PROVIDER_LABELS[rec.DIAR_PROVIDER]}` +
+    ` · voice matching ${PROVIDER_LABELS[rec.SPEAKER_PROVIDER]}` +
+    ` · summarizer ${rec.USE_GPU ? "GPU" : "CPU"}.`
+  );
+}
+
+function renderBenchRecommendation(rec, current) {
+  if (!rec) return;
+  benchRec = rec;
+  const matches =
+    current &&
+    ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER", "USE_GPU"].every(
+      (k) => current[k] === rec[k]
+    );
+  const line = $("bench-rec");
+  line.textContent =
+    benchSummaryText(rec) +
+    (matches ? " Your settings already match." : " Your settings differ.");
+  line.classList.remove("hidden");
+  $("bench-apply").classList.toggle("hidden", matches);
+}
+
+async function applyBenchRecommendation() {
+  if (!benchRec) return;
+  try {
+    await call("put_config", { fields: benchRec });
+    $("bench-apply").classList.add("hidden");
+    $("bench-rec").textContent =
+      benchSummaryText(benchRec) + " Applied — used from the next recording on.";
+    showToast("Fastest configuration applied.", 3500, true);
+  } catch (e) {
+    showToast(`Couldn't apply: ${e.message}`);
   }
 }
 
@@ -1274,7 +1355,19 @@ function renderConfigForm(cfg, models) {
       continue;
     }
 
-    if (meta.languages) {
+    if (meta.choices) {
+      const select = document.createElement("select");
+      select.dataset.config = name;
+      select.disabled = locked;
+      for (const [value, label] of meta.choices) {
+        const o = document.createElement("option");
+        o.value = value;
+        o.textContent = label;
+        if (value === cfg.values[name]) o.selected = true;
+        select.appendChild(o);
+      }
+      control.appendChild(select);
+    } else if (meta.languages) {
       const select = document.createElement("select");
       select.dataset.config = name;
       select.disabled = locked;
@@ -1666,7 +1759,9 @@ function initApp() {
   $("speakers-back").addEventListener("click", closeSpeakers);
   $("bench-btn").addEventListener("click", openBench);
   $("bench-back").addEventListener("click", closeBench);
-  $("bench-run").addEventListener("click", runBenchmark);
+  $("bench-run").addEventListener("click", () => startBenchmark(null));
+  $("bench-run-file").addEventListener("click", pickBenchmarkFile);
+  $("bench-apply").addEventListener("click", applyBenchRecommendation);
   $("config-save").addEventListener("click", saveConfig);
   $("config-reset").addEventListener("click", resetConfig);
   $("reveal-btn").addEventListener("click", revealDataDir);

@@ -19,9 +19,13 @@ impl Events for PrintEvents {
 }
 
 fn main() {
-    let ctx = Ctx::from_env(Arc::new(PrintEvents));
+    let mut ctx = Ctx::from_env(Arc::new(PrintEvents));
+    if let Some(p) = std::env::var_os("LAZYMEET_FFMPEG") {
+        Arc::get_mut(&mut ctx).unwrap().ffmpeg = Some(p.into());
+    }
     ctx.paths.ensure_dirs().expect("data dirs");
-    bench::start(&ctx).expect("benchmark should start");
+    let source = std::env::args().nth(1).map(Into::into);
+    bench::start(&ctx, source).expect("benchmark should start");
     while ctx.bench_running.load(Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }

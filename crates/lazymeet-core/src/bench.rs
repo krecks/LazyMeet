@@ -4,6 +4,7 @@
 //! their own hardware. Results stream to the UI as `benchmark-progress`
 //! events; one run at a time, and never while a meeting is processing.
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -12,10 +13,17 @@ use serde_json::{json, Value};
 use crate::error::{ApiError, ApiResult};
 use crate::Ctx;
 
-/// Kick off a benchmark in a background thread. Progress arrives as
-/// `benchmark-progress` events: `{status: "running", step, rows}` after each
-/// measurement, then `{status: "done", rows}` or `{status: "error", message}`.
-pub fn start(ctx: &Arc<Ctx>) -> ApiResult<Value> {
+/// Kick off a benchmark in a background thread. `source` is an optional
+/// user-picked recording; None benchmarks the deterministic synthetic audio.
+/// Progress arrives as `benchmark-progress` events: `{status: "running",
+/// step, rows}` after each measurement, then `{status: "done", rows,
+/// recommendation, current}` or `{status: "error", message}`.
+pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
+    if let Some(path) = &source {
+        if !path.is_file() {
+            return Err(ApiError::invalid("file not found"));
+        }
+    }
     if ctx.fake {
         return Err(ApiError::conflict("benchmark is not available in FAKE mode"));
     }
@@ -33,7 +41,8 @@ pub fn start(ctx: &Arc<Ctx>) -> ApiResult<Value> {
 
     let ctx = ctx.clone();
     std::thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&ctx)));
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&ctx, source)));
         if let Err(_panic) = result {
             ctx.events.emit(
                 "benchmark-progress",
@@ -46,16 +55,57 @@ pub fn start(ctx: &Arc<Ctx>) -> ApiResult<Value> {
 }
 
 #[cfg(feature = "native-pipeline")]
-fn run(ctx: &Arc<Ctx>) {
+fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
     let threads = ctx.config.read().unwrap().num_threads() as i32;
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     let models_dir = ctx.paths.models_dir.clone();
     let mut rows: Vec<Value> = Vec::new();
+
+    let source_label = source
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "synthetic audio".to_string());
 
     let emit = |rows: &Vec<Value>, step: &str| {
         ctx.events.emit(
             "benchmark-progress",
-            json!({"status": "running", "step": step, "rows": rows}),
+            json!({
+                "status": "running",
+                "step": step,
+                "rows": rows,
+                "threads": threads,
+                "cores": cores,
+                "source": source_label,
+            }),
         );
+    };
+
+    // Benchmark audio: the user's recording (first 300 s, decoded locally)
+    // or the deterministic synthetic buffer.
+    emit(&rows, "Preparing audio…");
+    let samples = match &source {
+        Some(path) => {
+            let Some(ffmpeg) = ctx.ffmpeg.as_deref() else {
+                ctx.events.emit(
+                    "benchmark-progress",
+                    json!({"status": "error", "message": "ffmpeg is not available"}),
+                );
+                return;
+            };
+            match crate::pipeline::native::bench_audio_from_file(ffmpeg, path, &ctx.paths.data_dir)
+            {
+                Ok(samples) => samples,
+                Err(e) => {
+                    ctx.events.emit(
+                        "benchmark-progress",
+                        json!({"status": "error", "message": format!("could not decode the recording: {e}")}),
+                    );
+                    return;
+                }
+            }
+        }
+        None => crate::pipeline::native::bench_audio_synth(),
     };
 
     // ONNX stages per provider. CoreML only exists on macOS.
@@ -65,7 +115,7 @@ fn run(ctx: &Arc<Ctx>) {
     }
     for (provider, label) in providers {
         emit(&rows, &format!("ONNX models on {label}…"));
-        match crate::pipeline::native::bench_onnx(&models_dir, threads, provider) {
+        match crate::pipeline::native::bench_onnx(&models_dir, threads, provider, &samples) {
             Ok(stage_rows) => {
                 for (stage, secs, audio_secs) in stage_rows {
                     rows.push(json!({
@@ -100,6 +150,7 @@ fn run(ctx: &Arc<Ctx>) {
                 "backend": label,
                 "seconds": (load_s * 10.0).round() / 10.0,
                 "speed": format!("{tok_per_s:.1} tokens/s"),
+                "tps": tok_per_s,
             })),
             Err(e) => rows.push(json!({
                 "stage": "Summarizer LLM",
@@ -110,11 +161,64 @@ fn run(ctx: &Arc<Ctx>) {
         emit(&rows, "");
     }
 
-    ctx.events.emit("benchmark-progress", json!({"status": "done", "rows": rows}));
+    // Fastest backend per stage → a ready-to-apply config recommendation.
+    let fastest_onnx = |stage: &str| -> &'static str {
+        let best = rows
+            .iter()
+            .filter(|r| r["stage"] == stage && r.get("error").is_none())
+            .min_by(|a, b| {
+                let a = a["seconds"].as_f64().unwrap_or(f64::MAX);
+                let b = b["seconds"].as_f64().unwrap_or(f64::MAX);
+                a.total_cmp(&b)
+            });
+        match best.and_then(|r| r["backend"].as_str()) {
+            Some("CoreML (ANE)") => "coreml",
+            _ => "cpu",
+        }
+    };
+    // The LLM winner is generation throughput, not load time.
+    let fastest_llm_gpu = rows
+        .iter()
+        .filter(|r| r["stage"] == "Summarizer LLM" && r.get("error").is_none())
+        .max_by(|a, b| {
+            let a = a["tps"].as_f64().unwrap_or(0.0);
+            let b = b["tps"].as_f64().unwrap_or(0.0);
+            a.total_cmp(&b)
+        })
+        .map(|r| r["backend"] == "Metal GPU")
+        .unwrap_or(true);
+    let recommendation = json!({
+        "ASR_PROVIDER": fastest_onnx("Transcription"),
+        "DIAR_PROVIDER": fastest_onnx("Diarization"),
+        "SPEAKER_PROVIDER": fastest_onnx("Speaker ID"),
+        "USE_GPU": fastest_llm_gpu,
+    });
+    let current = {
+        let config = ctx.config.read().unwrap();
+        json!({
+            "ASR_PROVIDER": config.asr_provider(),
+            "DIAR_PROVIDER": config.diar_provider(),
+            "SPEAKER_PROVIDER": config.speaker_provider(),
+            "USE_GPU": config.use_gpu(),
+        })
+    };
+
+    ctx.events.emit(
+        "benchmark-progress",
+        json!({
+            "status": "done",
+            "rows": rows,
+            "threads": threads,
+            "cores": cores,
+            "source": source_label,
+            "recommendation": recommendation,
+            "current": current,
+        }),
+    );
 }
 
 #[cfg(not(feature = "native-pipeline"))]
-fn run(ctx: &Arc<Ctx>) {
+fn run(ctx: &Arc<Ctx>, _source: Option<PathBuf>) {
     ctx.events.emit(
         "benchmark-progress",
         json!({"status": "error", "message": "this build has no native pipeline"}),

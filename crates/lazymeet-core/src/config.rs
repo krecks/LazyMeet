@@ -134,6 +134,12 @@ pub fn tunables() -> Vec<TunableSpec> {
         t("ASR_LANGUAGE", "LAZYMEET_ASR_LANGUAGE", Kind::Str, None, None),
         t("SUMMARY_MODEL", "LAZYMEET_SUMMARY_MODEL", Kind::Str, None, None),
         t("SUMMARY_LANGUAGE", "LAZYMEET_SUMMARY_LANGUAGE", Kind::Str, None, None),
+        // Per-stage ONNX execution provider ("cpu" | "coreml"). CPU is the
+        // fastest on every machine measured so far; the built-in benchmark
+        // verifies per machine and can apply the fastest combination.
+        t("ASR_PROVIDER", "LAZYMEET_ASR_PROVIDER", Kind::Str, None, None),
+        t("DIAR_PROVIDER", "LAZYMEET_DIAR_PROVIDER", Kind::Str, None, None),
+        t("SPEAKER_PROVIDER", "LAZYMEET_SPEAKER_PROVIDER", Kind::Str, None, None),
         t("SPEAKER_THRESHOLD", "LAZYMEET_SPEAKER_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("DIAR_THRESHOLD", "LAZYMEET_DIAR_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("SPEAKER_MERGE_THRESHOLD", "LAZYMEET_MERGE_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
@@ -150,6 +156,7 @@ pub fn default_value(name: &str) -> Value {
         "ASR_LANGUAGE" => json!("auto"),
         "SUMMARY_MODEL" => json!("qwen3.5-4b"),
         "SUMMARY_LANGUAGE" => json!("auto"),
+        "ASR_PROVIDER" | "DIAR_PROVIDER" | "SPEAKER_PROVIDER" => json!("cpu"),
         "SPEAKER_THRESHOLD" => json!(0.6),
         "DIAR_THRESHOLD" => json!(0.7),
         "SPEAKER_MERGE_THRESHOLD" => json!(0.6),
@@ -284,7 +291,28 @@ impl Config {
     pub fn keep_audio(&self) -> bool {
         self.values["KEEP_AUDIO"].as_bool().unwrap_or(true)
     }
+
+    /// Per-stage ONNX execution provider; `LAZYMEET_ONNX_PROVIDER` forces all
+    /// three at once (benchmark scripts / experiments).
+    fn provider_of(&self, name: &str) -> String {
+        std::env::var("LAZYMEET_ONNX_PROVIDER")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| self.str_of(name))
+    }
+    pub fn asr_provider(&self) -> String {
+        self.provider_of("ASR_PROVIDER")
+    }
+    pub fn diar_provider(&self) -> String {
+        self.provider_of("DIAR_PROVIDER")
+    }
+    pub fn speaker_provider(&self) -> String {
+        self.provider_of("SPEAKER_PROVIDER")
+    }
 }
+
+/// Execution providers a user can pick per stage.
+pub const ONNX_PROVIDERS: &[&str] = &["cpu", "coreml"];
 
 /// Read config.json; unknown keys and invalid values are dropped.
 pub fn load_overrides(paths: &Paths) -> Map<String, Value> {

@@ -324,29 +324,41 @@
             machine offers: the transcription, speaker-separation, and
             voice-matching models on the CPU and — on Apple Silicon — the Neural
             Engine (CoreML); the summarizer LLM on the GPU and the CPU. Takes a
-            few minutes and needs the models downloaded. LazyMeet always uses
-            the fastest configuration by default; this lets you verify it on
-            your hardware.</p>
+            few minutes and needs the models downloaded. LazyMeet ships with the
+            configuration that is fastest on most machines; after a run it can
+            apply the combination that measured fastest on yours.</p>
         </div>
         <details class="bench-how">
           <summary>How the test works</summary>
-          <p class="muted">All measurements run on <strong>synthesized audio and a
-            fixed text prompt</strong> generated on the fly — none of your
-            recordings are read, and nothing leaves this machine. The audio is
-            deterministic noise shaped like speech; these models spend the same
-            compute on every second of audio regardless of its content, which is
-            exactly what differs between backends, so the comparison carries
-            over to real recordings.</p>
+          <p class="muted">By default all measurements run on <strong>synthesized
+            audio and a fixed text prompt</strong> generated on the fly — none of
+            your recordings are read, and nothing leaves this machine. The audio
+            is deterministic noise shaped like speech; these models spend the
+            same compute on every second of audio regardless of its content,
+            which is exactly what differs between backends, so the comparison
+            carries over to real recordings — and results stay comparable
+            across machines.</p>
+          <p class="muted"><em>Run with your own recording</em> uses a file you
+            pick instead — capped at the <strong>first 5 minutes</strong>, decoded
+            locally, never uploaded — if you want timings on your typical audio.
+            Backend comparisons don't need more: their cost scales linearly with
+            audio length, so more minutes only add waiting. The summarizer test
+            always uses the fixed prompt.</p>
           <ul class="muted">
-            <li><strong>Transcription</strong> — 120&thinsp;s of audio through the
-              speech-to-text model (VAD bypassed, one warm-up pass first).</li>
+            <li><strong>Transcription</strong> — the first 120&thinsp;s of the
+              audio through the speech-to-text model (VAD bypassed, one warm-up
+              pass first).</li>
             <li><strong>Diarization</strong> — a full who-spoke-when pass over
-              240&thinsp;s of audio (segmentation, embeddings, clustering).</li>
+              up to 5 minutes of audio (segmentation, embeddings,
+              clustering).</li>
             <li><strong>Speaker ID</strong> — 40 voiceprint extractions from
               5-second windows, the same way meeting voiceprints are built.</li>
             <li><strong>Summarizer LLM</strong> — loads the summary model and
               generates 384 tokens from a fixed prompt; the time column is the
               model load, the speed column is generation throughput.</li>
+            <li><strong>CPU threads</strong> — all CPU stages use the thread
+              count from Settings → CPU threads (default: about 75&thinsp;% of
+              the machine's cores); the run shows the exact number used.</li>
           </ul>
           <p class="muted">Times are for those fixed workloads, so runs are
             comparable across machines and backends. They are not a prediction
@@ -354,7 +366,11 @@
             silence removal.</p>
         </details>
         <button id="bench-run" class="btn">Run benchmark</button>
+        <button id="bench-run-file" class="btn ghost">Run with your own recording…</button>
         <p id="bench-status" class="muted"></p>
+        <p id="bench-env" class="muted hidden"></p>
+        <p id="bench-rec" class="muted hidden"></p>
+        <button id="bench-apply" class="btn hidden">Apply fastest configuration</button>
         <table id="bench-results" class="bench-table hidden">
           <thead>
             <tr><th>Stage</th><th>Backend</th><th>Time</th><th>Speed</th></tr>

@@ -84,6 +84,14 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             }
         }
     }
+    for key in ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER"] {
+        if let Some(v) = fields.get(key).filter(|v| !v.is_null()) {
+            let provider = v.as_str().unwrap_or_default();
+            if !config::ONNX_PROVIDERS.contains(&provider) {
+                return Err(ApiError::invalid(format!("unsupported provider for {key}")));
+            }
+        }
+    }
 
     let mut overrides = config::load_overrides(&ctx.paths);
     for (name, value) in fields {
