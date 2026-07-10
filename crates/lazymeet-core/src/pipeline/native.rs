@@ -608,7 +608,7 @@ pub fn bench_onnx(
     use std::time::Instant;
     let mut rows = Vec::new();
 
-    // ASR: default model, 30 s of audio through the recognizer (no VAD — the
+    // ASR: default model, 120 s of audio through the recognizer (no VAD — the
     // recognizer cost is what differs between providers).
     let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
     let mut recognizer = TransducerRecognizer::new(TransducerConfig {
@@ -625,17 +625,17 @@ pub fn bench_onnx(
         ..Default::default()
     })
     .map_err(|e| format!("ASR load ({provider}): {e}"))?;
-    let audio = synth_audio(30.0);
+    let audio = synth_audio(120.0);
     // One warmup pass (first call pays one-time graph setup), then measure.
     let _ = recognizer.transcribe(SAMPLE_RATE, &audio[..SAMPLE_RATE as usize]);
     let t = Instant::now();
     for chunk in audio.chunks((SAMPLE_RATE * 10) as usize) {
         let _ = recognizer.transcribe(SAMPLE_RATE, chunk);
     }
-    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), 30.0));
+    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), 120.0));
     drop(recognizer);
 
-    // Diarization: 60 s.
+    // Diarization: 240 s.
     let mut diarizer = Diarize::new(
         models_dir.join("diarization_segmentation.onnx"),
         models_dir.join("speaker_embedding.onnx"),
@@ -649,13 +649,13 @@ pub fn bench_onnx(
         },
     )
     .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
-    let audio = synth_audio(60.0);
+    let audio = synth_audio(240.0);
     let t = Instant::now();
     let _ = diarizer.compute(audio, None);
-    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), 60.0));
+    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), 240.0));
     drop(diarizer);
 
-    // Speaker embeddings: 10 × 5 s windows (matches how voiceprints are made).
+    // Speaker embeddings: 40 × 5 s windows (matches how voiceprints are made).
     let mut extractor = EmbeddingExtractor::new(ExtractorConfig {
         model: models_dir.join("speaker_embedding.onnx").to_string_lossy().into_owned(),
         provider: Some(provider.into()),
@@ -666,10 +666,10 @@ pub fn bench_onnx(
     let window = synth_audio(5.0);
     let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
     let t = Instant::now();
-    for _ in 0..10 {
+    for _ in 0..40 {
         let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
     }
-    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), 50.0));
+    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), 200.0));
 
     Ok(rows)
 }

@@ -94,7 +94,7 @@ fn run(ctx: &Arc<Ctx>) {
     }
     for (gpu, label) in llm_variants {
         emit(&rows, &format!("Summarizer LLM on {label}…"));
-        match crate::pipeline::native::bench_llm(&models_dir, threads, gpu, 96) {
+        match crate::pipeline::native::bench_llm(&models_dir, threads, gpu, 384) {
             Ok((load_s, tok_per_s)) => rows.push(json!({
                 "stage": "Summarizer LLM",
                 "backend": label,
