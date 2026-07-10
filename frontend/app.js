@@ -1068,24 +1068,6 @@ const CONFIG_META = {
     help: "Hint for Whisper models — Parakeet always detects the language itself.",
     languages: "Auto-detect",
   },
-  ASR_PROVIDER: {
-    section: "config-transcription",
-    label: "Transcription compute",
-    help: "Where the speech-to-text model runs. CPU measures fastest on most machines — verify with the benchmark (gauge icon).",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
-  },
-  DIAR_PROVIDER: {
-    section: "config-transcription",
-    label: "Speaker separation compute",
-    help: "Where the who-spoke-when model runs.",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
-  },
-  SPEAKER_PROVIDER: {
-    section: "config-transcription",
-    label: "Voice matching compute",
-    help: "Where the voiceprint model runs.",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
-  },
   SPEAKER_THRESHOLD: {
     section: "config-transcription",
     label: "Voice match strictness",
@@ -1121,9 +1103,27 @@ const CONFIG_META = {
   },
   USE_GPU: {
     section: "config-processing",
-    label: "Hardware acceleration",
-    help: "Run the summary model on the GPU where possible. Falls back to the CPU automatically. Transcription and speaker detection always use the CPU, where they run fastest.",
+    label: "Summary compute (GPU)",
+    help: "Run the summary model on the GPU where possible; off = CPU. The GPU is the summarizer's only accelerator — the steps below use the Neural Engine instead. The benchmark (gauge icon) measures every option on this machine and can apply the fastest.",
     toggle: true,
+  },
+  ASR_PROVIDER: {
+    section: "config-processing",
+    label: "Transcription compute",
+    help: "Where the speech-to-text model runs: CPU, or the Neural Engine (CoreML, Apple Silicon only — the GPU is not available for this engine). CPU measures fastest on most machines.",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+  },
+  DIAR_PROVIDER: {
+    section: "config-processing",
+    label: "Speaker separation compute",
+    help: "Where the who-spoke-when model runs: CPU or Neural Engine.",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+  },
+  SPEAKER_PROVIDER: {
+    section: "config-processing",
+    label: "Voice matching compute",
+    help: "Where the voiceprint model runs: CPU or Neural Engine.",
+    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
   },
   NUM_THREADS: {
     section: "config-processing",
