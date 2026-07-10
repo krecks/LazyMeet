@@ -53,6 +53,85 @@ pub struct Summary {
 
 pub type Voiceprints = BTreeMap<String, Vec<f64>>;
 
+/// Duration + downsampled waveform peaks for the pre-transcription prep
+/// screen (`probe_media`).
+#[derive(Debug, Clone, Serialize)]
+pub struct MediaProbe {
+    pub duration: f64,
+    pub peaks: Vec<f32>,
+}
+
+// --------------------------------------------------------------------------
+// Time-range selection (transcribe only parts of a recording)
+// --------------------------------------------------------------------------
+
+/// A user-selected span of the recording, in seconds of original-media time.
+pub type TimeRange = (f64, f64);
+
+/// Ranges shorter than this are accidental clicks and are dropped.
+const MIN_RANGE_SECS: f64 = 0.1;
+/// Neighbors closer than this merge into one range.
+const MERGE_GAP_SECS: f64 = 0.01;
+
+pub fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
+
+/// Clean up user-supplied ranges: clamp negative starts to zero, drop
+/// non-finite / inverted / sub-100 ms entries, sort, and merge overlapping or
+/// near-touching neighbors. Ends past the recording are left alone — the true
+/// duration isn't known here and the pipeline clamps to the decoded samples.
+pub fn normalize_ranges(raw: &[TimeRange]) -> Result<Vec<TimeRange>, String> {
+    let mut ranges: Vec<TimeRange> = raw
+        .iter()
+        .filter(|(s, e)| s.is_finite() && e.is_finite())
+        .map(|&(s, e)| (s.max(0.0), e))
+        .filter(|(s, e)| e - s >= MIN_RANGE_SECS)
+        .collect();
+    ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<TimeRange> = Vec::new();
+    for (s, e) in ranges {
+        match merged.last_mut() {
+            Some(last) if s <= last.1 + MERGE_GAP_SECS => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    if merged.is_empty() {
+        return Err("no usable time ranges selected".into());
+    }
+    Ok(merged)
+}
+
+/// Map diarization turns from the concatenated-selection timeline back to
+/// original-media time. `ranges` must be normalized (sorted, disjoint). A turn
+/// that straddles a splice boundary is split at it — turns carry no text, so
+/// the split is lossless.
+pub fn remap_turns(ranges: &[TimeRange], turns: &[Turn]) -> Vec<Turn> {
+    // cum[k] = where range k starts on the concatenated timeline.
+    let mut cum = Vec::with_capacity(ranges.len());
+    let mut total = 0.0;
+    for (s, e) in ranges {
+        cum.push(total);
+        total += e - s;
+    }
+    let mut out = Vec::new();
+    for turn in turns {
+        for (k, &(s, e)) in ranges.iter().enumerate() {
+            let lo = turn.start.max(cum[k]);
+            let hi = turn.end.min(cum[k] + (e - s));
+            if hi - lo > 1e-6 {
+                out.push(Turn {
+                    start: round3(s + lo - cum[k]),
+                    end: round3(s + hi - cum[k]),
+                    speaker: turn.speaker.clone(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.start.total_cmp(&b.start));
+    out
+}
+
 /// Language names the summarizer can be instructed in; the same codes are
 /// valid Whisper language hints ("auto" is added at the API layer).
 pub const LANGUAGE_NAMES: &[(&str, &str)] = &[
@@ -117,18 +196,37 @@ pub fn extract_playback_audio(ctx: &PipelineCtx, src: &Path, out_m4a: &Path) -> 
     native_only(ctx, |_| native_impl::extract_playback_audio(ctx, src, out_m4a))
 }
 
-pub fn transcribe(ctx: &PipelineCtx, wav: &Path) -> Result<Vec<Segment>, String> {
+/// `ranges` restricts transcription to the selected spans (None = whole
+/// file); timestamps stay in original-media time either way.
+pub fn transcribe(
+    ctx: &PipelineCtx,
+    wav: &Path,
+    ranges: Option<&[TimeRange]>,
+) -> Result<Vec<Segment>, String> {
     if ctx.fake {
-        return Ok(fake::transcribe());
+        return Ok(fake::transcribe(ranges));
     }
-    native_only(ctx, |_| native_impl::transcribe(ctx, wav))
+    native_only(ctx, |_| native_impl::transcribe(ctx, wav, ranges))
 }
 
-pub fn diarize(ctx: &PipelineCtx, wav: &Path, num_speakers: i64) -> Result<Vec<Turn>, String> {
+pub fn diarize(
+    ctx: &PipelineCtx,
+    wav: &Path,
+    num_speakers: i64,
+    ranges: Option<&[TimeRange]>,
+) -> Result<Vec<Turn>, String> {
     if ctx.fake {
-        return Ok(fake::diarize());
+        return Ok(fake::diarize(ranges));
     }
-    native_only(ctx, |_| native_impl::diarize(ctx, wav, num_speakers))
+    native_only(ctx, |_| native_impl::diarize(ctx, wav, num_speakers, ranges))
+}
+
+/// Duration + waveform peaks for the prep screen, from one ffmpeg decode.
+pub fn probe_media(ctx: &PipelineCtx, src: &Path) -> Result<MediaProbe, String> {
+    if ctx.fake {
+        return Ok(fake::probe());
+    }
+    native_only(ctx, |_| native_impl::probe_media(ctx, src))
 }
 
 pub fn compute_voiceprints(
@@ -179,10 +277,22 @@ mod native_impl {
     pub fn extract_playback_audio(_: &PipelineCtx, _: &Path, _: &Path) -> Result<(), String> {
         unreachable!()
     }
-    pub fn transcribe(_: &PipelineCtx, _: &Path) -> Result<Vec<Segment>, String> {
+    pub fn transcribe(
+        _: &PipelineCtx,
+        _: &Path,
+        _: Option<&[TimeRange]>,
+    ) -> Result<Vec<Segment>, String> {
         unreachable!()
     }
-    pub fn diarize(_: &PipelineCtx, _: &Path, _: i64) -> Result<Vec<Turn>, String> {
+    pub fn diarize(
+        _: &PipelineCtx,
+        _: &Path,
+        _: i64,
+        _: Option<&[TimeRange]>,
+    ) -> Result<Vec<Turn>, String> {
+        unreachable!()
+    }
+    pub fn probe_media(_: &PipelineCtx, _: &Path) -> Result<MediaProbe, String> {
         unreachable!()
     }
     pub fn compute_voiceprints(_: &PipelineCtx, _: &Path, _: &[Turn]) -> Result<Voiceprints, String> {

@@ -92,7 +92,7 @@ fn main() {
     }
 
     let started = Instant::now();
-    let res = api::create_meeting(&ctx, &recording, num_speakers).unwrap_or_else(|e| {
+    let res = api::create_meeting(&ctx, &recording, num_speakers, None, None).unwrap_or_else(|e| {
         eprintln!("create_meeting failed: {e}");
         std::process::exit(1);
     });

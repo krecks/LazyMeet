@@ -29,7 +29,7 @@ fn data_info_shape() {
 #[test]
 fn data_info_counts_meeting_files() {
     let app = TestApp::fake();
-    store::create_meeting(&app.ctx.paths, &app.ctx.locks, "sized.mp4", -1).unwrap();
+    store::create_meeting(&app.ctx.paths, &app.ctx.locks, "sized.mp4", -1, None, None).unwrap();
     let data = api::get_data_info(&app.ctx);
     assert!(data["meetings_bytes"].as_u64().unwrap() > 0);
     assert!(data["meeting_count"].as_u64().unwrap() >= 1);

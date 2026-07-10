@@ -1051,3 +1051,114 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .bench-how li {
   margin-bottom: 6px;
 }
+
+/* ------------------------------------------------------ prepare screen */
+.prep-body {
+  max-width: 760px;
+  gap: 1.1rem;
+}
+.prep-player {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.prep-player video {
+  width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-m);
+  background: #000;
+}
+.prep-player video.audio-only { max-height: 48px; }
+
+.wave-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  padding: 0.4rem;
+}
+#prep-wave {
+  display: block;
+  width: 100%;
+  touch-action: none; /* pointer drags select ranges; don't pan/zoom */
+}
+.wave-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 1rem;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  border-radius: var(--radius-m);
+}
+
+.prep-ranges .note-head { gap: 0.5rem; }
+.prep-ranges .note-head h3 { margin-right: auto; }
+.range-list {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+}
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.range-row:hover { background: var(--accent-soft); }
+.range-label {
+  min-width: 6.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.time-input {
+  width: 6.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+}
+.time-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.range-dur { margin-left: auto; }
+
+.prep-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+.prep-actions .speakers-field { margin: 0; }
+.prep-spacer { flex: 1; }
+
+.wave-zoom {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  display: flex;
+  gap: 0.25rem;
+}
+.wave-zoom button {
+  min-width: 1.7rem;
+  height: 1.5rem;
+  padding: 0 0.45rem;
+  font: 600 0.8rem var(--font-sans);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.wave-zoom button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}

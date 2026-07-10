@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use lazymeet_core::error::{ApiError, ApiResult};
@@ -60,14 +60,61 @@ pub async fn download_model(ctx: State<'_, App>, step: String, id: String) -> Ap
 
 // --- Meetings ---------------------------------------------------------------
 
+/// `ranges` (`[[start, end], ...]` in seconds, or null/omitted for the whole
+/// file) restricts transcription to the user-selected spans. `language`
+/// ("auto" or a code) is a per-meeting spoken-language hint that outranks the
+/// ASR_LANGUAGE setting; null/omitted keeps the setting.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_meeting(
     ctx: State<'_, App>,
     path: String,
     num_speakers: i64,
+    ranges: Option<Vec<(f64, f64)>>,
+    language: Option<String>,
 ) -> ApiResult<Value> {
     let ctx = ctx.inner().clone();
-    blocking(move || api::create_meeting(&ctx, &PathBuf::from(path), num_speakers)).await
+    blocking(move || {
+        api::create_meeting(
+            &ctx,
+            &PathBuf::from(path),
+            num_speakers,
+            ranges.as_deref(),
+            language.as_deref(),
+        )
+    })
+    .await
+}
+
+/// Duration + waveform peaks for the prep screen. Decodes the file with the
+/// bundled ffmpeg — takes a few seconds on long recordings.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn probe_media(ctx: State<'_, App>, path: String) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || api::probe_media(&ctx, &PathBuf::from(path))).await
+}
+
+/// Audio-only AAC preview for formats the webview can't play (mkv, avi, …).
+/// Decodes + encodes with the bundled ffmpeg — seconds to ~a minute on long
+/// recordings; the frontend shows a "preparing" note meanwhile.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn extract_preview_audio(ctx: State<'_, App>, path: String) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || api::extract_preview_audio(&ctx, &PathBuf::from(path))).await
+}
+
+/// Allow the picked file through the asset protocol so the prep screen's
+/// <video> can stream it before it is copied into the uploads dir (whose
+/// directory scope is set at startup).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn prepare_media_preview(app: AppHandle, path: String) -> ApiResult<Value> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(ApiError::invalid("file not found"));
+    }
+    app.asset_protocol_scope()
+        .allow_file(&p)
+        .map_err(|e| ApiError::internal(format!("could not enable preview: {e}")))?;
+    Ok(serde_json::json!({"ok": true}))
 }
 
 /// Native replacement for the `<input type="file">` picker (webview File

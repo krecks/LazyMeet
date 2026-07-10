@@ -82,8 +82,10 @@ pub fn startup(ctx: &Arc<Ctx>) -> std::io::Result<()> {
 
 /// Remove leftovers the old Python backend could leave behind on a crash:
 /// cross-process `.lock` files (locking is in-process now) and orphaned
-/// atomic-write `.tmp` staging files.
+/// atomic-write `.tmp` staging files. The prep screen's transient audio
+/// preview goes too — it only matters while its prep screen is open.
 fn sweep_stale_files(ctx: &Ctx) {
+    let _ = std::fs::remove_dir_all(ctx.paths.uploads_dir().join(config::PREVIEW_DIR));
     for dir in [ctx.paths.meetings_dir(), ctx.paths.data_dir.clone()] {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {

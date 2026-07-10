@@ -31,7 +31,10 @@ use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 
-use super::{MergedSegment, PipelineCtx, Segment, Summary, Turn, Voiceprints};
+use super::{
+    remap_turns, round3, MediaProbe, MergedSegment, PipelineCtx, Segment, Summary, Turn,
+    Voiceprints,
+};
 use crate::config;
 use crate::models::resolve_asr_at;
 
@@ -115,6 +118,113 @@ pub fn extract_playback_audio(ctx: &PipelineCtx, src: &Path, out_m4a: &Path) -> 
 }
 
 // --------------------------------------------------------------------------
+// Media probe (duration + waveform peaks for the prep screen)
+// --------------------------------------------------------------------------
+
+/// Probe decode rate — waveform peaks don't need speech-band fidelity.
+const PROBE_RATE: u32 = 8000;
+/// One fine peak bucket per 100 ms of audio while streaming.
+const FINE_BUCKET_SAMPLES: usize = 800;
+/// At most this many peaks are handed to the UI — 100 ms resolution up to an
+/// hour of audio, so the prep screen's zoom stays sharp on long recordings.
+const MAX_PEAKS: usize = 36_000;
+
+/// Duration + waveform peaks from a single ffmpeg decode. The duration comes
+/// from the decoded sample count — exact, and no ffprobe is bundled. The PCM
+/// is streamed (a 2 h recording decodes to ~115 MB) and folded into 100 ms
+/// peak buckets on the fly, then down to at most [`MAX_PEAKS`] values.
+pub fn probe_media(ctx: &PipelineCtx, src: &Path) -> Result<MediaProbe, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut cmd = ffmpeg_cmd(ctx)?;
+    cmd.args(["-v", "error"])
+        .arg("-i")
+        .arg(src)
+        .args(["-vn", "-ac", "1", "-ar"])
+        .arg(PROBE_RATE.to_string())
+        .args(["-f", "s16le", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+
+    // Drain stderr on its own thread so a chatty ffmpeg can't deadlock.
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = stderr.read_to_string(&mut buf);
+        buf
+    });
+
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut fine: Vec<f32> = Vec::new();
+    let mut peak = 0.0f32;
+    let mut in_bucket = 0usize;
+    let mut total_samples = 0u64;
+    let mut push = |s: i16| {
+        let v = (s as f32 / 32768.0).abs();
+        if v > peak {
+            peak = v;
+        }
+        in_bucket += 1;
+        total_samples += 1;
+        if in_bucket == FINE_BUCKET_SAMPLES {
+            fine.push(peak);
+            peak = 0.0;
+            in_bucket = 0;
+        }
+    };
+    let mut carry: Option<u8> = None; // odd-length read: half an i16
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_thread.join();
+                return Err(format!("ffmpeg read failed: {e}"));
+            }
+        };
+        let mut chunk = &buf[..n];
+        if let Some(lo) = carry.take() {
+            push(i16::from_le_bytes([lo, chunk[0]]));
+            chunk = &chunk[1..];
+        }
+        let mut pairs = chunk.chunks_exact(2);
+        for pair in &mut pairs {
+            push(i16::from_le_bytes([pair[0], pair[1]]));
+        }
+        if let [lo] = pairs.remainder() {
+            carry = Some(*lo);
+        }
+    }
+    if in_bucket > 0 {
+        fine.push(peak);
+    }
+
+    let status = child.wait().map_err(|e| format!("ffmpeg failed: {e}"))?;
+    let stderr_text = stderr_thread.join().unwrap_or_default();
+    if !status.success() {
+        let tail: String = stderr_text.lines().rev().take(4).collect::<Vec<_>>().join(" | ");
+        return Err(format!("ffmpeg failed ({status}): {tail}"));
+    }
+    if total_samples == 0 {
+        return Err("no audio track found in this file".into());
+    }
+    let duration = total_samples as f64 / PROBE_RATE as f64;
+    let group = fine.len().div_ceil(MAX_PEAKS).max(1);
+    let peaks = fine
+        .chunks(group)
+        // 3 decimals is plenty for drawing and keeps the JSON payload small.
+        .map(|c| (c.iter().copied().fold(0.0, f32::max) * 1000.0).round() / 1000.0)
+        .collect();
+    Ok(MediaProbe { duration, peaks })
+}
+
+// --------------------------------------------------------------------------
 // VAD + ASR (port of transcribe.py)
 // --------------------------------------------------------------------------
 
@@ -182,12 +292,22 @@ fn load_wav(wav: &Path) -> Result<Vec<f32>, String> {
     Ok(samples)
 }
 
-/// The ASR models are utterance-level, so Silero VAD cuts the audio into
-/// speech segments first; the timing comes from the VAD.
-pub fn transcribe(ctx: &PipelineCtx, wav: &Path) -> Result<Vec<Segment>, String> {
-    let samples = load_wav(wav)?;
-    let mut recognizer = load_recognizer(ctx)?;
-    let mut vad = SileroVad::new(
+/// Seconds (original-media time) → clamped, non-empty sample index spans into
+/// the loaded WAV. A range past the end of the audio clamps to it.
+fn sample_ranges(ranges: &[(f64, f64)], len: usize) -> Vec<(usize, usize)> {
+    ranges
+        .iter()
+        .map(|&(s, e)| {
+            let a = ((s * SAMPLE_RATE as f64) as usize).min(len);
+            let b = ((e * SAMPLE_RATE as f64).ceil() as usize).min(len);
+            (a, b)
+        })
+        .filter(|(a, b)| b > a)
+        .collect()
+}
+
+fn new_vad(ctx: &PipelineCtx) -> Result<SileroVad, String> {
+    SileroVad::new(
         SileroVadConfig {
             model: ctx.models_dir.join("silero_vad.onnx").to_string_lossy().into_owned(),
             // sherpa-onnx defaults (Python left them implicit).
@@ -203,13 +323,22 @@ pub fn transcribe(ctx: &PipelineCtx, wav: &Path) -> Result<Vec<Segment>, String>
         },
         100.0,
     )
-    .map_err(|e| format!("vad load: {e}"))?;
+    .map_err(|e| format!("vad load: {e}"))
+}
 
-    let mut segments: Vec<Segment> = Vec::new();
+/// Feed one contiguous sample span through VAD + recognizer, appending
+/// segments stamped in original-media time (`offset` = span start, seconds).
+fn transcribe_span(
+    vad: &mut SileroVad,
+    recognizer: &mut Recognizer,
+    samples: &[f32],
+    offset: f64,
+    out: &mut Vec<Segment>,
+) {
     let drain = |vad: &mut SileroVad, recognizer: &mut Recognizer, out: &mut Vec<Segment>| {
         while !vad.is_empty() {
             let seg = vad.front();
-            let start = seg.start as f64 / SAMPLE_RATE as f64;
+            let start = offset + seg.start as f64 / SAMPLE_RATE as f64;
             let end = start + seg.samples.len() as f64 / SAMPLE_RATE as f64;
             let text = recognizer.transcribe(SAMPLE_RATE, &seg.samples);
             let text = text.trim();
@@ -225,22 +354,52 @@ pub fn transcribe(ctx: &PipelineCtx, wav: &Path) -> Result<Vec<Segment>, String>
     };
     for chunk in samples.chunks(512) {
         vad.accept_waveform(chunk.to_vec());
-        drain(&mut vad, &mut recognizer, &mut segments);
+        drain(vad, recognizer, out);
     }
     vad.flush();
-    drain(&mut vad, &mut recognizer, &mut segments);
-    Ok(segments)
+    drain(vad, recognizer, out);
 }
 
-fn round3(v: f64) -> f64 {
-    (v * 1000.0).round() / 1000.0
+/// The ASR models are utterance-level, so Silero VAD cuts the audio into
+/// speech segments first; the timing comes from the VAD. With `ranges`, only
+/// the selected spans are fed — each through a fresh VAD (sherpa's VAD has no
+/// reset API, and a fresh one makes the sample counter unambiguous) — so no
+/// utterance can straddle a splice.
+pub fn transcribe(
+    ctx: &PipelineCtx,
+    wav: &Path,
+    ranges: Option<&[(f64, f64)]>,
+) -> Result<Vec<Segment>, String> {
+    let samples = load_wav(wav)?;
+    let mut recognizer = load_recognizer(ctx)?;
+    let spans = match ranges {
+        Some(rs) => sample_ranges(rs, samples.len()),
+        None => vec![(0, samples.len())],
+    };
+    let mut segments: Vec<Segment> = Vec::new();
+    for (a, b) in spans {
+        let mut vad = new_vad(ctx)?;
+        transcribe_span(
+            &mut vad,
+            &mut recognizer,
+            &samples[a..b],
+            a as f64 / SAMPLE_RATE as f64,
+            &mut segments,
+        );
+    }
+    Ok(segments)
 }
 
 // --------------------------------------------------------------------------
 // Diarization (port of diarize.py)
 // --------------------------------------------------------------------------
 
-pub fn diarize(ctx: &PipelineCtx, wav: &Path, num_speakers: i64) -> Result<Vec<Turn>, String> {
+pub fn diarize(
+    ctx: &PipelineCtx,
+    wav: &Path,
+    num_speakers: i64,
+    ranges: Option<&[(f64, f64)]>,
+) -> Result<Vec<Turn>, String> {
     // A meeting-supplied count (>0) wins; otherwise the env default (-1 auto).
     let n = if num_speakers > 0 { num_speakers } else { config::env_num_speakers() };
     let mut diarizer = Diarize::new(
@@ -262,8 +421,31 @@ pub fn diarize(ctx: &PipelineCtx, wav: &Path, num_speakers: i64) -> Result<Vec<T
     .map_err(|e| format!("diarizer load: {e}"))?;
 
     let samples = load_wav(wav)?;
+    // With ranges, the diarizer runs once over the spliced selection (speaker
+    // clustering must see all spans together); the concat-time turns are then
+    // remapped — splitting at splice boundaries — back to original time.
+    let (input, remap) = match ranges {
+        None => (samples, None),
+        Some(rs) => {
+            let spans = sample_ranges(rs, samples.len());
+            let mut concat = Vec::with_capacity(spans.iter().map(|(a, b)| b - a).sum());
+            for &(a, b) in &spans {
+                concat.extend_from_slice(&samples[a..b]);
+            }
+            if concat.is_empty() {
+                return Ok(Vec::new());
+            }
+            // Remap against the *clamped* spans so a range past the end of
+            // the audio maps consistently with what was actually fed.
+            let secs: Vec<(f64, f64)> = spans
+                .iter()
+                .map(|&(a, b)| (a as f64 / SAMPLE_RATE as f64, b as f64 / SAMPLE_RATE as f64))
+                .collect();
+            (concat, Some(secs))
+        }
+    };
     let mut turns: Vec<Turn> = diarizer
-        .compute(samples, None)
+        .compute(input, None)
         .map_err(|e| format!("diarize: {e}"))?
         .into_iter()
         .map(|s| Turn {
@@ -272,6 +454,9 @@ pub fn diarize(ctx: &PipelineCtx, wav: &Path, num_speakers: i64) -> Result<Vec<T
             speaker: format!("SPEAKER_{:02}", s.speaker),
         })
         .collect();
+    if let Some(secs) = remap {
+        turns = remap_turns(&secs, &turns);
+    }
     turns.sort_by(|a, b| a.start.total_cmp(&b.start));
     Ok(turns)
 }

@@ -59,7 +59,7 @@ fn title_rejects_empty_and_too_long() {
 #[test]
 fn title_editable_while_processing() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busy.mp4", -1).unwrap();
+    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busy.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -77,7 +77,7 @@ fn title_editable_while_processing() {
 #[test]
 fn old_records_without_title_get_fallback() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "legacy.mp4", -1).unwrap();
+    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "legacy.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     // Simulate a record from before titles existed.
     let path = app.ctx.paths.meetings_dir().join(format!("{mid}.json"));
@@ -128,7 +128,7 @@ fn content_edit_on_done_meeting() {
 #[test]
 fn content_edit_blocked_while_processing_or_error() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "locked.mp4", -1).unwrap();
+    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "locked.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     for status in ["queued", "summarizing", "error"] {
         store::update_meeting(
@@ -216,7 +216,7 @@ fn segment_edit_error_cases() {
 fn segment_edit_blocked_while_processing() {
     let app = TestApp::fake();
     let record =
-        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busyseg.mp4", -1).unwrap();
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busyseg.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,

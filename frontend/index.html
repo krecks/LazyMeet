@@ -126,20 +126,6 @@
           <strong>Drop a recording here</strong>
           <span class="muted small">or click to choose an audio or video file</span>
         </div>
-        <label class="speakers-field">
-          <span class="field-label">Speakers</span>
-          <select id="num-speakers">
-            <option value="-1">Auto-detect</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-          </select>
-        </label>
 
         <div class="side-head">
           <h2>Meetings</h2>
@@ -243,6 +229,81 @@
         </article>
       </main>
     </div>
+  </section>
+
+  <!-- Prepare a recording: preview it and choose which parts to transcribe -->
+  <section id="prepare" class="screen hidden">
+    <header class="app-header">
+      <div class="brand">
+        <button id="prep-back" class="icon-btn" title="Cancel" aria-label="Cancel and go back">
+          <svg class="icon"><use href="#i-back" /></svg>
+        </button>
+        <div>
+          <h1 class="wordmark">Prepare recording</h1>
+          <p id="prep-file" class="brand-tag"></p>
+        </div>
+      </div>
+    </header>
+
+    <main class="settings-body prep-body">
+      <div class="prep-player">
+        <video id="prep-video" controls playsinline preload="metadata"></video>
+        <p id="prep-nopreview" class="muted small hidden">Preview isn't available for this
+          format — selecting and transcribing still work.</p>
+      </div>
+
+      <div id="prep-wave-wrap" class="wave-wrap">
+        <canvas id="prep-wave" role="img"
+          aria-label="Zoomable audio waveform. The selected time ranges are edited in the list below."></canvas>
+        <div class="wave-zoom" role="group" aria-label="Waveform zoom">
+          <button id="wave-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+          <button id="wave-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="wave-zoom-fit" type="button" title="Show the whole file"
+            aria-label="Show the whole file">Fit</button>
+        </div>
+        <div id="prep-wave-status" class="wave-status muted">Analyzing audio…</div>
+      </div>
+
+      <section class="prep-ranges">
+        <div class="note-head">
+          <h3>Parts to transcribe</h3>
+          <button id="prep-add-range" class="btn ghost" type="button">
+            <svg class="icon"><use href="#i-plus" /></svg><span>Add segment</span>
+          </button>
+          <button id="prep-select-all" class="btn ghost" type="button"><span>Whole file</span></button>
+        </div>
+        <ul id="prep-range-list" class="range-list"></ul>
+        <p class="muted small">Drag on the waveform to add a segment; drag its edges to adjust,
+          drag its middle to move it. Pinch or ⌘-scroll to zoom, scroll to pan, and drag the
+          strip under the waveform to jump around. Times can also be typed below.</p>
+      </section>
+
+      <div class="prep-actions">
+        <label class="speakers-field">
+          <span class="field-label">Speakers</span>
+          <select id="num-speakers">
+            <option value="-1">Auto-detect</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label class="speakers-field"
+          title="Language spoken in the recording — a hint for Whisper models; Parakeet always detects it automatically.">
+          <span class="field-label">Language</span>
+          <select id="prep-language"></select>
+        </label>
+        <span class="prep-spacer"></span>
+        <span id="prep-hint" class="muted small hidden">Select at least one segment</span>
+        <button id="prep-cancel" class="btn ghost" type="button">Cancel</button>
+        <button id="prep-transcribe" class="btn" type="button">Transcribe</button>
+      </div>
+    </main>
   </section>
 
   <!-- Settings -->

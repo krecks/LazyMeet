@@ -42,7 +42,19 @@ impl TestApp {
         std::fs::create_dir_all(&src).unwrap();
         let path = src.join(name);
         std::fs::write(&path, bytes).unwrap();
-        let res = api::create_meeting(&self.ctx, &path, -1).expect("create_meeting");
+        let res = api::create_meeting(&self.ctx, &path, -1, None, None).expect("create_meeting");
+        res["id"].as_str().unwrap().to_string()
+    }
+
+    /// Like `upload`, but restricted to the given time ranges.
+    #[allow(dead_code)] // each test binary compiles common/ separately
+    pub fn upload_ranges(&self, name: &str, bytes: &[u8], ranges: &[(f64, f64)]) -> String {
+        let src = self.tmp.path().join("incoming");
+        std::fs::create_dir_all(&src).unwrap();
+        let path = src.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let res =
+            api::create_meeting(&self.ctx, &path, -1, Some(ranges), None).expect("create_meeting");
         res["id"].as_str().unwrap().to_string()
     }
 

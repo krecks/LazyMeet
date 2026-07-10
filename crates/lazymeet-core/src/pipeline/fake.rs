@@ -7,29 +7,64 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use super::{Segment, Summary, Turn, Voiceprints};
+use super::{MediaProbe, Segment, Summary, TimeRange, Turn, Voiceprints};
 use crate::config::FAKE_EMBED_DIM;
 
-pub fn transcribe() -> Vec<Segment> {
+/// With `ranges`, the canonical utterances are clipped to the selected spans
+/// (dropped when they don't overlap) — the same "only selected audio shows
+/// up, timestamps stay in original time" contract as the native pipeline.
+pub fn transcribe(ranges: Option<&[TimeRange]>) -> Vec<Segment> {
     let s = |start: f64, end: f64, text: &str| Segment { start, end, text: text.into() };
-    vec![
+    let all = vec![
         s(0.0, 3.2, "Hi everyone, thanks for joining the weekly sync."),
         s(3.4, 7.1, "Let's start with the transcription pipeline status."),
         s(7.3, 11.0, "I finished wiring up the diarization step yesterday."),
         s(11.2, 15.4, "Great. Can you also add the speaker library before Friday?"),
         s(15.6, 19.0, "Yes, I'll have it ready and send the demo recording."),
-    ]
+    ];
+    let Some(ranges) = ranges else { return all };
+    let mut out = Vec::new();
+    for seg in all {
+        for &(s, e) in ranges {
+            let lo = seg.start.max(s);
+            let hi = seg.end.min(e);
+            if hi - lo > 1e-6 {
+                out.push(Segment { start: lo, end: hi, text: seg.text.clone() });
+            }
+        }
+    }
+    out
 }
 
-pub fn diarize() -> Vec<Turn> {
+pub fn diarize(ranges: Option<&[TimeRange]>) -> Vec<Turn> {
     // Two alternating speakers matching the fake transcript timeline.
     let t = |start: f64, end: f64, speaker: &str| Turn { start, end, speaker: speaker.into() };
-    vec![
+    let all = vec![
         t(0.0, 7.2, "SPEAKER_00"),
         t(7.2, 11.1, "SPEAKER_01"),
         t(11.1, 15.5, "SPEAKER_00"),
         t(15.5, 19.2, "SPEAKER_01"),
-    ]
+    ];
+    let Some(ranges) = ranges else { return all };
+    let mut out = Vec::new();
+    for turn in all {
+        for &(s, e) in ranges {
+            let lo = turn.start.max(s);
+            let hi = turn.end.min(e);
+            if hi - lo > 1e-6 {
+                out.push(Turn { start: lo, end: hi, speaker: turn.speaker.clone() });
+            }
+        }
+    }
+    out
+}
+
+/// Deterministic probe matching the fake timeline (which ends at 19.2 s).
+pub fn probe() -> MediaProbe {
+    MediaProbe {
+        duration: 19.2,
+        peaks: (0..192).map(|i| (i as f32 * 0.7).sin().abs() * 0.8 + 0.1).collect(),
+    }
 }
 
 /// Deterministic unit-ish vector seeded by the speaker label. Same label →

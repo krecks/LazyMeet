@@ -79,6 +79,8 @@ pub fn create_meeting(
     locks: &StoreLocks,
     filename: &str,
     num_speakers: i64,
+    ranges: Option<&[(f64, f64)]>,
+    language: Option<&str>,
 ) -> std::io::Result<Record> {
     let meeting_id = uuid::Uuid::new_v4().simple().to_string();
     let mut record = Map::new();
@@ -90,6 +92,25 @@ pub fn create_meeting(
     record.insert("status".into(), json!("queued"));
     record.insert("error".into(), Value::Null);
     record.insert("num_speakers".into(), json!(num_speakers)); // -1 = auto-detect
+    // null = whole file; [[start, end], ...] = the spans to transcribe
+    // (seconds, original-media time), normalized at the API layer. Records
+    // from before this feature lack the key, which reads the same as null.
+    record.insert(
+        "ranges".into(),
+        match ranges {
+            Some(rs) => json!(rs),
+            None => Value::Null,
+        },
+    );
+    // Per-meeting spoken-language hint ("auto" or a code); null = use the
+    // ASR_LANGUAGE setting. Pre-existing records lack the key = null.
+    record.insert(
+        "language".into(),
+        match language {
+            Some(lang) => json!(lang),
+            None => Value::Null,
+        },
+    );
     record.insert("speakers".into(), json!({})); // diarized id -> display name
     record.insert("recognized".into(), json!([])); // auto-matched from the library
     record.insert("confirmed".into(), json!([])); // recognized ids the user verified

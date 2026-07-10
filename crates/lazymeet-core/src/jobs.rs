@@ -296,8 +296,13 @@ fn versions_with(
 pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
     // Pick up the latest settings — a fresh snapshot per job, like the fresh
     // worker process (or Python's config.refresh()) used to guarantee.
-    let config = Config::resolve(&ctx.paths);
+    let mut config = Config::resolve(&ctx.paths);
     let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id).unwrap_or_default();
+    // A language chosen on the prep screen outranks the saved setting for
+    // this meeting (it's stored on the record, so re-transcriptions keep it).
+    if let Some(lang) = record.get("language").and_then(|v| v.as_str()) {
+        config.override_value("ASR_LANGUAGE", json!(lang));
+    }
 
     let pctx = PipelineCtx {
         fake: ctx.fake,
@@ -344,6 +349,12 @@ fn run_full(
     action: &str,
 ) -> Result<(), String> {
     let num_speakers = record.get("num_speakers").and_then(|v| v.as_i64()).unwrap_or(-1);
+    // User-selected spans to transcribe (null/absent = the whole file). Kept
+    // on the record so queued resumes and re-transcriptions honor them too.
+    let ranges: Option<Vec<pipeline::TimeRange>> = record
+        .get("ranges")
+        .filter(|v| !v.is_null())
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
     let retranscribe = action == "transcription";
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("extracting"))]));
@@ -369,10 +380,10 @@ fn run_full(
     }
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("transcribing"))]));
-    let segments = pipeline::transcribe(pctx, &wav)?;
+    let segments = pipeline::transcribe(pctx, &wav, ranges.as_deref())?;
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
-    let turns = pipeline::diarize(pctx, &wav, num_speakers)?;
+    let turns = pipeline::diarize(pctx, &wav, num_speakers, ranges.as_deref())?;
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
     let voiceprints = pipeline::compute_voiceprints(pctx, &wav, &turns)?;

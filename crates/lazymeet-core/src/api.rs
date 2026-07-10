@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::config;
 use crate::error::{ApiError, ApiResult};
-use crate::pipeline::LANGUAGE_NAMES;
+use crate::pipeline::{self, LANGUAGE_NAMES};
 use crate::store::{self, StoreError};
 use crate::{jobs, models, Ctx};
 
@@ -152,10 +152,27 @@ pub fn download_model(ctx: &Arc<Ctx>, step: &str, id: &str) -> ApiResult<Value> 
 
 /// POST /api/meetings — native replacement for the multipart upload: the
 /// recording is referenced by filesystem path (drag-drop / file dialog give
-/// real paths) and copied into the uploads dir.
-pub fn create_meeting(ctx: &Arc<Ctx>, src: &Path, num_speakers: i64) -> ApiResult<Value> {
+/// real paths) and copied into the uploads dir. `ranges` restricts
+/// transcription to the selected spans (seconds, original-media time);
+/// None = the whole recording.
+pub fn create_meeting(
+    ctx: &Arc<Ctx>,
+    src: &Path,
+    num_speakers: i64,
+    ranges: Option<&[pipeline::TimeRange]>,
+    language: Option<&str>,
+) -> ApiResult<Value> {
     if !src.is_file() {
         return Err(ApiError::invalid("file not found"));
+    }
+    let ranges = match ranges {
+        Some(raw) => Some(pipeline::normalize_ranges(raw).map_err(ApiError::invalid)?),
+        None => None,
+    };
+    if let Some(lang) = language {
+        if !supported_languages().contains(&lang) {
+            return Err(ApiError::invalid("unsupported language"));
+        }
     }
     let filename = src
         .file_name()
@@ -163,7 +180,14 @@ pub fn create_meeting(ctx: &Arc<Ctx>, src: &Path, num_speakers: i64) -> ApiResul
         .filter(|n| !n.is_empty())
         .unwrap_or("recording")
         .to_string();
-    let record = store::create_meeting(&ctx.paths, &ctx.locks, &filename, num_speakers)?;
+    let record = store::create_meeting(
+        &ctx.paths,
+        &ctx.locks,
+        &filename,
+        num_speakers,
+        ranges.as_deref(),
+        language,
+    )?;
     let id = record["id"].as_str().unwrap().to_string();
     let upload_dir = ctx.paths.uploads_dir().join(&id);
     std::fs::create_dir_all(&upload_dir)?;
@@ -173,6 +197,43 @@ pub fn create_meeting(ctx: &Arc<Ctx>, src: &Path, num_speakers: i64) -> ApiResul
     })?;
     jobs::dispatch(ctx, id.clone(), jobs::Job::Process { upload: dest });
     Ok(json!({"id": id}))
+}
+
+/// Extract an audio-only AAC preview of a recording for the prep screen —
+/// the fallback when the webview can't play the original container (mkv,
+/// avi, wma, …). Written under uploads/.preview/ (already asset-protocol
+/// scoped), one file at a time, overwritten per call, swept on startup.
+pub fn extract_preview_audio(ctx: &Ctx, src: &Path) -> ApiResult<Value> {
+    if !src.is_file() {
+        return Err(ApiError::invalid("file not found"));
+    }
+    let config = config::Config::resolve(&ctx.paths);
+    let pctx = pipeline::PipelineCtx {
+        fake: ctx.fake,
+        config: &config,
+        models_dir: &ctx.paths.models_dir,
+        ffmpeg: ctx.ffmpeg.clone(),
+    };
+    let out = ctx.paths.uploads_dir().join(config::PREVIEW_DIR).join("preview.m4a");
+    pipeline::extract_playback_audio(&pctx, src, &out).map_err(ApiError::invalid)?;
+    Ok(json!({"path": out.to_string_lossy()}))
+}
+
+/// Duration + waveform peaks for the pre-transcription prep screen. Decodes
+/// the file once with the bundled ffmpeg — call it from a blocking context.
+pub fn probe_media(ctx: &Ctx, src: &Path) -> ApiResult<Value> {
+    if !src.is_file() {
+        return Err(ApiError::invalid("file not found"));
+    }
+    let config = config::Config::resolve(&ctx.paths);
+    let pctx = pipeline::PipelineCtx {
+        fake: ctx.fake,
+        config: &config,
+        models_dir: &ctx.paths.models_dir,
+        ffmpeg: ctx.ffmpeg.clone(),
+    };
+    let probe = pipeline::probe_media(&pctx, src).map_err(ApiError::invalid)?;
+    Ok(serde_json::to_value(probe).unwrap_or_else(|_| json!({})))
 }
 
 /// POST /api/meetings/{id}/reprocess — regenerate content with the *current*

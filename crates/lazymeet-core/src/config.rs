@@ -23,6 +23,13 @@ pub const APP_NAME: &str = "LazyMeet";
 /// Extracted-audio filename for video uploads (kept for playback).
 pub const PLAYBACK_FILENAME: &str = "playback.m4a";
 
+/// Scratch dir under uploads/ for the prep screen's audio preview (formats
+/// the webview can't play directly). One file at a time, overwritten per
+/// probe and swept on startup. Uploads/ is asset-protocol scoped, so the
+/// preview streams without extra scope grants; the dotted name can never
+/// collide with a meeting id (hex uuid).
+pub const PREVIEW_DIR: &str = ".preview";
+
 // --------------------------------------------------------------------------
 // Paths
 // --------------------------------------------------------------------------
@@ -260,6 +267,13 @@ impl Config {
 
     pub fn values(&self) -> &Map<String, Value> {
         &self.values
+    }
+
+    /// Replace one value in this snapshot — for per-meeting overrides (e.g. a
+    /// language chosen on the prep screen) that outrank the saved settings
+    /// for a single job without touching config.json.
+    pub fn override_value(&mut self, name: &str, value: Value) {
+        self.values.insert(name.to_string(), value);
     }
 
     fn str_of(&self, name: &str) -> String {

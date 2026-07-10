@@ -192,7 +192,7 @@ fn onnx_providers_default_to_cpu_and_validate() {
 #[test]
 fn atomic_writes_leave_no_temp_files() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "tmp.mp4", -1).unwrap();
+    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "tmp.mp4", -1, None, None).unwrap();
     store::delete_meeting(&app.ctx.paths, &app.ctx.locks, record["id"].as_str().unwrap());
     let leftovers: Vec<_> = std::fs::read_dir(app.ctx.paths.meetings_dir())
         .unwrap()

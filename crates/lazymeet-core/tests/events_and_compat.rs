@@ -100,7 +100,7 @@ fn created_at_sorts_against_python_timestamps() {
     let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
     let mid = record["id"].as_str().unwrap();
     std::fs::write(app.ctx.paths.meetings_dir().join(format!("{mid}.json")), fixture).unwrap();
-    let ours = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "new.mp4", -1).unwrap();
+    let ours = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "new.mp4", -1, None, None).unwrap();
 
     // Same timestamp format (microseconds + +00:00 offset)...
     let py_ts = record["created_at"].as_str().unwrap();
