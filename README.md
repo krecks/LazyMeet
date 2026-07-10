@@ -1,5 +1,8 @@
 # LazyMeet
 
+[![Build](https://github.com/krecks/LazyMeet/actions/workflows/build.yml/badge.svg)](https://github.com/krecks/LazyMeet/actions/workflows/build.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 **Local, private meeting transcription & summaries.** Drag and drop a recording
 (e.g. an OBS capture) and get a **per-speaker transcript**, a **summary**, and
 **action items** — everything runs on your machine. No cloud, no accounts, **no
@@ -9,10 +12,15 @@ Speaker identification is built in: name a speaker once and that name
 **auto-applies to the same voice in future recordings**, backed by a local
 voiceprint library that learns from every confirmed match.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/meeting-dark.png">
+  <img alt="LazyMeet showing a finished meeting: summary, key takeaways, action items, and a per-speaker transcript with recognized-speaker badges" src="docs/screenshots/meeting-light.png">
+</picture>
+
 ## How it works
 
 ```
-Tauri desktop app — one binary, backend in Rust (no Python, no sidecar)
+Tauri desktop app — one binary, everything in Rust
      1. ffmpeg (bundled)        → 16 kHz mono audio
      2. sherpa-onnx VAD         → speech utterances
      3. NVIDIA Parakeet (ONNX)  → transcript with timestamps
@@ -27,17 +35,23 @@ a bundled static binary. Progress streams to the UI as native events.
 All AI models are **token-free** and download once on first run, then run
 fully offline:
 
-| Component | Engine | Source |
+| Component | Model | Source |
 |---|---|---|
 | Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
 | Voice activity | Silero VAD | sherpa-onnx GitHub releases |
 | Diarization + speaker ID | pyannote-seg + speaker-embedding (ONNX) | sherpa-onnx GitHub releases |
-| Summarization | Qwen 3.5 (0.8B–9B selectable, GGUF) via llama-cpp-python | Hugging Face (ungated) |
-| ffmpeg | static binary | `imageio-ffmpeg` wheel |
+| Summarization | Qwen 3.5 (0.8B–9B selectable, GGUF) via llama.cpp | Hugging Face (ungated) |
+| ffmpeg | static binary | bundled with the app |
+
+Models are switched in Settings — each option lists its trade-offs and
+downloads on demand:
+
+![The Settings screen comparing transcription models side by side, with pros and cons for each](docs/screenshots/settings.png)
 
 ## Install (end users)
 
-1. Download the installer for your OS from the latest build artifacts
+1. Download the installer for your OS from the
+   [latest release](https://github.com/krecks/LazyMeet/releases/latest)
    (`.dmg`/`.app`, `.msi`/`.exe`, or `.AppImage`/`.deb`).
 2. Launch **LazyMeet**. On first run it downloads the AI models (a few GB) with a
    progress screen — this happens once.
@@ -47,6 +61,16 @@ fully offline:
 
 You install nothing else — ffmpeg, the models, and the LLM are all bundled or
 auto-downloaded.
+
+## Prepare a recording before transcribing
+
+Every file you add opens a preparation screen first: play the recording,
+see its waveform, and choose which parts get transcribed — drag directly on
+the waveform to skip a break or transcribe only the segments that matter. You
+can also fix the number of speakers and hint the spoken language. The whole
+file is preselected, so the fast path stays a single click on **Transcribe**.
+
+![The prepare screen with an audio preview, a zoomable waveform, and two selected time ranges](docs/screenshots/prepare.png)
 
 ## Speaker naming across files
 
@@ -117,7 +141,7 @@ processing finishes instead.
 
 Requirements: Rust (stable) + Tauri CLI (`cargo install tauri-cli --version
 "^2"`), cmake (sherpa-onnx and llama.cpp build from source), and the platform
-webview libs (Linux: `libwebkit2gtk-4.1-dev`). No Python.
+webview libs (Linux: `libwebkit2gtk-4.1-dev`).
 
 ```bash
 # 1. Fetch the bundled ffmpeg for your platform (once)
@@ -147,9 +171,10 @@ cargo run --release -p lazymeet-core --bin lazymeet-cli -- recording.mp4
 
 ### Tests
 
-The behavioral test suite (a 1:1 port of the old pytest suite, plus event and
-Python-data-compat coverage) runs the stubbed (`LAZYMEET_FAKE`) pipeline and
-needs no models or cmake:
+The behavioral test suite covers the whole backend surface — meetings,
+speaker library, config, model downloads, events, and the on-disk data
+format. It runs against the stubbed (`LAZYMEET_FAKE`) pipeline and needs no
+models or cmake:
 
 ```bash
 cargo test -p lazymeet-core --no-default-features
@@ -175,3 +200,22 @@ Environment variables (all optional):
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
 | `LAZYMEET_KEEP_AUDIO` | `1` | `1` = keep only the audio track for playback (video files are deleted after processing); `0` = delete recordings entirely (disables segment playback) |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |
+
+## Contributing
+
+LazyMeet is young and still has rough edges — bug reports, feature ideas, and
+pull requests are all welcome. Open an issue to discuss bigger changes first.
+For code changes, `cargo test -p lazymeet-core --no-default-features` must
+pass; the frontend is plain HTML/CSS/JS with no build step.
+
+## License
+
+LazyMeet is free software, released under the
+[GNU General Public License v3.0 (or later)](LICENSE). You may use, study,
+share, and modify it; if you distribute LazyMeet or a modified version, you
+must make the source available under the same license.
+
+The bundled ffmpeg binary is a separate program invoked by the app and remains
+under its own LGPL/GPL license. The AI models are downloaded at first run
+directly from their publishers and keep their respective licenses (Parakeet:
+CC-BY-4.0, Qwen: Apache-2.0).
