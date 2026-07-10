@@ -961,3 +961,24 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   opacity: 0.7;
   font-style: italic;
 }
+
+.bench-how {
+  margin: 0 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.bench-how summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.bench-how p,
+.bench-how ul {
+  margin: 10px 0 4px;
+}
+.bench-how ul {
+  padding-left: 20px;
+}
+.bench-how li {
+  margin-bottom: 6px;
+}

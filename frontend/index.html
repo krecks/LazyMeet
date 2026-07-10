@@ -328,6 +328,31 @@
             the fastest configuration by default; this lets you verify it on
             your hardware.</p>
         </div>
+        <details class="bench-how">
+          <summary>How the test works</summary>
+          <p class="muted">All measurements run on <strong>synthesized audio and a
+            fixed text prompt</strong> generated on the fly — none of your
+            recordings are read, and nothing leaves this machine. The audio is
+            deterministic noise shaped like speech; these models spend the same
+            compute on every second of audio regardless of its content, which is
+            exactly what differs between backends, so the comparison carries
+            over to real recordings.</p>
+          <ul class="muted">
+            <li><strong>Transcription</strong> — 120&thinsp;s of audio through the
+              speech-to-text model (VAD bypassed, one warm-up pass first).</li>
+            <li><strong>Diarization</strong> — a full who-spoke-when pass over
+              240&thinsp;s of audio (segmentation, embeddings, clustering).</li>
+            <li><strong>Speaker ID</strong> — 40 voiceprint extractions from
+              5-second windows, the same way meeting voiceprints are built.</li>
+            <li><strong>Summarizer LLM</strong> — loads the summary model and
+              generates 384 tokens from a fixed prompt; the time column is the
+              model load, the speed column is generation throughput.</li>
+          </ul>
+          <p class="muted">Times are for those fixed workloads, so runs are
+            comparable across machines and backends. They are not a prediction
+            of full-meeting duration — real recordings add audio extraction and
+            silence removal.</p>
+        </details>
         <button id="bench-run" class="btn">Run benchmark</button>
         <p id="bench-status" class="muted"></p>
         <table id="bench-results" class="bench-table hidden">
