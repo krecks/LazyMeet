@@ -3189,8 +3189,6 @@ dependencies = [
 [[package]]
 name = "sherpa-rs"
 version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81835d89a3fc44482a6829e3e2483ac83f7b4d1623c76f196c77c9ecf5c18203"
 dependencies = [
  "eyre",
  "hound",

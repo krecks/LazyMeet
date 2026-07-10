@@ -95,30 +95,37 @@ saved voices in the **Known speakers** panel.
 ## Performance
 
 Measured on a real 28.5-minute, 1.23 GB OBS recording (HEVC 1728×1122@60,
-170 transcript segments, 2 speakers, full notes produced) on an **Apple M1
-Pro with 7 CPU threads** (the default: ~75 % of cores). Each cell is the
-stage duration.
+167 transcript segments, full notes produced) on an **Apple M1 Pro with the
+default settings** (7 CPU threads: ~75 % of cores). End to end the recording
+processes in **~3.2 minutes — about 9× faster than realtime**, twice as fast
+as v0.1.2, thanks to two pipeline changes:
 
-**ONNX models — CPU vs CoreML (ANE/NPU):**
+- **Transcription and diarization run concurrently.** They read the same
+  decoded audio with disjoint models, so each gets half the thread budget
+  and they run side by side — measurably faster than either full-budget
+  ordering (a 28.5-minute meeting: 190 s overlapped vs 271 s sequential).
+- **Diarization is multi-threaded.** Upstream sherpa-rs pins the diarization
+  models to one ONNX thread; a vendored copy (`crates/vendor/sherpa-rs`)
+  exposes the thread count, which alone makes the stage 2× faster
+  (229 s → 122 s on the recording above).
 
-| Stage | CPU | CoreML | Verdict |
-|---|---|---|---|
-| Transcription (Parakeet) | 104 s | 212 s | CoreML 2.0× slower |
-| Diarization | 227 s | 246 s | CoreML 1.08× slower |
-| Speaker ID | 7.9 s | 18.0 s | CoreML 2.3× slower |
+Stage durations on that recording, before → after:
 
-**Summarizer LLM (Qwen3.5-4B) — Metal GPU vs CPU:**
+| Stage | v0.1.2 (sequential) | now |
+|---|---|---|
+| Transcription (Parakeet) | 103 s | 172 s combined — the two run |
+| Diarization | 229 s | concurrently on half the threads each |
+| Speaker ID | 7.7 s | 7.8 s |
+| Summarization (Metal GPU) | 33 s | 33 s |
+| **Total** | **375 s** | **190 s** |
 
-| Stage | Metal GPU | CPU | Verdict |
-|---|---|---|---|
-| Summarization | 34 s | 84 s | GPU 2.5× faster |
-
-The defaults follow from these numbers: the ONNX models always run on the
-**CPU** (onnxruntime can only place a fraction of their ops on the Neural
-Engine, and the CPU↔ANE hand-offs cost more than the acceleration saves),
-while the summarizer LLM runs on the **GPU** where llama.cpp supports it
-(the *Hardware acceleration* setting toggles this). End to end the meeting
-above processes in ~7 minutes — about 4× faster than realtime.
+**Backends:** the ONNX models always run on the **CPU** — CoreML/ANE was
+re-measured with the multi-threaded diarizer and is still slower on every
+stage (onnxruntime can only place a fraction of the ops on the Neural
+Engine, and the CPU↔ANE hand-offs cost more than the acceleration saves).
+The summarizer LLM runs on the **GPU** where llama.cpp supports it (the
+*Hardware acceleration* setting toggles this): Metal generates ~25 % faster
+than CPU and loads the model far faster.
 
 Hardware differs, so the app includes a built-in benchmark (gauge icon, top
 right) that measures ASR, diarization, speaker ID, and the summarizer on

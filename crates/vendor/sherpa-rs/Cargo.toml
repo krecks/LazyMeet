@@ -1,0 +1,42 @@
+# Vendored copy of the published sherpa-rs 0.6.8 crate (MIT, by thewh1teagle,
+# https://github.com/thewh1teagle/sherpa-rs), wired in via [patch.crates-io].
+#
+# The ONLY functional change is in src/diarize.rs: DiarizeConfig gains a
+# `num_threads` field (upstream hardcodes 1 ONNX intra-op thread for both
+# diarization models, which makes diarization the slowest pipeline stage by
+# far). The upstream repository is archived (read-only, 0.6.8 is the final
+# release), so this vendor is permanent; the patch is also preserved on the
+# `diarize-num-threads` branch of github.com/krecks/sherpa-rs.
+#
+# It depends on the registry sherpa-rs-sys by version — exactly like the
+# published crate — so the vendored copy does NOT rebuild the C++ stack.
+
+[package]
+name = "sherpa-rs"
+version = "0.6.8"
+edition = "2021"
+license = "MIT"
+description = "Rust bindings to https://github.com/k2-fsa/sherpa-onnx (vendored: configurable diarization threads)"
+repository = "https://github.com/thewh1teagle/sherpa-rs"
+
+[lib]
+name = "sherpa_rs"
+crate-type = ["rlib"]
+
+[features]
+default = ["download-binaries", "tts"]
+cuda = ["sherpa-rs-sys/cuda"]
+directml = ["sherpa-rs-sys/directml"]
+download-binaries = ["sherpa-rs-sys/download-binaries"]
+static = ["sherpa-rs-sys/static"]
+sys = []
+tts = ["sherpa-rs-sys/tts"]
+
+[dependencies]
+eyre = "0.6.12"
+hound = "3.5.1"
+tracing = "0.1.40"
+
+[dependencies.sherpa-rs-sys]
+version = "0.6.8"
+default-features = false

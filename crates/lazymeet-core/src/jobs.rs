@@ -380,10 +380,15 @@ fn run_full(
     }
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("transcribing"))]));
-    let segments = pipeline::transcribe(pctx, &wav, ranges.as_deref())?;
-
-    update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
-    let turns = pipeline::diarize(pctx, &wav, num_speakers, ranges.as_deref())?;
+    let (segments, turns) = pipeline::transcribe_and_diarize(
+        pctx,
+        &wav,
+        num_speakers,
+        ranges.as_deref(),
+        || {
+            update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
+        },
+    )?;
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
     let voiceprints = pipeline::compute_voiceprints(pctx, &wav, &turns)?;

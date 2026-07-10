@@ -242,9 +242,8 @@ impl Recognizer {
     }
 }
 
-fn load_recognizer(ctx: &PipelineCtx) -> Result<Recognizer, String> {
+fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recognizer, String> {
     let spec = resolve_asr_at(ctx.models_dir, ctx.fake, &ctx.config.asr_model());
-    let threads = ctx.config.num_threads() as i32;
     let provider = ctx.config.asr_provider();
     let language = match ctx.config.asr_language().as_str() {
         "auto" => String::new(), // "" lets Whisper detect the language itself
@@ -369,9 +368,10 @@ pub fn transcribe(
     ctx: &PipelineCtx,
     wav: &Path,
     ranges: Option<&[(f64, f64)]>,
+    threads: i32,
 ) -> Result<Vec<Segment>, String> {
     let samples = load_wav(wav)?;
-    let mut recognizer = load_recognizer(ctx)?;
+    let mut recognizer = load_recognizer(ctx, threads)?;
     let spans = match ranges {
         Some(rs) => sample_ranges(rs, samples.len()),
         None => vec![(0, samples.len())],
@@ -399,6 +399,7 @@ pub fn diarize(
     wav: &Path,
     num_speakers: i64,
     ranges: Option<&[(f64, f64)]>,
+    threads: i32,
 ) -> Result<Vec<Turn>, String> {
     // A meeting-supplied count (>0) wins; otherwise the env default (-1 auto).
     let n = if num_speakers > 0 { num_speakers } else { config::env_num_speakers() };
@@ -415,6 +416,7 @@ pub fn diarize(
             min_duration_on: Some(0.3),
             min_duration_off: Some(0.5),
             provider: Some(ctx.config.diar_provider()),
+            num_threads: Some(threads),
             debug: false,
         },
     )
@@ -912,6 +914,7 @@ pub fn bench_onnx(
             min_duration_on: Some(0.3),
             min_duration_off: Some(0.5),
             provider: Some(provider.into()),
+            num_threads: Some(threads),
             debug: false,
         },
     )
