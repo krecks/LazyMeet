@@ -44,6 +44,9 @@
       </symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" /></symbol>
       <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 14l4-6" /><path d="M5.6 18.6a9 9 0 1 1 12.8 0" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+      </symbol>
       <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" /></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></symbol>
     </defs>
@@ -186,12 +189,22 @@
 
           <div id="error-note" class="error-note hidden" role="alert"></div>
 
+          <div id="version-banner" class="version-banner hidden" role="status">
+            <span id="version-banner-text"></span>
+            <button id="version-back" class="btn ghost" type="button">Back to current</button>
+          </div>
+
           <section class="notes">
             <div class="note-block" id="summary-block">
               <div class="note-head">
                 <h3>Summary</h3>
                 <button class="icon-btn subtle" id="summary-edit-btn" title="Edit summary" aria-label="Edit summary">
                   <svg class="icon"><use href="#i-pencil" /></svg>
+                </button>
+                <button class="icon-btn subtle" id="regen-notes-btn"
+                  title="Regenerate the notes with the current summary model"
+                  aria-label="Regenerate notes">
+                  <svg class="icon"><use href="#i-refresh" /></svg>
                 </button>
               </div>
               <p id="summary-text" class="serif"></p>
@@ -212,10 +225,20 @@
               <button class="icon-btn subtle" id="copy-transcript-btn" title="Copy transcript" aria-label="Copy transcript">
                 <svg class="icon"><use href="#i-copy" /></svg>
               </button>
+              <button class="icon-btn subtle" id="retranscribe-btn"
+                title="Re-transcribe the recording with the current models (replaces transcript, speakers, and notes)"
+                aria-label="Re-transcribe recording">
+                <svg class="icon"><use href="#i-refresh" /></svg>
+              </button>
             </div>
             <div id="speaker-legend" class="legend"></div>
             <datalist id="speaker-names"></datalist>
             <div id="transcript" class="transcript"></div>
+          </section>
+
+          <section class="history-section hidden" id="history-section">
+            <div class="note-head"><h3>History</h3></div>
+            <ol id="history-list" class="history-list"></ol>
           </section>
         </article>
       </main>

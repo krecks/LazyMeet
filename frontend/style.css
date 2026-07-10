@@ -583,6 +583,8 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .note-head .icon-btn { opacity: 0; }
 .note-block:hover .note-head .icon-btn, .note-head .icon-btn:focus-visible,
 .transcript-section:hover .note-head .icon-btn { opacity: 1; }
+/* an armed (confirm-pending) button must stay visible when the pointer leaves */
+.note-head .icon-btn.armed { opacity: 1; }
 
 #summary-text {
   margin: 0;
@@ -626,6 +628,62 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   margin-top: 0.45rem;
 }
 .editor-hint { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; }
+
+/* -------------------------------------------------------------- history */
+.version-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.2rem 0 0;
+  padding: 0.6rem 0.9rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-m);
+  font-size: 0.85rem;
+}
+.version-banner span { flex: 1; }
+.version-banner .btn { flex: none; }
+
+.history-section { margin: 1.2rem 0 2rem; }
+.history-list { margin: 0; padding: 0; list-style: none; }
+.history-list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.history-list li:first-child { border-top: none; }
+.history-v {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  flex: none;
+}
+.history-action { font-weight: 600; }
+.history-when { color: var(--text-muted); font-size: 0.78rem; }
+.history-models {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  margin-left: auto;
+  overflow-wrap: anywhere;
+}
+.history-view { padding: 0.2rem 0.7rem; font-size: 0.78rem; flex: none; }
+.history-current {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.history-nocopy { flex: none; font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
 
 /* ------------------------------------------------------------ transcript */
 .transcript-section .note-head { margin-bottom: 0.6rem; }

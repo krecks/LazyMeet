@@ -72,6 +72,7 @@ fn main() {
             commands::rename_speakers,
             commands::verify_speaker,
             commands::delete_meeting,
+            commands::reprocess_meeting,
             commands::export_meeting,
             commands::get_speakers,
             commands::rename_known_speaker,

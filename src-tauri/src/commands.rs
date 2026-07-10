@@ -149,6 +149,18 @@ pub async fn delete_meeting(ctx: State<'_, App>, meeting_id: String) -> ApiResul
     api::delete_meeting(&ctx, &meeting_id)
 }
 
+/// Regenerate with the current settings: mode "notes" re-summarizes the
+/// existing transcript, mode "transcription" re-runs the whole pipeline over
+/// the kept audio. Progress streams like the original processing.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn reprocess_meeting(
+    ctx: State<'_, App>,
+    meeting_id: String,
+    mode: String,
+) -> ApiResult<Value> {
+    api::reprocess_meeting(&ctx, &meeting_id, &mode)
+}
+
 /// Export = build the markdown in core, then a native save dialog. Returns the
 /// written path, or null when the user cancelled.
 #[tauri::command(rename_all = "snake_case")]

@@ -171,8 +171,43 @@ pub fn create_meeting(ctx: &Arc<Ctx>, src: &Path, num_speakers: i64) -> ApiResul
     std::fs::copy(src, &dest).map_err(|e| {
         ApiError::internal(format!("could not copy the recording: {e}"))
     })?;
-    jobs::dispatch(ctx, id.clone(), dest);
+    jobs::dispatch(ctx, id.clone(), jobs::Job::Process { upload: dest });
     Ok(json!({"id": id}))
+}
+
+/// POST /api/meetings/{id}/reprocess — regenerate content with the *current*
+/// settings. mode "notes": summarize the existing transcript again; mode
+/// "transcription": run the whole pipeline again over the kept audio.
+pub fn reprocess_meeting(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str) -> ApiResult<Value> {
+    let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
+        .ok_or_else(|| ApiError::not_found("meeting not found"))?;
+    let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "done" && status != "error" {
+        return Err(ApiError::conflict("the meeting is still processing"));
+    }
+    let job = match mode {
+        "notes" => {
+            let has_transcript = record
+                .get("segments")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            if !has_transcript {
+                return Err(ApiError::conflict("there is no transcript to summarize yet"));
+            }
+            jobs::Job::Resummarize
+        }
+        "transcription" => {
+            if store::audio_path(&ctx.paths, &record).is_none() {
+                return Err(ApiError::not_found("the recording is no longer on disk"));
+            }
+            jobs::Job::Retranscribe
+        }
+        _ => return Err(ApiError::invalid("mode must be \"notes\" or \"transcription\"")),
+    };
+    let record = jobs::queue_rejob(ctx, meeting_id, mode, job)
+        .ok_or_else(|| ApiError::not_found("meeting not found"))?;
+    Ok(Value::Object(store::public_meeting(&ctx.paths, &record)))
 }
 
 pub fn list_meetings(ctx: &Ctx) -> Value {

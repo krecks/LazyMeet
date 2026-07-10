@@ -41,6 +41,7 @@ let searchQuery = "";
 let currentMeeting = null;
 let editing = null; // "title" | "summary" | "seg:3" | "takeaways:1" | … | null
 let pendingMeeting = null;
+let viewingVersion = null; // history version number rendered read-only, or null for current
 
 // --------------------------------------------------------------------------
 // First-run setup. The download runs in the backend either way; the user can
@@ -375,6 +376,7 @@ function selectMeeting(id) {
   activeId = id;
   editing = null; // abandon any open edit — it belonged to the previous meeting
   pendingMeeting = null;
+  viewingVersion = null;
   releasePlayer(); // the playing audio belonged to the previous meeting
   $("empty").classList.add("hidden");
   renderMeetingList();
@@ -386,6 +388,7 @@ function showEmpty() {
   currentMeeting = null;
   editing = null;
   pendingMeeting = null;
+  viewingVersion = null;
   releasePlayer();
   $("processing").classList.add("hidden");
   $("result").classList.add("hidden");
@@ -461,6 +464,29 @@ function renderResult(m) {
   $("processing").classList.add("hidden");
   $("result").classList.remove("hidden");
 
+  // Version viewing: an older snapshot renders read-only in place of the
+  // live content until "Back to current". The latest version IS the live
+  // content, and entries from before snapshots existed have nothing to show.
+  const versions = m.versions || [];
+  const latestV = versions.length ? versions[versions.length - 1].v : null;
+  let viewed = null;
+  if (viewingVersion != null && viewingVersion !== latestV) {
+    viewed = versions.find((v) => v.v === viewingVersion && v.snapshot) || null;
+  }
+  if (!viewed) viewingVersion = null;
+  const shown = viewed ? { ...m, ...viewed.snapshot } : m;
+
+  const banner = $("version-banner");
+  banner.classList.toggle("hidden", !viewed);
+  if (viewed) {
+    $("version-banner-text").textContent =
+      `Viewing v${viewed.v} · ${HISTORY_ACTIONS[viewed.action] || "Processed"} · ${fmtDate(viewed.created_at)} — read-only. The current version is v${latestV}.`;
+  }
+  $("version-back").onclick = () => {
+    viewingVersion = null;
+    renderResult(currentMeeting);
+  };
+
   $("result-title").textContent = m.title || m.filename;
   $("result-meta").textContent = fmtDate(m.created_at);
   $("result-title").onclick = startTitleEdit;
@@ -470,6 +496,10 @@ function renderResult(m) {
   // meeting with nothing else to show.
   const deleteBtn = $("delete-btn");
   disarm(deleteBtn);
+  // Export always writes the current version — disabled while viewing an old
+  // one so it can't silently export something other than what's on screen.
+  $("export-btn").disabled = !!viewed;
+  $("export-btn").title = viewed ? "Go back to the current version to export" : "";
   $("export-btn").onclick = async () => {
     try {
       const path = await call("export_meeting", { meeting_id: m.id });
@@ -478,8 +508,8 @@ function renderResult(m) {
       showToast(`Export failed: ${e.message}`);
     }
   };
-  $("copy-notes-btn").onclick = () => copyText(notesAsText(m), "Notes copied");
-  $("copy-transcript-btn").onclick = () => copyText(transcriptAsText(m), "Transcript copied");
+  $("copy-notes-btn").onclick = () => copyText(notesAsText(shown), "Notes copied");
+  $("copy-transcript-btn").onclick = () => copyText(transcriptAsText(shown), "Transcript copied");
   deleteBtn.onclick = () => {
     confirmThen(deleteBtn, "Sure?", async () => {
       try {
@@ -493,6 +523,21 @@ function renderResult(m) {
     });
   };
 
+  // Regeneration: notes need a transcript; a full re-run needs the kept
+  // audio. Hidden while viewing an old version — they act on the current one.
+  const regenNotesBtn = $("regen-notes-btn");
+  const retranscribeBtn = $("retranscribe-btn");
+  disarm(regenNotesBtn);
+  disarm(retranscribeBtn);
+  regenNotesBtn.classList.toggle("hidden", !!viewed || !(m.segments || []).length);
+  retranscribeBtn.classList.toggle("hidden", !!viewed || !m.has_audio);
+  regenNotesBtn.onclick = () =>
+    confirmThen(regenNotesBtn, "Click again to replace the current notes", () =>
+      reprocess(m.id, "notes"));
+  retranscribeBtn.onclick = () =>
+    confirmThen(retranscribeBtn, "Click again to replace transcript, speakers, and notes", () =>
+      reprocess(m.id, "transcription"));
+
   const errNote = $("error-note");
   if (m.status === "error") {
     errNote.textContent = m.error || "Processing failed.";
@@ -502,17 +547,96 @@ function renderResult(m) {
   }
 
   // Content edits are only allowed once processing succeeded — mirrors the
-  // backend, which 409s earlier (the worker would clobber the edit).
-  const editable = m.status === "done";
-  $("summary-text").textContent = m.summary || "";
+  // backend, which 409s earlier (the worker would clobber the edit). An old
+  // version on screen is a snapshot — never editable.
+  const editable = m.status === "done" && !viewed;
+  $("summary-text").textContent = shown.summary || "";
   $("summary-edit-btn").classList.toggle("hidden", !editable);
   $("summary-edit-btn").onclick = startSummaryEdit;
-  renderNoteList("takeaways", "takeaways", editable);
-  renderNoteList("action-items", "action_items", editable);
+  renderNoteList(shown, "takeaways", "takeaways", editable);
+  renderNoteList(shown, "action-items", "action_items", editable);
 
-  const colorOf = buildColorMap(m.segments || []);
-  renderLegend(m, colorOf);
-  renderTranscript(m, colorOf, editable);
+  const colorOf = buildColorMap(shown.segments || []);
+  renderLegend(shown, colorOf, !!viewed);
+  renderTranscript(shown, colorOf, editable);
+  renderHistory(m, latestV);
+}
+
+/// Queue a regeneration; the meeting-updated event flow takes over from there.
+async function reprocess(meetingId, mode) {
+  try {
+    await call("reprocess_meeting", { meeting_id: meetingId, mode });
+    showToast(mode === "notes" ? "Regenerating the notes…" : "Re-transcribing the recording…", 3000, true);
+  } catch (e) {
+    showToast(
+      e.status === 409
+        ? "Still processing — try again when it's done."
+        : `Couldn't start: ${e.message}`
+    );
+  }
+}
+
+const HISTORY_ACTIONS = {
+  processed: "Processed",
+  notes: "Notes regenerated",
+  transcription: "Re-transcribed",
+};
+
+// One row per (re)generation, newest first: which models made that version.
+// The newest row is the live content; older rows with a snapshot open it
+// read-only. Models show "not recorded" for meetings processed before
+// version history existed — that can't be reconstructed afterwards.
+function renderHistory(m, latestV) {
+  const versions = m.versions || [];
+  $("history-section").classList.toggle("hidden", !versions.length);
+  const list = $("history-list");
+  list.innerHTML = "";
+  for (const v of [...versions].reverse()) {
+    const li = document.createElement("li");
+    const badge = el("span", "history-v");
+    badge.textContent = `v${v.v}`;
+    const action = el("span", "history-action");
+    action.textContent = HISTORY_ACTIONS[v.action] || v.action || "Processed";
+    const when = el("span", "history-when");
+    when.textContent = v.created_at ? fmtDate(v.created_at) : "";
+    const models = el("span", "history-models");
+    models.textContent =
+      `transcription: ${v.asr_model || "not recorded"} · notes: ${v.summary_model || "not recorded"}`;
+    li.append(badge, action, when, models);
+
+    if (v.v === latestV) {
+      const chip = el("span", "history-current");
+      chip.textContent = viewingVersion == null ? "current" : "back to current";
+      if (viewingVersion != null) {
+        const btn = el("button", "btn ghost history-view");
+        btn.type = "button";
+        btn.textContent = "Back to current";
+        btn.onclick = () => {
+          viewingVersion = null;
+          renderResult(currentMeeting);
+        };
+        li.appendChild(btn);
+      } else {
+        li.appendChild(chip);
+      }
+    } else if (v.snapshot) {
+      const btn = el("button", "btn ghost history-view");
+      btn.type = "button";
+      btn.textContent = v.v === viewingVersion ? "Viewing" : "View";
+      btn.disabled = v.v === viewingVersion;
+      btn.onclick = () => {
+        viewingVersion = v.v;
+        renderResult(currentMeeting);
+      };
+      li.appendChild(btn);
+    } else {
+      const note = el("span", "history-nocopy");
+      note.textContent = "no saved copy";
+      note.title = "This version was replaced before LazyMeet kept snapshots.";
+      li.appendChild(note);
+    }
+    list.appendChild(li);
+  }
 }
 
 // Called when an inline edit ends. `fresh` is the PATCH response (or null on
@@ -621,10 +745,10 @@ function startSummaryEdit() {
   ta.focus();
 }
 
-function renderNoteList(elId, field, editable) {
+function renderNoteList(m, elId, field, editable) {
   const ul = $(elId);
   ul.innerHTML = "";
-  const items = currentMeeting[field] || [];
+  const items = m[field] || [];
   if (!items.length) {
     const li = el("li", "list-empty muted");
     li.textContent = "None";
@@ -734,7 +858,7 @@ function buildColorMap(segments) {
   return map;
 }
 
-function renderLegend(m, colorOf) {
+function renderLegend(m, colorOf, readOnly) {
   const legend = $("speaker-legend");
   legend.innerHTML = "";
   for (const id of Object.keys(colorOf)) {
@@ -747,11 +871,18 @@ function renderLegend(m, colorOf) {
     chip.innerHTML = `<span class="swatch"></span>`;
     const input = document.createElement("input");
     input.value = name;
-    input.title = "Rename — saves this voice for future recordings";
+    input.title = readOnly
+      ? "Read-only — speakers belong to the current version"
+      : "Rename — saves this voice for future recordings";
+    input.disabled = !!readOnly;
     input.setAttribute("aria-label", `Rename ${name}`);
     input.setAttribute("list", "speaker-names");
     input.addEventListener("change", () => renameSpeaker(m.id, id, input.value));
     chip.appendChild(input);
+    if (readOnly) {
+      legend.appendChild(chip);
+      continue; // no verify buttons on a snapshot
+    }
     if (recognized && confirmed) {
       const badge = el("span", "badge-recognized");
       badge.textContent = "known";

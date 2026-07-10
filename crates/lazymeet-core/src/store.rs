@@ -100,6 +100,8 @@ pub fn create_meeting(
     // transient voiceprints captured during identification, used when the user
     // later renames a speaker so we can enrol that voice.
     record.insert("voiceprints".into(), json!({}));
+    // one entry per (re)generation: which models produced the content
+    record.insert("versions".into(), json!([]));
 
     let _g = locks.meetings.lock().unwrap();
     paths.ensure_dirs()?;
@@ -496,11 +498,12 @@ pub fn audio_path(paths: &Paths, record: &Record) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Strip internal fields (voiceprints, worker pid) before returning to the client.
+/// Strip internal fields (voiceprints, worker pid, rejob marker) before
+/// returning to the client.
 pub fn public_meeting(paths: &Paths, record: &Record) -> Record {
     let mut out = Map::new();
     for (k, v) in record {
-        if k != "voiceprints" && k != "worker_pid" {
+        if k != "voiceprints" && k != "worker_pid" && k != "rejob" {
             out.insert(k.clone(), v.clone());
         }
     }
