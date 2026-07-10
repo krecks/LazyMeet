@@ -343,26 +343,69 @@ pub fn compute_voiceprints(
 /// Tokens reserved for the model's response plus prompt scaffolding.
 const RESERVE: usize = 2560;
 
-const SYSTEM: &str = "You are a meeting assistant. Given a transcript with speaker labels, produce \
-    a concise summary, the key takeaways, and concrete action items. \
-    Respond with ONLY a JSON object of the form \
+/// Fixed response-format instruction, appended after the (user-editable)
+/// SUMMARY_PROMPT so a customized prompt can't break summary parsing.
+const FORMAT: &str = "Respond with ONLY a JSON object of the form \
     {\"summary\": str, \"takeaways\": [str], \"action_items\": [str]}.";
 
 const NOTES_SYSTEM: &str = "You are a meeting assistant. Summarize this portion of a meeting transcript \
     into concise bullet notes capturing decisions, topics, and any action items. \
     Return plain text bullets only.";
 
-fn lang_instruction(ctx: &PipelineCtx) -> String {
+fn language_name<'a>(code: &'a str) -> &'a str {
+    super::LANGUAGE_NAMES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, n)| *n)
+        .unwrap_or(code)
+}
+
+/// Detect the transcript's language, restricted to the languages the
+/// summarizer can be instructed in. None when detection isn't reliable
+/// (very short or heavily mixed-language transcripts).
+fn detect_language(text: &str) -> Option<&'static str> {
+    use whatlang::Lang;
+    const LANGS: &[(Lang, &str)] = &[
+        (Lang::Eng, "en"),
+        (Lang::Deu, "de"),
+        (Lang::Fra, "fr"),
+        (Lang::Spa, "es"),
+        (Lang::Ita, "it"),
+        (Lang::Por, "pt"),
+        (Lang::Nld, "nl"),
+        (Lang::Pol, "pl"),
+        (Lang::Rus, "ru"),
+        (Lang::Ukr, "uk"),
+        (Lang::Tur, "tr"),
+        (Lang::Cmn, "zh"),
+        (Lang::Jpn, "ja"),
+        (Lang::Kor, "ko"),
+    ];
+    // A few thousand characters are plenty for a confident call.
+    let sample: String = text.chars().take(4000).collect();
+    let detector = whatlang::Detector::with_allowlist(LANGS.iter().map(|(l, _)| *l).collect());
+    let info = detector.detect(&sample)?;
+    if !info.is_reliable() {
+        return None;
+    }
+    LANGS.iter().find(|(l, _)| *l == info.lang()).map(|(_, code)| *code)
+}
+
+/// The language order given to the summarizer. An explicit setting wins;
+/// "auto" detects the language from the transcript text. Naming the language
+/// outright ("Write everything in German.") is what small models actually
+/// follow — the former "same language as the meeting" phrasing made them
+/// drift into English on non-English meetings.
+fn lang_instruction(ctx: &PipelineCtx, transcript: &str) -> String {
     let code = ctx.config.summary_language();
-    if !code.is_empty() && code != "auto" {
-        let name = super::LANGUAGE_NAMES
-            .iter()
-            .find(|(c, _)| *c == code)
-            .map(|(_, n)| *n)
-            .unwrap_or(code.as_str());
-        format!(" Write everything in {name}.")
+    let code = if !code.is_empty() && code != "auto" {
+        Some(code)
     } else {
-        " Write in the same language the meeting was held in.".into()
+        detect_language(transcript).map(str::to_string)
+    };
+    match code {
+        Some(code) => format!("Write everything in {}.", language_name(&code)),
+        None => "Write in the same language the meeting was held in.".into(),
     }
 }
 
@@ -763,20 +806,92 @@ pub fn summarize(
     let lines = transcript_lines(segments, speakers);
     let budget = (llm.n_ctx as usize).saturating_sub(RESERVE).max(1024);
     let full = lines.join("\n");
-    let lang = lang_instruction(ctx);
+    let lang = lang_instruction(ctx, &full);
+    let custom = ctx.config.summary_prompt();
+    let task = custom.trim();
+    let task = if task.is_empty() { config::DEFAULT_SUMMARY_PROMPT } else { task };
 
+    // The language order is repeated at the END of every user message: small
+    // models weigh trailing instructions far more than the system prompt.
     let body = if llm.count_tokens(&full) <= budget {
-        format!("Transcript:\n{full}")
+        format!("Transcript:\n{full}\n\n{lang}")
     } else {
         // Map-reduce for long meetings.
         let mut notes = Vec::new();
         for chunk in chunk_lines(&llm, &lines, budget) {
-            let note = llm.chat(&format!("{NOTES_SYSTEM}{lang}"), &chunk, 512)?;
+            let note =
+                llm.chat(&format!("{NOTES_SYSTEM} {lang}"), &format!("{chunk}\n\n{lang}"), 512)?;
             notes.push(strip_thinking(&note));
         }
         let combined = llm.truncate_to_tokens(&notes.join("\n"), budget);
-        format!("Meeting notes:\n{combined}")
+        format!("Meeting notes:\n{combined}\n\n{lang}")
     };
-    let response = llm.chat(&format!("{SYSTEM}{lang}"), &body, 1024)?;
+    let response = llm.chat(&format!("{task} {FORMAT} {lang}"), &body, 1024)?;
     Ok(parse_summary(&response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_language;
+
+    #[test]
+    fn detects_meeting_language() {
+        let de = "Guten Morgen zusammen, fangen wir mit dem Protokoll der letzten Sitzung an \
+            und gehen danach die offenen Punkte durch. Wer übernimmt die Abstimmung mit dem \
+            Kunden bis Ende der Woche?";
+        assert_eq!(detect_language(&de.repeat(3)), Some("de"));
+        let en = "Good morning everyone, let's start with the minutes from last time and \
+            then go through the open items. Who takes the customer follow-up by Friday?";
+        assert_eq!(detect_language(&en.repeat(3)), Some("en"));
+    }
+
+    #[test]
+    fn unreliable_detection_returns_none() {
+        assert_eq!(detect_language("ok"), None);
+    }
+
+    /// Real-model smoke test for the language fix — needs the downloaded models:
+    /// cargo test -p lazymeet-core --lib german_meeting -- --ignored --nocapture
+    #[test]
+    #[ignore = "runs the real summarizer; needs models on disk"]
+    fn german_meeting_gets_german_notes() {
+        let real_models = crate::config::Paths::from_env().models_dir;
+        // Default config (SUMMARY_LANGUAGE=auto), untouched by the user's config.json.
+        let paths = crate::config::Paths::at("/nonexistent");
+        let config = crate::config::Config::resolve(&paths);
+        let ctx = crate::pipeline::PipelineCtx {
+            fake: false,
+            config: &config,
+            models_dir: &real_models,
+            ffmpeg: None,
+        };
+        let lines = [
+            "Guten Morgen zusammen. Lasst uns mit dem Statusbericht anfangen.",
+            "Der Prototyp ist fertig, aber die Tests laufen noch bis Freitag.",
+            "Dann übernehme ich die Abstimmung mit dem Kunden und schicke die Einladung raus.",
+            "Wir müssen außerdem entscheiden, ob wir das Release auf nächste Woche verschieben.",
+            "Einverstanden, wir verschieben es. Markus aktualisiert den Zeitplan bis Montag.",
+        ];
+        let segments: Vec<crate::pipeline::MergedSegment> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, text)| crate::pipeline::MergedSegment {
+                start: i as f64 * 5.0,
+                end: i as f64 * 5.0 + 4.0,
+                speaker: format!("spk{}", i % 2),
+                text: text.to_string(),
+            })
+            .collect();
+        let mut speakers = serde_json::Map::new();
+        speakers.insert("spk0".into(), serde_json::json!("Anna"));
+        speakers.insert("spk1".into(), serde_json::json!("Markus"));
+
+        let summary = super::summarize(&ctx, &segments, &speakers).unwrap();
+        println!(
+            "summary: {}\ntakeaways: {:#?}\naction items: {:#?}",
+            summary.summary, summary.takeaways, summary.action_items
+        );
+        let text = format!("{} {}", summary.summary, summary.takeaways.join(" "));
+        assert_eq!(detect_language(&text), Some("de"), "notes are not German: {text}");
+    }
 }

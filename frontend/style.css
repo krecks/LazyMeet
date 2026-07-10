@@ -753,6 +753,17 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .config-row select { max-width: 100%; min-width: 0; }
 .config-row.wide { grid-template-columns: 1fr 280px; }
 .config-row.wide select { width: 100%; }
+.config-row.stacked { grid-template-columns: 1fr; }
+.config-row.stacked .config-control {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: stretch;
+  margin-top: 0.4rem;
+}
+.config-row.stacked textarea {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
 .model-status {
   grid-column: 1 / -1;
   margin: 0.3rem 0 0;

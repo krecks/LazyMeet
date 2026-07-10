@@ -134,6 +134,8 @@ pub fn tunables() -> Vec<TunableSpec> {
         t("ASR_LANGUAGE", "LAZYMEET_ASR_LANGUAGE", Kind::Str, None, None),
         t("SUMMARY_MODEL", "LAZYMEET_SUMMARY_MODEL", Kind::Str, None, None),
         t("SUMMARY_LANGUAGE", "LAZYMEET_SUMMARY_LANGUAGE", Kind::Str, None, None),
+        // For Str tunables, `max` is the character cap (default 200 when None).
+        t("SUMMARY_PROMPT", "LAZYMEET_SUMMARY_PROMPT", Kind::Str, None, Some(2000.0)),
         // Per-stage ONNX execution provider ("cpu" | "coreml"). CPU is the
         // fastest on every machine measured so far; the built-in benchmark
         // verifies per machine and can apply the fastest combination.
@@ -150,12 +152,20 @@ pub fn tunables() -> Vec<TunableSpec> {
     ]
 }
 
+/// Default summarizer system prompt (user-editable via SUMMARY_PROMPT). The
+/// JSON response format and the notes-language instruction are appended by
+/// the pipeline and are NOT part of this prompt, so editing it can't break
+/// summary parsing or the language setting.
+pub const DEFAULT_SUMMARY_PROMPT: &str = "You are a meeting assistant. Given a transcript with \
+    speaker labels, produce a concise summary, the key takeaways, and concrete action items.";
+
 pub fn default_value(name: &str) -> Value {
     match name {
         "ASR_MODEL" => json!("parakeet-tdt-0.6b-v3"),
         "ASR_LANGUAGE" => json!("auto"),
         "SUMMARY_MODEL" => json!("qwen3.5-4b"),
         "SUMMARY_LANGUAGE" => json!("auto"),
+        "SUMMARY_PROMPT" => json!(DEFAULT_SUMMARY_PROMPT),
         "ASR_PROVIDER" | "DIAR_PROVIDER" | "SPEAKER_PROVIDER" => json!("cpu"),
         "SUMMARY_PROVIDER" => json!(if cfg!(target_os = "macos") { "gpu" } else { "cpu" }),
         "SPEAKER_THRESHOLD" => json!(0.6),
@@ -183,7 +193,8 @@ pub fn coerce(spec: &TunableSpec, raw: &Value) -> Option<Value> {
         Kind::Str => match raw {
             Value::String(s) => {
                 let v = s.trim();
-                if !v.is_empty() && v.len() <= 200 {
+                let cap = spec.max.map(|m| m as usize).unwrap_or(200);
+                if !v.is_empty() && v.chars().count() <= cap {
                     Some(json!(v))
                 } else {
                     None
@@ -269,6 +280,10 @@ impl Config {
     }
     pub fn summary_language(&self) -> String {
         self.str_of("SUMMARY_LANGUAGE")
+    }
+    /// User-editable summarizer system prompt; DEFAULT_SUMMARY_PROMPT when unset.
+    pub fn summary_prompt(&self) -> String {
+        self.str_of("SUMMARY_PROMPT")
     }
     pub fn speaker_threshold(&self) -> f64 {
         self.f64_of("SPEAKER_THRESHOLD")

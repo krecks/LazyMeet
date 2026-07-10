@@ -10,7 +10,7 @@ rust-version = "1.77"
 # FAKE pipeline is compiled, so the behavioral test suite builds in seconds:
 #   cargo test -p lazymeet-core --no-default-features
 default = ["native-pipeline"]
-native-pipeline = ["dep:sherpa-rs", "dep:llama-cpp-2"]
+native-pipeline = ["dep:sherpa-rs", "dep:llama-cpp-2", "dep:whatlang"]
 
 [[bin]]
 name = "lazymeet-cli"
@@ -34,6 +34,8 @@ sha2 = "0.10"
 ureq = "2"
 tar = "0.4"
 bzip2 = "0.4"
+# Transcript language detection for SUMMARY_LANGUAGE="auto" (native only).
+whatlang = { version = "0.18.0", optional = true }
 
 # Metal offload for the summarizer LLM on Apple Silicon (SUMMARY_PROVIDER
 # picks layer offload at runtime; elsewhere llama.cpp runs on the CPU).

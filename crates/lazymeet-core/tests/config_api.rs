@@ -80,6 +80,38 @@ fn put_config_rejects_invalid() {
 }
 
 #[test]
+fn summary_prompt_round_trip() {
+    let app = TestApp::fake();
+    // The default is exposed so the settings UI can show (and restore) it.
+    let payload = api::config_payload(&app.ctx);
+    assert_eq!(payload["defaults"]["SUMMARY_PROMPT"], config::DEFAULT_SUMMARY_PROMPT);
+    assert_eq!(payload["values"]["SUMMARY_PROMPT"], config::DEFAULT_SUMMARY_PROMPT);
+
+    // A custom prompt persists and resolves.
+    let data = api::put_config(
+        &app.ctx,
+        &obj(&[("SUMMARY_PROMPT", json!("Focus on decisions and open questions."))]),
+    )
+    .unwrap();
+    assert_eq!(data["values"]["SUMMARY_PROMPT"], "Focus on decisions and open questions.");
+    assert_eq!(
+        app.ctx.config.read().unwrap().summary_prompt(),
+        "Focus on decisions and open questions."
+    );
+
+    // Beyond the 2000-char cap and blank values are rejected.
+    let long = "x".repeat(2001);
+    let err = api::put_config(&app.ctx, &obj(&[("SUMMARY_PROMPT", json!(long))])).unwrap_err();
+    assert_eq!(err.code, 422);
+    let err = api::put_config(&app.ctx, &obj(&[("SUMMARY_PROMPT", json!("   "))])).unwrap_err();
+    assert_eq!(err.code, 422);
+
+    // null (the UI sends it for an emptied field) restores the default.
+    let data = api::put_config(&app.ctx, &obj(&[("SUMMARY_PROMPT", json!(null))])).unwrap();
+    assert_eq!(data["values"]["SUMMARY_PROMPT"], config::DEFAULT_SUMMARY_PROMPT);
+}
+
+#[test]
 fn num_threads_default_tracks_cores() {
     let cores = std::thread::available_parallelism().map(|n| n.get() as i64).unwrap_or(8);
     let maximum = config::max_threads();

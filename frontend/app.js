@@ -1098,8 +1098,14 @@ const CONFIG_META = {
   SUMMARY_LANGUAGE: {
     section: "config-summary",
     label: "Notes language",
-    help: "The language the notes are written in.",
+    help: "The language the notes are written in. “Match the meeting” detects the language from the transcript; pick one explicitly if a meeting mixes languages.",
     languages: "Match the meeting",
+  },
+  SUMMARY_PROMPT: {
+    section: "config-summary",
+    label: "System prompt",
+    help: "The instruction the summary model follows when it reads the transcript — edit it to change the tone or focus of the notes. The response format and the notes-language instruction are always appended automatically, so they can't be broken here. Clear the field and save to restore the default.",
+    textarea: true,
   },
   SUMMARY_PROVIDER: {
     section: "config-processing",
@@ -1384,6 +1390,22 @@ function renderConfigForm(cfg, models) {
         select.appendChild(o);
       }
       control.appendChild(select);
+    } else if (meta.textarea) {
+      row.classList.add("stacked");
+      const ta = document.createElement("textarea");
+      ta.dataset.config = name;
+      ta.rows = 4;
+      ta.value = cfg.values[name];
+      ta.placeholder = cfg.defaults[name] || "";
+      if (limits.max) ta.maxLength = limits.max;
+      ta.disabled = locked;
+      ta.setAttribute("aria-label", meta.label);
+      control.appendChild(ta);
+      // Stacked layout reads label → help → control.
+      row.append(label, help, control);
+      if (locked) row.appendChild(lockedHint());
+      $(meta.section).appendChild(row);
+      continue;
     } else if (meta.toggle) {
       const sw = el("label", "switch");
       const input = document.createElement("input");
@@ -1548,6 +1570,7 @@ function collectConfigValues() {
     if (input.disabled) continue;
     const name = input.dataset.config;
     if (input.tagName === "SELECT") body[name] = input.value;
+    else if (input.tagName === "TEXTAREA") body[name] = input.value.trim() || null; // empty resets to default
     else if (input.type === "checkbox") body[name] = input.checked;
     else if (input.type === "number") body[name] = parseInt(input.value, 10);
     else body[name] = parseFloat(input.value);
