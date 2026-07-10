@@ -90,13 +90,13 @@ jobs:
 
       - name: Fetch bundled ffmpeg
         shell: bash
-        # On macOS fetch both architectures: a Rosetta tauri-cli resolves the
-        # externalBin suffix from its own arch, not the build target's.
+        # macOS: pin the triple to the explicit build target (see the --target
+        # note on the build step) so the arm64 ffmpeg is what gets bundled.
         run: |
-          ./scripts/fetch_ffmpeg.sh
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             ./scripts/fetch_ffmpeg.sh aarch64-apple-darwin
-            ./scripts/fetch_ffmpeg.sh x86_64-apple-darwin
+          else
+            ./scripts/fetch_ffmpeg.sh
           fi
 
       # Prebuilt binary in seconds — `cargo install` compiled the CLI from
@@ -107,20 +107,27 @@ jobs:
         run: cargo binstall tauri-cli --locked --no-confirm
 
       - name: Build Tauri app
-        run: cargo tauri build
+        # macOS: the target must be explicit. The prebuilt tauri-cli can run
+        # under Rosetta and then resolves the bundle name and the externalBin
+        # triple from its own x86_64 arch — v0.1.2 shipped as "x64.dmg" with
+        # an x86_64 ffmpeg inside (needing Rosetta at runtime) because of it.
+        run: cargo tauri build ${{ matrix.os == 'macos-latest' && '--target aarch64-apple-darwin' || '' }}
         working-directory: src-tauri
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: lazymeet-${{ matrix.os }}
+          # `**` also matches zero segments, so these cover both the plain
+          # layout (target/release/bundle) and the per-target layout an
+          # explicit --target produces (target/<triple>/release/bundle).
           path: |
-            target/release/bundle/**/*.dmg
-            target/release/bundle/**/*.app
-            target/release/bundle/**/*.msi
-            target/release/bundle/**/*.exe
-            target/release/bundle/**/*.AppImage
-            target/release/bundle/**/*.deb
+            target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.app
+            target/**/release/bundle/**/*.msi
+            target/**/release/bundle/**/*.exe
+            target/**/release/bundle/**/*.AppImage
+            target/**/release/bundle/**/*.deb
           if-no-files-found: ignore
 
   # On a version tag, gather the per-platform artifacts into one release.

@@ -74,4 +74,7 @@ jobs:
         run: ./scripts/fetch_ffmpeg.sh
 
       - name: Build release workspace (fills the cache)
-        run: cargo build --release --workspace --locked
+        # macOS mirrors the release build's explicit --target (see build.yml):
+        # cargo puts artifacts under target/<triple>/ when a target is passed,
+        # and the cache is only useful if it's filled under the same path.
+        run: cargo build --release --workspace --locked ${{ matrix.os == 'macos-latest' && '--target aarch64-apple-darwin' || '' }}
