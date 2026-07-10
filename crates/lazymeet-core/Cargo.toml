@@ -35,7 +35,7 @@ ureq = "2"
 tar = "0.4"
 bzip2 = "0.4"
 
-# Metal offload for the summarizer LLM on Apple Silicon (the USE_GPU tunable
+# Metal offload for the summarizer LLM on Apple Silicon (SUMMARY_PROVIDER
 # picks layer offload at runtime; elsewhere llama.cpp runs on the CPU).
 [target.'cfg(target_os = "macos")'.dependencies]
 llama-cpp-2 = { version = "0.1.151", features = ["metal"], optional = true }

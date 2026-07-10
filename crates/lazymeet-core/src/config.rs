@@ -144,8 +144,8 @@ pub fn tunables() -> Vec<TunableSpec> {
         t("DIAR_THRESHOLD", "LAZYMEET_DIAR_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("SPEAKER_MERGE_THRESHOLD", "LAZYMEET_MERGE_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("MIN_SPEAKER_SECONDS", "LAZYMEET_MIN_SPEAKER_SECONDS", Kind::Float, Some(0.0), Some(600.0)),
+        t("SUMMARY_PROVIDER", "LAZYMEET_SUMMARY_PROVIDER", Kind::Str, None, None),
         t("NUM_THREADS", "LAZYMEET_NUM_THREADS", Kind::Int, Some(1.0), Some(max_threads() as f64)),
-        t("USE_GPU", "LAZYMEET_USE_GPU", Kind::Bool, None, None),
         t("KEEP_AUDIO", "LAZYMEET_KEEP_AUDIO", Kind::Bool, None, None),
     ]
 }
@@ -157,12 +157,12 @@ pub fn default_value(name: &str) -> Value {
         "SUMMARY_MODEL" => json!("qwen3.5-4b"),
         "SUMMARY_LANGUAGE" => json!("auto"),
         "ASR_PROVIDER" | "DIAR_PROVIDER" | "SPEAKER_PROVIDER" => json!("cpu"),
+        "SUMMARY_PROVIDER" => json!(if cfg!(target_os = "macos") { "gpu" } else { "cpu" }),
         "SPEAKER_THRESHOLD" => json!(0.6),
         "DIAR_THRESHOLD" => json!(0.7),
         "SPEAKER_MERGE_THRESHOLD" => json!(0.6),
         "MIN_SPEAKER_SECONDS" => json!(15.0),
         "NUM_THREADS" => json!(default_threads()),
-        "USE_GPU" => json!(true),
         "KEEP_AUDIO" => json!(true),
         _ => Value::Null,
     }
@@ -285,8 +285,12 @@ impl Config {
     pub fn num_threads(&self) -> i64 {
         self.values["NUM_THREADS"].as_i64().unwrap_or(1)
     }
+    /// The summarizer runs on the GPU when SUMMARY_PROVIDER is "gpu".
     pub fn use_gpu(&self) -> bool {
-        self.values["USE_GPU"].as_bool().unwrap_or(true)
+        self.str_of("SUMMARY_PROVIDER") == "gpu"
+    }
+    pub fn summary_provider(&self) -> String {
+        self.str_of("SUMMARY_PROVIDER")
     }
     pub fn keep_audio(&self) -> bool {
         self.values["KEEP_AUDIO"].as_bool().unwrap_or(true)
@@ -311,8 +315,28 @@ impl Config {
     }
 }
 
-/// Execution providers a user can pick per stage.
-pub const ONNX_PROVIDERS: &[&str] = &["cpu", "coreml"];
+/// ONNX execution providers available in this build on this platform. The
+/// recognition models run via onnxruntime, whose accelerator on Apple
+/// Silicon is the Neural Engine (CoreML); CUDA/DirectML would slot in here
+/// once compiled in.
+pub fn onnx_provider_options() -> Vec<&'static str> {
+    let mut v = vec!["cpu"];
+    if cfg!(target_os = "macos") {
+        v.push("coreml");
+    }
+    v
+}
+
+/// Summarizer backends available in this build on this platform. llama.cpp's
+/// accelerator here is the Metal GPU (macOS); CUDA/Vulkan would slot in once
+/// compiled in. There is no NPU path for llama.cpp.
+pub fn summary_provider_options() -> Vec<&'static str> {
+    let mut v = vec!["cpu"];
+    if cfg!(target_os = "macos") {
+        v.push("gpu");
+    }
+    v
+}
 
 /// Read config.json; unknown keys and invalid values are dropped.
 pub fn load_overrides(paths: &Paths) -> Map<String, Value> {

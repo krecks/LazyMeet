@@ -191,7 +191,7 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
         "ASR_PROVIDER": fastest_onnx("Transcription"),
         "DIAR_PROVIDER": fastest_onnx("Diarization"),
         "SPEAKER_PROVIDER": fastest_onnx("Speaker ID"),
-        "USE_GPU": fastest_llm_gpu,
+        "SUMMARY_PROVIDER": if fastest_llm_gpu { "gpu" } else { "cpu" },
     });
     let current = {
         let config = ctx.config.read().unwrap();
@@ -199,7 +199,7 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
             "ASR_PROVIDER": config.asr_provider(),
             "DIAR_PROVIDER": config.diar_provider(),
             "SPEAKER_PROVIDER": config.speaker_provider(),
-            "USE_GPU": config.use_gpu(),
+            "SUMMARY_PROVIDER": config.summary_provider(),
         })
     };
 

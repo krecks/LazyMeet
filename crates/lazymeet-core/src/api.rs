@@ -56,6 +56,15 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         // Set by env var, which outranks config.json — the UI locks these.
         "env_locked": config::env_locked(),
         "limits": limits,
+        // Backends available in this build on this platform — the UI builds
+        // the compute selects from these (CPU everywhere; NPU for the
+        // recognition models on Apple Silicon; Metal GPU for the summarizer).
+        "compute_options": {
+            "ASR_PROVIDER": config::onnx_provider_options(),
+            "DIAR_PROVIDER": config::onnx_provider_options(),
+            "SPEAKER_PROVIDER": config::onnx_provider_options(),
+            "SUMMARY_PROVIDER": config::summary_provider_options(),
+        },
     })
 }
 
@@ -87,9 +96,15 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
     for key in ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER"] {
         if let Some(v) = fields.get(key).filter(|v| !v.is_null()) {
             let provider = v.as_str().unwrap_or_default();
-            if !config::ONNX_PROVIDERS.contains(&provider) {
+            if !config::onnx_provider_options().contains(&provider) {
                 return Err(ApiError::invalid(format!("unsupported provider for {key}")));
             }
+        }
+    }
+    if let Some(v) = fields.get("SUMMARY_PROVIDER").filter(|v| !v.is_null()) {
+        let provider = v.as_str().unwrap_or_default();
+        if !config::summary_provider_options().contains(&provider) {
+            return Err(ApiError::invalid("unsupported provider for SUMMARY_PROVIDER"));
         }
     }
 

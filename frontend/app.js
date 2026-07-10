@@ -1101,29 +1101,29 @@ const CONFIG_META = {
     help: "The language the notes are written in.",
     languages: "Match the meeting",
   },
-  USE_GPU: {
+  SUMMARY_PROVIDER: {
     section: "config-processing",
-    label: "Summary compute (GPU)",
-    help: "Run the summary model on the GPU where possible; off = CPU. The GPU is the summarizer's only accelerator — the steps below use the Neural Engine instead. The benchmark (gauge icon) measures every option on this machine and can apply the fastest.",
-    toggle: true,
+    label: "Summary compute",
+    help: "Where the summary model runs. Its engine (llama.cpp) accelerates on the GPU; the Neural Engine is not available for it. Options show what this build supports on this machine — the benchmark (gauge icon) measures them all and can apply the fastest.",
+    providers: true,
   },
   ASR_PROVIDER: {
     section: "config-processing",
     label: "Transcription compute",
-    help: "Where the speech-to-text model runs: CPU, or the Neural Engine (CoreML, Apple Silicon only — the GPU is not available for this engine). CPU measures fastest on most machines.",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+    help: "Where the speech-to-text model runs. Its engine (onnxruntime) accelerates on the Neural Engine on Apple Silicon; the GPU is not available for it. CPU measures fastest on most machines.",
+    providers: true,
   },
   DIAR_PROVIDER: {
     section: "config-processing",
     label: "Speaker separation compute",
     help: "Where the who-spoke-when model runs: CPU or Neural Engine.",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+    providers: true,
   },
   SPEAKER_PROVIDER: {
     section: "config-processing",
     label: "Voice matching compute",
     help: "Where the voiceprint model runs: CPU or Neural Engine.",
-    choices: [["cpu", "CPU"], ["coreml", "Neural Engine (CoreML, Apple only)"]],
+    providers: true,
   },
   NUM_THREADS: {
     section: "config-processing",
@@ -1253,14 +1253,18 @@ function onBenchProgress(p) {
   }
 }
 
-const PROVIDER_LABELS = { cpu: "CPU", coreml: "Neural Engine" };
+const PROVIDER_LABELS = {
+  cpu: "CPU",
+  coreml: "Neural Engine (NPU)",
+  gpu: "GPU",
+};
 
 function benchSummaryText(rec) {
   return (
     `Fastest on this machine: transcription ${PROVIDER_LABELS[rec.ASR_PROVIDER]}` +
     ` · speaker separation ${PROVIDER_LABELS[rec.DIAR_PROVIDER]}` +
     ` · voice matching ${PROVIDER_LABELS[rec.SPEAKER_PROVIDER]}` +
-    ` · summarizer ${rec.USE_GPU ? "GPU" : "CPU"}.`
+    ` · summarizer ${PROVIDER_LABELS[rec.SUMMARY_PROVIDER]}.`
   );
 }
 
@@ -1269,7 +1273,7 @@ function renderBenchRecommendation(rec, current) {
   benchRec = rec;
   const matches =
     current &&
-    ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER", "USE_GPU"].every(
+    ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER", "SUMMARY_PROVIDER"].every(
       (k) => current[k] === rec[k]
     );
   const line = $("bench-rec");
@@ -1355,14 +1359,15 @@ function renderConfigForm(cfg, models) {
       continue;
     }
 
-    if (meta.choices) {
+    if (meta.providers) {
       const select = document.createElement("select");
       select.dataset.config = name;
-      select.disabled = locked;
-      for (const [value, label] of meta.choices) {
+      const options = (cfg.compute_options && cfg.compute_options[name]) || ["cpu"];
+      select.disabled = locked || options.length < 2;
+      for (const value of options) {
         const o = document.createElement("option");
         o.value = value;
-        o.textContent = label;
+        o.textContent = PROVIDER_LABELS[value] || value;
         if (value === cfg.values[name]) o.selected = true;
         select.appendChild(o);
       }

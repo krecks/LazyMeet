@@ -49,18 +49,19 @@ fn precedence_env_beats_file_beats_default() {
 }
 
 #[test]
-fn use_gpu_toggle() {
+fn summary_provider_env_toggle() {
     let _lock = ENV_LOCK.lock().unwrap();
     let app = TestApp::fake();
-    // USE_GPU (summarizer Metal offload) accelerates by default and toggles.
-    assert!(app.ctx.config.read().unwrap().use_gpu());
+    // The summarizer accelerates by default where a GPU backend exists.
+    let default_gpu = cfg!(target_os = "macos");
+    assert_eq!(app.ctx.config.read().unwrap().use_gpu(), default_gpu);
     {
-        let _env = EnvGuard::set("LAZYMEET_USE_GPU", "0");
+        let _env = EnvGuard::set("LAZYMEET_SUMMARY_PROVIDER", "cpu");
         app.ctx.refresh_config();
         assert!(!app.ctx.config.read().unwrap().use_gpu());
     }
     app.ctx.refresh_config();
-    assert!(app.ctx.config.read().unwrap().use_gpu());
+    assert_eq!(app.ctx.config.read().unwrap().use_gpu(), default_gpu);
 }
 
 #[test]
