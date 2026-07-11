@@ -12,9 +12,23 @@ rust-version = "1.77"
 #   cargo test -p lazymeet-core --no-default-features
 default = ["native-pipeline"]
 native-pipeline = ["dep:sherpa-rs", "dep:llama-cpp-2", "dep:whatlang"]
+# Build llama.cpp's CPU kernels as runtime-dispatched loadable modules
+# (GGML_CPU_ALL_VARIANTS): one binary serves SSE2-only through AVX512 CPUs at
+# full speed. Turns libllama into shared libs — the backend modules must ship
+# next to the executable (see llama_backend() in pipeline/native.rs).
+llama-dynamic-backends = ["native-pipeline", "llama-cpp-2/dynamic-backends"]
+# GPU summarization via Vulkan, as a loadable module: on machines without a
+# usable driver the module simply fails to load and the CPU variants serve.
+# Build-time requirement: Vulkan SDK (glslc). Only meaningful together with
+# llama-dynamic-backends.
+llama-vulkan = ["llama-dynamic-backends", "llama-cpp-2/vulkan"]
 
 [[bin]]
 name = "lazymeet-cli"
+required-features = ["native-pipeline"]
+
+[[example]]
+name = "bench_prefill"
 required-features = ["native-pipeline"]
 
 [dependencies]

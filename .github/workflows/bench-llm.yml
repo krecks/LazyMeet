@@ -1,15 +1,18 @@
-# Measures the summarizer LLM (and, as a control, the ONNX stages) on the
-# x86 runner across kernel strategies, to decide how shipped Windows/Linux
-# builds should get fast CPU inference (see issue #1):
-#   - baseline: what ships today — no x86 target features, so ggml compiles
-#     SSE2-only kernels (onnxruntime dispatches at runtime and is unaffected;
-#     its rows double as the control).
-#   - avx2: -C target-feature=+avx2,+fma,+f16c — fast kernels baked in, but
-#     the binary SIGILLs on pre-2013 CPUs.
-#   - dynamic: llama.cpp's GGML_CPU_ALL_VARIANTS as runtime-dispatched
-#     loadable modules — fast kernels AND old-CPU compatibility, at the cost
-#     of shipping shared libs.
-# Manual-dispatch only; benchmarks nothing on tags or pushes.
+# Measures the summarizer LLM across x86 kernel strategies, to decide how
+# shipped Windows/Linux builds get fast CPU inference (see issue #1).
+#
+# Round 1 (matrix jobs) showed generation speed is memory-bandwidth-bound —
+# identical across SSE2/AVX2/dynamic kernels. What remains is PREFILL
+# (prompt processing): compute-bound, and the dominant cost of summarizing
+# long transcripts. bench_prefill measures it directly; its gen_tps doubles
+# as the machine-speed control.
+#
+# Variants:
+#   - baseline: what ships today — no x86 target features (SSE2-only ggml).
+#   - avx2: -C target-feature=+avx2,+fma,+f16c baked in (SIGILL pre-2013).
+#   - dynamic: GGML_CPU_ALL_VARIANTS as runtime-dispatched loadable modules.
+# All three run SEQUENTIALLY IN ONE JOB: separate jobs land on runner VMs
+# whose speed varies too much to compare. Manual-dispatch only.
 name: bench-llm
 
 on:
@@ -17,24 +20,8 @@ on:
 
 jobs:
   bench:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: baseline
-            rustflags: "-C relocation-model=dynamic-no-pic"
-            features: ""
-          - variant: avx2
-            rustflags: "-C relocation-model=dynamic-no-pic -C target-feature=+avx2,+fma,+f16c"
-            features: ""
-          - variant: dynamic
-            rustflags: "-C relocation-model=dynamic-no-pic"
-            features: "--features llama-dynamic-backends"
-
     runs-on: ubuntu-22.04
-
-    env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
+    timeout-minutes: 180
 
     steps:
       - uses: actions/checkout@v4
@@ -42,28 +29,46 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: CPU info
-        run: lscpu | grep -E 'Model name|CPU\(s\)|avx' || true
+        run: lscpu | grep -E 'Model name|^CPU\(s\)' ; grep -o 'avx2\|avx512[a-z]*' /proc/cpuinfo | sort -u | head -5
 
-      - name: Build (${{ matrix.variant }})
+      - name: Build baseline
+        env:
+          RUSTFLAGS: "-C relocation-model=dynamic-no-pic"
+        run: cargo build --release -p lazymeet-core --example bench_prefill --example fetch_models
+
+      - name: Fetch models (~3.2 GB, once)
+        env:
+          RUSTFLAGS: "-C relocation-model=dynamic-no-pic"
+        run: cargo run --release -p lazymeet-core --example fetch_models | tail -2
+
+      - name: Bench baseline (SSE2 kernels)
+        env:
+          RUSTFLAGS: "-C relocation-model=dynamic-no-pic"
         run: |
-          cargo build --release -p lazymeet-core \
-            --example bench_smoke --example fetch_models ${{ matrix.features }}
+          for i in 1 2; do
+            cargo run --release -p lazymeet-core --example bench_prefill 2>/dev/null | tail -1
+          done
 
-      - name: List backend modules (dynamic)
-        if: matrix.variant == 'dynamic'
-        run: find target/release -name '*.so*' \( -path '*backends*' -o -name 'libllama*' -o -name 'libggml*' \) | sed 's|.*/||' | sort -u
-
-      - name: Fetch models (~3.2 GB)
+      - name: Build + bench avx2
+        env:
+          RUSTFLAGS: "-C relocation-model=dynamic-no-pic -C target-feature=+avx2,+fma,+f16c"
         run: |
-          cargo run --release -p lazymeet-core \
-            --example fetch_models ${{ matrix.features }} | tail -3
+          cargo build --release -p lazymeet-core --example bench_prefill
+          for i in 1 2; do
+            cargo run --release -p lazymeet-core --example bench_prefill 2>/dev/null | tail -1
+          done
 
-      - name: Bench (${{ matrix.variant }})
+      - name: Build + bench dynamic (runtime-dispatched kernels)
+        env:
+          RUSTFLAGS: "-C relocation-model=dynamic-no-pic"
         run: |
-          cargo run --release -p lazymeet-core \
-            --example bench_smoke ${{ matrix.features }} > bench.log 2>stderr.log || true
-          echo "--- final rows ---"
-          grep -o '"rows":\[[^]]*\]' bench.log | tail -1 | sed 's/^/{/; s/$/}/' | python3 -m json.tool || true
-          echo "--- errors (if any) ---"
-          grep '"status":"error"' bench.log || true
-          grep -iE 'load_backends|registered|SIGILL|error' stderr.log | head -10 || true
+          cargo build --release -p lazymeet-core --example bench_prefill --features llama-dynamic-backends
+          BACK=$(dirname "$(find target/release -name 'libggml-cpu-haswell.so' | head -1)")
+          echo "backends dir: $BACK"
+          for i in 1 2; do
+            LAZYMEET_LLM_BACKENDS_DIR="$BACK" \
+              cargo run --release -p lazymeet-core --example bench_prefill --features llama-dynamic-backends \
+              2>stderr-dynamic.log | tail -1
+          done
+          echo "--- which backend variant loaded ---"
+          grep -i 'load_backend' stderr-dynamic.log | head -5 || true

@@ -599,7 +599,22 @@ fn lang_instruction(ctx: &PipelineCtx, transcript: &str) -> String {
 fn llama_backend() -> Result<&'static LlamaBackend, String> {
     static BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
     BACKEND
-        .get_or_init(|| LlamaBackend::init().map_err(|e| e.to_string()))
+        .get_or_init(|| {
+            // With dynamic backends the ggml kernels (CPU variants, Vulkan)
+            // are loadable modules that must be registered before init.
+            // LAZYMEET_LLM_BACKENDS_DIR points at the shipped modules (set
+            // by the desktop shell from its resource dir); without it, fall
+            // back to the build-time directory, which is valid on the
+            // machine that compiled the binary (dev builds, CI benches).
+            #[cfg(feature = "llama-dynamic-backends")]
+            match std::env::var_os("LAZYMEET_LLM_BACKENDS_DIR") {
+                Some(dir) => llama_cpp_2::llama_backend::load_backends_from_path(
+                    std::path::Path::new(&dir),
+                ),
+                None => llama_cpp_2::llama_backend::load_backends(),
+            }
+            LlamaBackend::init().map_err(|e| e.to_string())
+        })
         .as_ref()
         .map_err(|e| e.clone())
 }
