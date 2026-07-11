@@ -1,0 +1,69 @@
+# Measures the summarizer LLM (and, as a control, the ONNX stages) on the
+# x86 runner across kernel strategies, to decide how shipped Windows/Linux
+# builds should get fast CPU inference (see issue #1):
+#   - baseline: what ships today — no x86 target features, so ggml compiles
+#     SSE2-only kernels (onnxruntime dispatches at runtime and is unaffected;
+#     its rows double as the control).
+#   - avx2: -C target-feature=+avx2,+fma,+f16c — fast kernels baked in, but
+#     the binary SIGILLs on pre-2013 CPUs.
+#   - dynamic: llama.cpp's GGML_CPU_ALL_VARIANTS as runtime-dispatched
+#     loadable modules — fast kernels AND old-CPU compatibility, at the cost
+#     of shipping shared libs.
+# Manual-dispatch only; benchmarks nothing on tags or pushes.
+name: bench-llm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: baseline
+            rustflags: "-C relocation-model=dynamic-no-pic"
+            features: ""
+          - variant: avx2
+            rustflags: "-C relocation-model=dynamic-no-pic -C target-feature=+avx2,+fma,+f16c"
+            features: ""
+          - variant: dynamic
+            rustflags: "-C relocation-model=dynamic-no-pic"
+            features: "--features llama-dynamic-backends"
+
+    runs-on: ubuntu-22.04
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: CPU info
+        run: lscpu | grep -E 'Model name|CPU\(s\)|avx' || true
+
+      - name: Build (${{ matrix.variant }})
+        run: |
+          cargo build --release -p lazymeet-core \
+            --example bench_smoke --example fetch_models ${{ matrix.features }}
+
+      - name: List backend modules (dynamic)
+        if: matrix.variant == 'dynamic'
+        run: find target/release -name '*.so*' \( -path '*backends*' -o -name 'libllama*' -o -name 'libggml*' \) | sed 's|.*/||' | sort -u
+
+      - name: Fetch models (~3.2 GB)
+        run: |
+          cargo run --release -p lazymeet-core \
+            --example fetch_models ${{ matrix.features }} | tail -3
+
+      - name: Bench (${{ matrix.variant }})
+        run: |
+          cargo run --release -p lazymeet-core \
+            --example bench_smoke ${{ matrix.features }} > bench.log 2>stderr.log || true
+          echo "--- final rows ---"
+          grep -o '"rows":\[[^]]*\]' bench.log | tail -1 | sed 's/^/{/; s/$/}/' | python3 -m json.tool || true
+          echo "--- errors (if any) ---"
+          grep '"status":"error"' bench.log || true
+          grep -iE 'load_backends|registered|SIGILL|error' stderr.log | head -10 || true
