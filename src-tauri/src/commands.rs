@@ -173,6 +173,15 @@ pub async fn patch_segment(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn patch_segments(
+    ctx: State<'_, App>,
+    meeting_id: String,
+    edits: Vec<(usize, String)>,
+) -> ApiResult<Value> {
+    api::patch_segments(&ctx, &meeting_id, &edits)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn rename_speakers(
     ctx: State<'_, App>,
     meeting_id: String,

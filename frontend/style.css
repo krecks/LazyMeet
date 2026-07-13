@@ -721,6 +721,47 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .legend .icon-btn.verify.yes { color: var(--success); }
 .legend .icon-btn.verify.no { color: var(--danger); }
 
+/* find & replace bar */
+.find-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+  padding: 0.5rem 0.55rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+}
+.find-row { display: flex; align-items: center; gap: 0.35rem; }
+.find-row .find-field { flex: 1; margin: 0; max-width: 22rem; }
+.find-field.no-icon input { padding-left: 0.6rem; }
+.find-count {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  min-width: 3rem;
+  text-align: center;
+}
+.find-case {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.find-case.on { background: var(--accent-soft); color: var(--accent); }
+.find-row .btn { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+
+.seg-text mark.find-hit {
+  background: var(--accent-soft);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.seg-text mark.find-hit.current {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+
 .transcript { display: flex; flex-direction: column; }
 .seg {
   position: relative;

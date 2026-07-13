@@ -1662,6 +1662,221 @@ function renderTranscript(m, colorOf, editable) {
     }
     t.appendChild(div);
   });
+  // Whatever is on screen is what find searches — including read-only
+  // snapshots (where the replace row hides).
+  find.meeting = m;
+  find.editable = editable;
+  refreshFind();
+}
+
+// --------------------------------------------------------------------------
+// Find & replace in the transcript. Matching lives entirely here (the same
+// matcher drives highlights, the counter, and replace); the backend only gets
+// the resulting segment texts via the bulk patch_segments command, so a
+// replace-all is one locked write instead of one per segment.
+// --------------------------------------------------------------------------
+const find = {
+  open: false,
+  matchCase: false,
+  matches: [], // { seg, start, end } in transcript order
+  current: -1, // index into matches
+  marks: [], // <mark> elements, parallel to matches
+  meeting: null, // the meeting whose segments are rendered (may be a snapshot)
+  editable: false,
+};
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Literal search as a regex: the 'i' flag gives Unicode-aware case folding
+// without the index drift of comparing toLowerCase()d strings.
+function findRegex() {
+  const q = $("find-input").value;
+  if (!q) return null;
+  return new RegExp(escapeRegExp(q), find.matchCase ? "g" : "gi");
+}
+
+function openFind() {
+  find.open = true;
+  $("find-bar").classList.remove("hidden");
+  $("find-toggle-btn").setAttribute("aria-expanded", "true");
+  const input = $("find-input");
+  input.focus();
+  input.select();
+  refreshFind();
+}
+
+function closeFind() {
+  find.open = false;
+  $("find-bar").classList.add("hidden");
+  $("find-toggle-btn").setAttribute("aria-expanded", "false");
+  refreshFind(); // clears the highlights
+}
+
+/// Recompute matches for the rendered transcript and repaint. Runs on every
+/// transcript render, query edit, and case toggle. `find.current` is clamped,
+/// not reset — after a replace the position carries over to the next match.
+function refreshFind() {
+  const re = find.open ? findRegex() : null;
+  const segs = (find.meeting && find.meeting.segments) || [];
+  find.matches = [];
+  if (re) {
+    segs.forEach((seg, i) => {
+      for (const hit of seg.text.matchAll(re)) {
+        find.matches.push({ seg: i, start: hit.index, end: hit.index + hit[0].length });
+      }
+    });
+  }
+  find.current = find.matches.length
+    ? Math.min(Math.max(find.current, 0), find.matches.length - 1)
+    : -1;
+  paintFindMarks();
+  updateFindControls();
+}
+
+// Rewrite each segment's text HTML with <mark>s around the matches. Segments
+// that had no marks and get none are left untouched.
+function paintFindMarks() {
+  const t = $("transcript");
+  const segs = (find.meeting && find.meeting.segments) || [];
+  const bySeg = new Map();
+  find.matches.forEach((m, k) => {
+    if (!bySeg.has(m.seg)) bySeg.set(m.seg, []);
+    bySeg.get(m.seg).push({ ...m, k });
+  });
+  segs.forEach((seg, i) => {
+    const node = t.children[i] && t.children[i].querySelector(".seg-text");
+    if (!node) return;
+    const hits = bySeg.get(i);
+    if (!hits) {
+      if (node.querySelector("mark")) node.innerHTML = escapeHtml(seg.text);
+      return;
+    }
+    let html = "";
+    let pos = 0;
+    for (const h of hits) {
+      html += escapeHtml(seg.text.slice(pos, h.start));
+      html += `<mark class="find-hit${h.k === find.current ? " current" : ""}">${escapeHtml(
+        seg.text.slice(h.start, h.end)
+      )}</mark>`;
+      pos = h.end;
+    }
+    html += escapeHtml(seg.text.slice(pos));
+    node.innerHTML = html;
+  });
+  // matches are generated in document order, so this lines up with find.matches
+  find.marks = [...t.querySelectorAll("mark.find-hit")];
+}
+
+function updateFindControls() {
+  const n = find.matches.length;
+  $("find-count").textContent = $("find-input").value ? `${n ? find.current + 1 : 0}/${n}` : "";
+  $("find-prev").disabled = !n;
+  $("find-next").disabled = !n;
+  $("find-replace-row").classList.toggle("hidden", !find.editable);
+  $("find-replace").disabled = !n;
+  const allBtn = $("find-replace-all");
+  if (allBtn.disabled !== !n) disarm(allBtn); // a stale confirm must not survive
+  allBtn.disabled = !n;
+}
+
+function gotoMatch(k) {
+  const n = find.matches.length;
+  if (!n) return;
+  find.current = ((k % n) + n) % n;
+  find.marks.forEach((el, i) => el.classList.toggle("current", i === find.current));
+  const el = find.marks[find.current];
+  if (el) el.scrollIntoView({ block: "center" });
+  updateFindControls();
+}
+
+/// Replace the current match (all = false) or every match (all = true).
+/// Only reachable when `find.editable`, i.e. the live version of a "done"
+/// meeting is on screen — so `find.meeting === currentMeeting`.
+async function replaceMatches(all) {
+  if (!find.editable || !find.matches.length || !currentMeeting) return;
+  const replacement = $("find-replace-input").value;
+  const targets = all ? find.matches : [find.matches[find.current]];
+  const bySeg = new Map();
+  for (const m of targets) {
+    if (!bySeg.has(m.seg)) bySeg.set(m.seg, []);
+    bySeg.get(m.seg).push(m);
+  }
+  // Within a segment, splice from the end so earlier offsets stay valid.
+  const edits = [];
+  for (const [i, hits] of bySeg) {
+    let text = currentMeeting.segments[i].text;
+    for (const h of [...hits].sort((a, b) => b.start - a.start)) {
+      text = text.slice(0, h.start) + replacement + text.slice(h.end);
+    }
+    edits.push([i, text]);
+  }
+  const keep = all ? 0 : find.current;
+  try {
+    const m = await call("patch_segments", { meeting_id: currentMeeting.id, edits });
+    find.current = keep; // refreshFind (via renderResult) clamps this onto the next match
+    renderResult(m);
+    if (all) showToast(`Replaced ${targets.length} match${targets.length === 1 ? "" : "es"}`, 2500, true);
+    else if (find.marks[find.current]) find.marks[find.current].scrollIntoView({ block: "center" });
+  } catch (e) {
+    showToast(editError(e));
+  }
+}
+
+// One-time wiring for the find bar (called from initApp).
+function setupFind() {
+  $("find-toggle-btn").addEventListener("click", () => (find.open ? closeFind() : openFind()));
+  $("find-close").addEventListener("click", closeFind);
+  $("find-prev").addEventListener("click", () => gotoMatch(find.current - 1));
+  $("find-next").addEventListener("click", () => gotoMatch(find.current + 1));
+  $("find-case").addEventListener("click", () => {
+    find.matchCase = !find.matchCase;
+    const btn = $("find-case");
+    btn.classList.toggle("on", find.matchCase);
+    btn.setAttribute("aria-pressed", String(find.matchCase));
+    find.current = 0;
+    refreshFind();
+  });
+  $("find-input").addEventListener("input", () => {
+    find.current = 0;
+    refreshFind();
+    if (find.matches.length) gotoMatch(0); // follow the first match while typing
+  });
+  $("find-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      gotoMatch(find.current + (e.shiftKey ? -1 : 1));
+    }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeFind();
+    }
+  });
+  $("find-replace-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      replaceMatches(false);
+    }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeFind();
+    }
+  });
+  $("find-replace").addEventListener("click", () => replaceMatches(false));
+  // Replace-all has no undo — same two-click guard as the other destructive buttons.
+  $("find-replace-all").addEventListener("click", (e) => {
+    confirmThen(e.currentTarget, `Replace all ${find.matches.length}?`, () => replaceMatches(true));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.key.toLowerCase() === "f" &&
+      !$("app").classList.contains("hidden") &&
+      !$("result").classList.contains("hidden")
+    ) {
+      e.preventDefault();
+      openFind();
+    }
+  });
 }
 
 // --------------------------------------------------------------------------
@@ -2622,6 +2837,7 @@ function initApp() {
   $("app").classList.remove("hidden");
   setupDropzone();
   setupPrepare();
+  setupFind();
   $("settings-btn").addEventListener("click", openSettings);
   $("settings-back").addEventListener("click", closeSettings);
   $("speakers-btn").addEventListener("click", openSpeakers);

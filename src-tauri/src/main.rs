@@ -72,6 +72,7 @@ fn main() {
             commands::get_meeting_audio_path,
             commands::patch_meeting,
             commands::patch_segment,
+            commands::patch_segments,
             commands::rename_speakers,
             commands::verify_speaker,
             commands::delete_meeting,

@@ -385,6 +385,27 @@ pub fn patch_segment(
     Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
 }
 
+/// Bulk transcript text edit — one locked write for all listed segments
+/// (the frontend's search & replace). Unlike `patch_segment`, an edit may
+/// leave a segment empty: replacing a phrase with nothing is legitimate, and
+/// the segment keeps its speaker and timestamps.
+pub fn patch_segments(
+    ctx: &Ctx,
+    meeting_id: &str,
+    edits: &[(usize, String)],
+) -> ApiResult<Value> {
+    if edits.is_empty() {
+        return Err(ApiError::invalid("no segments to update"));
+    }
+    let updated = store::update_segment_texts(&ctx.paths, &ctx.locks, meeting_id, edits)
+        .map_err(|e| match e {
+            StoreError::SegmentOutOfRange => ApiError::not_found("segment not found"),
+            other => status_conflict(other),
+        })?
+        .ok_or_else(|| ApiError::not_found("meeting not found"))?;
+    Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
+}
+
 pub fn rename_speakers(ctx: &Ctx, meeting_id: &str, names: &Map<String, Value>) -> ApiResult<Value> {
     let updated = store::merge_speaker_names(&ctx.paths, &ctx.locks, meeting_id, names)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;

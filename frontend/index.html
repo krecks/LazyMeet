@@ -47,6 +47,8 @@
       <symbol id="i-refresh" viewBox="0 0 24 24">
         <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
       </symbol>
+      <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></symbol>
+      <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></symbol>
       <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" /></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></symbol>
     </defs>
@@ -208,6 +210,10 @@
           <section class="transcript-section">
             <div class="note-head">
               <h3>Transcript</h3>
+              <button class="icon-btn subtle" id="find-toggle-btn" title="Find in transcript (⌘F)"
+                aria-label="Find in transcript" aria-expanded="false" aria-controls="find-bar">
+                <svg class="icon"><use href="#i-search" /></svg>
+              </button>
               <button class="icon-btn subtle" id="copy-transcript-btn" title="Copy transcript" aria-label="Copy transcript">
                 <svg class="icon"><use href="#i-copy" /></svg>
               </button>
@@ -216,6 +222,38 @@
                 aria-label="Re-transcribe recording">
                 <svg class="icon"><use href="#i-refresh" /></svg>
               </button>
+            </div>
+            <div id="find-bar" class="find-bar hidden" role="search" aria-label="Find in transcript">
+              <div class="find-row">
+                <div class="search-field find-field">
+                  <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
+                  <input id="find-input" type="text" placeholder="Find in transcript"
+                    aria-label="Find in transcript" autocomplete="off" spellcheck="false" />
+                </div>
+                <button id="find-case" class="icon-btn subtle find-case" type="button"
+                  title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>
+                <span id="find-count" class="find-count muted" aria-live="polite"></span>
+                <button id="find-prev" class="icon-btn subtle" type="button" title="Previous match"
+                  aria-label="Previous match">
+                  <svg class="icon"><use href="#i-chev-up" /></svg>
+                </button>
+                <button id="find-next" class="icon-btn subtle" type="button" title="Next match"
+                  aria-label="Next match">
+                  <svg class="icon"><use href="#i-chev-down" /></svg>
+                </button>
+                <button id="find-close" class="icon-btn subtle" type="button" title="Close (esc)"
+                  aria-label="Close search">
+                  <svg class="icon"><use href="#i-x" /></svg>
+                </button>
+              </div>
+              <div id="find-replace-row" class="find-row">
+                <div class="search-field find-field no-icon">
+                  <input id="find-replace-input" type="text" placeholder="Replace with"
+                    aria-label="Replace with" autocomplete="off" spellcheck="false" />
+                </div>
+                <button id="find-replace" class="btn ghost" type="button"><span>Replace</span></button>
+                <button id="find-replace-all" class="btn ghost" type="button"><span>Replace all</span></button>
+              </div>
             </div>
             <div id="speaker-legend" class="legend"></div>
             <datalist id="speaker-names"></datalist>

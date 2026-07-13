@@ -249,6 +249,39 @@ pub fn update_segment(
     Ok(Some(record))
 }
 
+/// Bulk variant of `update_segment` for search & replace: every edit is
+/// validated against the segment list first, then all are applied in one
+/// write — a replace-all is atomic instead of one write per segment.
+pub fn update_segment_texts(
+    paths: &Paths,
+    locks: &StoreLocks,
+    meeting_id: &str,
+    edits: &[(usize, String)],
+) -> Result<Option<Record>, StoreError> {
+    let _g = locks.meetings.lock().unwrap();
+    let Some(mut record) = get_meeting_unlocked(paths, meeting_id) else {
+        return Ok(None);
+    };
+    if record.get("status").and_then(|v| v.as_str()) != Some("done") {
+        let status = record.get("status").and_then(|v| v.as_str()).map(String::from);
+        return Err(StoreError::StatusConflict(status));
+    }
+    let segments = record
+        .get_mut("segments")
+        .and_then(|v| v.as_array_mut())
+        .ok_or(StoreError::SegmentOutOfRange)?;
+    if edits.iter().any(|(i, _)| *i >= segments.len()) {
+        return Err(StoreError::SegmentOutOfRange);
+    }
+    for (index, text) in edits {
+        if let Some(obj) = segments[*index].as_object_mut() {
+            obj.insert("text".into(), json!(text.trim()));
+        }
+    }
+    let _ = atomic_write_json(&meeting_path(paths, meeting_id), &Value::Object(record.clone()));
+    Ok(Some(record))
+}
+
 /// Is `c` a word character in the sense of Python's `\w` (unicode-aware)?
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
