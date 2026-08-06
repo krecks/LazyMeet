@@ -68,6 +68,7 @@ fn main() {
             commands::extract_preview_audio,
             commands::pick_recording,
             commands::list_meetings,
+            commands::search_meetings,
             commands::get_meeting,
             commands::get_meeting_audio_path,
             commands::patch_meeting,

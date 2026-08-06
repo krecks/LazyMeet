@@ -521,6 +521,162 @@ pub fn list_meetings(paths: &Paths, locks: &StoreLocks) -> Vec<Record> {
     items
 }
 
+/// A single meeting's worth of search hits is capped so one very common word
+/// can't push a multi-megabyte payload over IPC. `count` stays truthful.
+const MAX_HITS_PER_MEETING: usize = 200;
+
+/// Case-insensitive literal substring search across every meeting file.
+///
+/// There is no index — this is the same directory walk `list_meetings` does,
+/// reading more of each record. Hits carry the full source text; the frontend
+/// re-runs the equivalent JS matcher to highlight, so offsets never have to
+/// survive the UTF-8/UTF-16 boundary.
+///
+/// Version snapshots (`versions[].snapshot`) are deliberately skipped: they
+/// duplicate the whole segment array per reprocess, and searching them would
+/// report every occurrence once per past version.
+pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Record> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    // regex::escape makes the pattern literal, so this can only fail on a
+    // query long enough to blow the compiled-size limit — treat that as "no
+    // results" rather than panicking on user input.
+    let Ok(re) = regex::RegexBuilder::new(&regex::escape(query)).case_insensitive(true).build()
+    else {
+        return Vec::new();
+    };
+
+    let _g = locks.meetings.lock().unwrap();
+    let mut items: Vec<Record> = Vec::new();
+    let entries = match std::fs::read_dir(paths.meetings_dir()) {
+        Ok(e) => e,
+        Err(_) => return items,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(rec) = read_json_map(&path) else { continue };
+
+        // fallback covers records created before titles existed
+        let title = rec
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| rec.get("filename").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        let speakers = rec.get("speakers").and_then(|v| v.as_object());
+
+        let mut hits: Vec<Value> = Vec::new();
+        // One row per matching field, but `count` totals *occurrences* — the
+        // same thing the transcript find bar counts, so the two agree. `rows`
+        // keeps counting past the cap so `truncated` stays honest.
+        let mut count = 0usize;
+        let mut rows = 0usize;
+        let push = |hit: Value, n: usize, hits: &mut Vec<Value>, count: &mut usize, rows: &mut usize| {
+            *count += n;
+            *rows += 1;
+            if hits.len() < MAX_HITS_PER_MEETING {
+                hits.push(hit);
+            }
+        };
+        // 0 when the field doesn't match at all.
+        let occurrences = |text: &str| re.find_iter(text).count();
+
+        let n = occurrences(title);
+        if n > 0 {
+            push(json!({"kind": "title", "text": title}), n, &mut hits, &mut count, &mut rows);
+        }
+        for (id, name) in speakers.into_iter().flatten() {
+            let Some(name) = name.as_str() else { continue };
+            let n = occurrences(name);
+            if n > 0 {
+                push(
+                    json!({"kind": "speaker", "speaker": id, "text": name}),
+                    n,
+                    &mut hits,
+                    &mut count,
+                    &mut rows,
+                );
+            }
+        }
+        for (i, seg) in rec.get("segments").and_then(|v| v.as_array()).into_iter().flatten().enumerate()
+        {
+            let text = seg.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let n = occurrences(text);
+            if n == 0 {
+                continue;
+            }
+            let speaker = seg.get("speaker").and_then(|v| v.as_str()).unwrap_or("");
+            // same display rule as the transcript: the mapped name, else the
+            // raw diarized id
+            let name = speakers
+                .and_then(|s| s.get(speaker))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(speaker);
+            push(
+                json!({
+                    "kind": "segment",
+                    "index": i,
+                    "start": seg.get("start").cloned().unwrap_or(Value::Null),
+                    "speaker": speaker,
+                    "speaker_name": name,
+                    "text": text,
+                }),
+                n,
+                &mut hits,
+                &mut count,
+                &mut rows,
+            );
+        }
+        if let Some(summary) = rec.get("summary").and_then(|v| v.as_str()) {
+            let n = occurrences(summary);
+            if n > 0 {
+                push(json!({"kind": "summary", "text": summary}), n, &mut hits, &mut count, &mut rows);
+            }
+        }
+        for (key, kind) in [("takeaways", "takeaway"), ("action_items", "action_item")] {
+            for (i, item) in rec.get(key).and_then(|v| v.as_array()).into_iter().flatten().enumerate()
+            {
+                let Some(text) = item.as_str() else { continue };
+                let n = occurrences(text);
+                if n > 0 {
+                    push(
+                        json!({"kind": kind, "index": i, "text": text}),
+                        n,
+                        &mut hits,
+                        &mut count,
+                        &mut rows,
+                    );
+                }
+            }
+        }
+
+        if count == 0 {
+            continue;
+        }
+        let mut item = Map::new();
+        item.insert("id".into(), rec.get("id").cloned().unwrap_or(Value::Null));
+        item.insert("filename".into(), rec.get("filename").cloned().unwrap_or(Value::Null));
+        item.insert("title".into(), json!(title));
+        item.insert("status".into(), rec.get("status").cloned().unwrap_or(Value::Null));
+        item.insert("created_at".into(), rec.get("created_at").cloned().unwrap_or(Value::Null));
+        item.insert("count".into(), json!(count));
+        item.insert("truncated".into(), json!(rows > hits.len()));
+        item.insert("hits".into(), Value::Array(hits));
+        items.push(item);
+    }
+    items.sort_by(|a, b| {
+        let ka = a.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+        let kb = b.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+        kb.cmp(ka) // newest first
+    });
+    items
+}
+
 pub fn delete_meeting(paths: &Paths, locks: &StoreLocks, meeting_id: &str) -> bool {
     let _g = locks.meetings.lock().unwrap();
     let path = meeting_path(paths, meeting_id);

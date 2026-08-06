@@ -275,6 +275,14 @@ pub fn list_meetings(ctx: &Ctx) -> Value {
     Value::Array(store::list_meetings(&ctx.paths, &ctx.locks).into_iter().map(Value::Object).collect())
 }
 
+/// Literal, case-insensitive search over every meeting on disk. An empty query
+/// is a legitimate empty result, not a validation error.
+pub fn search_meetings(ctx: &Ctx, query: &str) -> Value {
+    Value::Array(
+        store::search_meetings(&ctx.paths, &ctx.locks, query).into_iter().map(Value::Object).collect(),
+    )
+}
+
 pub fn get_meeting(ctx: &Ctx, meeting_id: &str) -> ApiResult<Value> {
     let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;

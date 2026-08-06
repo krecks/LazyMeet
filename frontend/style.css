@@ -749,14 +749,15 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .find-case.on { background: var(--accent-soft); color: var(--accent); }
 .find-row .btn { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
 
-.seg-text mark.find-hit {
+/* shared by the transcript and the global-search snippets */
+mark.find-hit {
   background: var(--accent-soft);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
   box-shadow: 0 0 0 1px var(--accent-soft);
 }
-.seg-text mark.find-hit.current {
+mark.find-hit.current {
   background: var(--accent);
   color: var(--on-accent);
   box-shadow: none;
@@ -801,6 +802,82 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .seg.playing { background: var(--accent-soft); border-radius: 0 var(--radius-m) var(--radius-m) 0; }
 .seg.editing { background: var(--accent-soft); border-radius: 0 var(--radius-m) var(--radius-m) 0; }
 .seg .editor select { font-size: 0.82rem; }
+/* the segment a search result jumped to — long enough to catch the eye after
+   the scroll settles, then out of the way */
+.seg.flash { animation: seg-flash 1.4s ease-out; border-radius: 0 var(--radius-m) var(--radius-m) 0; }
+@keyframes seg-flash {
+  0%, 40% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+
+/* -------------------------------------------------- global search results */
+.search-results { max-width: 780px; }
+.search-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.search-head h2 { margin: 0; font-size: 1.25rem; }
+.search-group { margin-bottom: 0.6rem; }
+.search-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  text-align: left;
+  cursor: pointer;
+}
+.search-group-head:hover { border-color: var(--border-strong); }
+.search-group-head .g-title { font-weight: 600; flex: 1; }
+.search-group-head .g-count {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.search-group-head .icon { flex: none; }
+.search-hits { padding: 0.3rem 0 0.5rem 0.4rem; }
+.search-hit {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-left: 2.5px solid var(--border-strong);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0 var(--radius-m) var(--radius-m) 0;
+}
+.search-hit:hover { background: var(--surface-2); }
+.search-hit .meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+  margin-bottom: 0.15rem;
+}
+.search-hit .who { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.search-hit .ts { font-family: var(--font-mono); color: var(--text-muted); }
+.search-hit .snippet {
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.hit-kind {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.search-more { padding: 0.4rem 0.6rem; font-size: 0.82rem; }
 
 /* -------------------------------------------------------------- settings */
 .settings-body {

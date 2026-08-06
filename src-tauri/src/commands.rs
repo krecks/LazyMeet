@@ -143,6 +143,14 @@ pub async fn list_meetings(ctx: State<'_, App>) -> ApiResult<Value> {
     Ok(api::list_meetings(&ctx))
 }
 
+/// Unlike `list_meetings` this reads every byte of every meeting file, so it
+/// goes to the blocking pool rather than the async runtime.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn search_meetings(ctx: State<'_, App>, query: String) -> ApiResult<Value> {
+    let ctx = Arc::clone(&ctx);
+    blocking(move || Ok(api::search_meetings(&ctx, &query))).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_meeting(ctx: State<'_, App>, meeting_id: String) -> ApiResult<Value> {
     api::get_meeting(&ctx, &meeting_id)

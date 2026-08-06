@@ -951,8 +951,13 @@ function renderMeetingList() {
   const list = $("meeting-list");
   list.innerHTML = "";
   const q = searchQuery.trim().toLowerCase();
+  // Titles filter instantly; meetings whose *content* matched join them once
+  // the global search comes back, so the list can't contradict the results.
+  const withHits = new Set(gsearch.results.map((g) => g.id));
   const shown = q
-    ? meetings.filter((m) => (m.title || m.filename || "").toLowerCase().includes(q))
+    ? meetings.filter(
+        (m) => withHits.has(m.id) || (m.title || m.filename || "").toLowerCase().includes(q)
+      )
     : meetings;
   if (!shown.length) {
     list.innerHTML = `<li class="list-empty muted">${meetings.length ? "No matches" : "No meetings yet"}</li>`;
@@ -1084,6 +1089,7 @@ function selectMeeting(id) {
   viewingVersion = null;
   releasePlayer(); // the playing audio belonged to the previous meeting
   $("empty").classList.add("hidden");
+  hideSearchResults(); // the meeting takes the pane back from the result list
   renderMeetingList();
   showActiveMeeting();
 }
@@ -1095,6 +1101,7 @@ function showEmpty() {
   pendingMeeting = null;
   viewingVersion = null;
   releasePlayer();
+  hideSearchResults();
   $("processing").classList.add("hidden");
   $("result").classList.add("hidden");
   $("empty").classList.remove("hidden");
@@ -1140,7 +1147,7 @@ function onMeetingUpdated({ id, status, meeting }) {
 
 function renderProcessing(m) {
   $("result").classList.add("hidden");
-  $("processing").classList.remove("hidden");
+  $("processing").classList.toggle("hidden", searchOpen());
   const title = m.title || m.filename;
   $("proc-title").textContent =
     m.status === "queued"
@@ -1167,7 +1174,9 @@ function renderResult(m) {
   }
   currentMeeting = m;
   $("processing").classList.add("hidden");
-  $("result").classList.remove("hidden");
+  // A background update must not push the meeting back over the search
+  // results; the render still happens, it just stays behind them.
+  $("result").classList.toggle("hidden", searchOpen());
 
   // Version viewing: an older snapshot renders read-only in place of the
   // live content until "Back to current". The latest version IS the live
@@ -1667,6 +1676,7 @@ function renderTranscript(m, colorOf, editable) {
   find.meeting = m;
   find.editable = editable;
   refreshFind();
+  consumePendingScroll(m); // a global-search hit asked for this segment
 }
 
 // --------------------------------------------------------------------------
@@ -1688,11 +1698,32 @@ const find = {
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Literal search as a regex: the 'i' flag gives Unicode-aware case folding
-// without the index drift of comparing toLowerCase()d strings.
+// without the index drift of comparing toLowerCase()d strings. Shared with
+// global search so highlights can never disagree between the two surfaces.
+function literalRegex(query, matchCase) {
+  if (!query) return null;
+  return new RegExp(escapeRegExp(query), matchCase ? "g" : "gi");
+}
+
 function findRegex() {
-  const q = $("find-input").value;
-  if (!q) return null;
-  return new RegExp(escapeRegExp(q), find.matchCase ? "g" : "gi");
+  return literalRegex($("find-input").value, find.matchCase);
+}
+
+/// `text` as HTML with every match wrapped in a <mark>. `currentAt` marks one
+/// hit as the active one (by its ordinal within this text); global search
+/// passes nothing and gets all hits styled the same.
+function markHits(text, re, offset = 0, currentAt = -1) {
+  let html = "";
+  let pos = 0;
+  let k = offset;
+  re.lastIndex = 0;
+  for (const hit of text.matchAll(re)) {
+    html += escapeHtml(text.slice(pos, hit.index));
+    html += `<mark class="find-hit${k === currentAt ? " current" : ""}">${escapeHtml(hit[0])}</mark>`;
+    pos = hit.index + hit[0].length;
+    k += 1;
+  }
+  return html + escapeHtml(text.slice(pos));
 }
 
 function openFind() {
@@ -1743,6 +1774,7 @@ function paintFindMarks() {
     if (!bySeg.has(m.seg)) bySeg.set(m.seg, []);
     bySeg.get(m.seg).push({ ...m, k });
   });
+  const re = find.matches.length ? findRegex() : null;
   segs.forEach((seg, i) => {
     const node = t.children[i] && t.children[i].querySelector(".seg-text");
     if (!node) return;
@@ -1751,17 +1783,9 @@ function paintFindMarks() {
       if (node.querySelector("mark")) node.innerHTML = escapeHtml(seg.text);
       return;
     }
-    let html = "";
-    let pos = 0;
-    for (const h of hits) {
-      html += escapeHtml(seg.text.slice(pos, h.start));
-      html += `<mark class="find-hit${h.k === find.current ? " current" : ""}">${escapeHtml(
-        seg.text.slice(h.start, h.end)
-      )}</mark>`;
-      pos = h.end;
-    }
-    html += escapeHtml(seg.text.slice(pos));
-    node.innerHTML = html;
+    // hits are contiguous within a segment, so the first one's ordinal places
+    // the whole run against find.current
+    node.innerHTML = markHits(seg.text, re, hits[0].k, find.current);
   });
   // matches are generated in document order, so this lines up with find.matches
   find.marks = [...t.querySelectorAll("mark.find-hit")];
@@ -1877,6 +1901,228 @@ function setupFind() {
       openFind();
     }
   });
+}
+
+// --------------------------------------------------------------------------
+// Global search. The sidebar box searches every meeting on disk, not just the
+// cached titles: the backend scans the meeting files (`search_meetings`) and
+// returns hits grouped per meeting, which render in the main pane. Matching is
+// literal and case-insensitive — "Paket" finds "Arbeitspaket" — using the same
+// matcher as the transcript find bar, so highlights agree.
+// --------------------------------------------------------------------------
+const gsearch = {
+  query: "", // the query the rendered results belong to
+  results: [],
+  token: 0, // stale-response guard, same idea as activeId in showActiveMeeting
+  timer: null,
+  collapsed: new Set(), // meeting ids the user folded away
+};
+
+// One letter would scan the whole library to match nearly every meeting.
+const MIN_QUERY = 2;
+const SNIPPET_PAD = 60; // characters of context kept either side of the hit
+
+const HIT_KINDS = {
+  title: "Title",
+  speaker: "Speaker",
+  summary: "Summary",
+  takeaway: "Key takeaway",
+  action_item: "Action item",
+};
+
+/// Debounced entry point from the sidebar input. The sidebar's own title
+/// filter stays instant; only the disk scan waits for a pause in typing.
+function queueGlobalSearch(query) {
+  clearTimeout(gsearch.timer);
+  if (query.trim().length < MIN_QUERY) {
+    // Backspacing out of a search puts the previous view back.
+    if (searchOpen() || gsearch.query) clearGlobalSearch();
+    return;
+  }
+  gsearch.timer = setTimeout(() => runGlobalSearch(query), 200);
+}
+
+async function runGlobalSearch(query) {
+  const token = ++gsearch.token;
+  let results;
+  try {
+    results = await call("search_meetings", { query });
+  } catch (e) {
+    showToast(`Couldn't search: ${e.message}`);
+    return;
+  }
+  if (token !== gsearch.token) return; // a newer query already ran
+  gsearch.query = query;
+  gsearch.results = results;
+  gsearch.collapsed.clear();
+  renderMeetingList(); // content matches join the sidebar's title matches
+  renderSearchResults();
+}
+
+/// Take the results over the main pane. The meeting views stay in the DOM so
+/// clearing the search can restore whatever was open.
+function renderSearchResults() {
+  $("empty").classList.add("hidden");
+  $("processing").classList.add("hidden");
+  $("result").classList.add("hidden");
+  $("search-results").classList.remove("hidden");
+
+  const re = literalRegex(gsearch.query, false);
+  const total = gsearch.results.reduce((n, g) => n + g.count, 0);
+  $("search-summary").textContent = total
+    ? `“${gsearch.query}” — ${plural(total, "match", "matches")} in ${plural(
+        gsearch.results.length,
+        "meeting",
+        "meetings"
+      )}`
+    : `No matches for “${gsearch.query}”`;
+
+  const box = $("search-groups");
+  box.innerHTML = "";
+  for (const group of gsearch.results) {
+    box.appendChild(renderSearchGroup(group, re));
+  }
+}
+
+function renderSearchGroup(group, re) {
+  const wrap = el("section", "search-group");
+  const collapsed = gsearch.collapsed.has(group.id);
+  const [cls, label] = badgeFor(group.status);
+
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "search-group-head";
+  head.setAttribute("aria-expanded", String(!collapsed));
+  head.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-chev-${
+    collapsed ? "down" : "up"
+  }" /></svg>
+    <span class="g-title">${escapeHtml(group.title || group.filename || "Meeting")}</span>
+    <span class="badge ${cls}">${label}</span>
+    <span class="g-count">${plural(group.count, "match", "matches")} · ${escapeHtml(
+      fmtRelative(group.created_at)
+    )}</span>`;
+  head.addEventListener("click", () => {
+    if (collapsed) gsearch.collapsed.delete(group.id);
+    else gsearch.collapsed.add(group.id);
+    renderSearchResults();
+  });
+  wrap.appendChild(head);
+  if (collapsed) return wrap;
+
+  const hits = el("div", "search-hits");
+  for (const hit of group.hits) {
+    hits.appendChild(renderSearchHit(group, hit, re));
+  }
+  if (group.truncated) {
+    const more = el("p", "search-more muted");
+    more.textContent = `Showing the first ${group.hits.length} places — open the meeting to see the rest.`;
+    hits.appendChild(more);
+  }
+  wrap.appendChild(hits);
+  return wrap;
+}
+
+function renderSearchHit(group, hit, re) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "search-hit";
+  const meta =
+    hit.kind === "segment"
+      ? `<span class="who">${escapeHtml(hit.speaker_name || hit.speaker)}</span>
+         <span class="ts">${fmtTs(hit.start)}</span>`
+      : `<span class="hit-kind">${escapeHtml(HIT_KINDS[hit.kind] || hit.kind)}</span>`;
+  btn.innerHTML = `<span class="meta">${meta}</span>
+    <span class="snippet">${snippetHtml(hit.text, re)}</span>`;
+  btn.addEventListener("click", () => openHit(group, hit));
+  return btn;
+}
+
+/// A window around the first match, with the query highlighted throughout.
+/// The backend sends whole segments; long ones would otherwise bury the hit.
+function snippetHtml(text, re) {
+  re.lastIndex = 0;
+  const first = re.exec(text);
+  if (!first) return escapeHtml(text); // matcher disagreement — show it plain
+  const from = Math.max(0, first.index - SNIPPET_PAD);
+  const to = Math.min(text.length, first.index + first[0].length + SNIPPET_PAD);
+  const body = markHits(text.slice(from, to), re);
+  return (from ? "…" : "") + body + (to < text.length ? "…" : "");
+}
+
+/// Open the meeting the hit came from. A transcript hit also carries the
+/// segment to land on, handled once that transcript is on screen.
+function openHit(group, hit) {
+  pendingScrollSeg =
+    hit.kind === "segment" ? { id: group.id, index: hit.index, query: gsearch.query } : null;
+  selectMeeting(group.id);
+}
+
+const searchOpen = () => !$("search-results").classList.contains("hidden");
+
+/// Step aside for a meeting view. The rendered groups stay in the DOM so
+/// returning to them (Enter in the search box) costs nothing.
+function hideSearchResults() {
+  $("search-results").classList.add("hidden");
+}
+
+/// Set by openHit, consumed by the next renderTranscript for that meeting.
+let pendingScrollSeg = null;
+
+function consumePendingScroll(m) {
+  if (!pendingScrollSeg || pendingScrollSeg.id !== m.id) return;
+  const { index, query } = pendingScrollSeg;
+  pendingScrollSeg = null;
+  // Arm the find bar with the same term and make the clicked occurrence the
+  // current match, so next/prev carries on from where the user landed.
+  $("find-input").value = query;
+  find.current = 0;
+  openFind();
+  const k = find.matches.findIndex((m) => m.seg === index);
+  if (k >= 0) gotoMatch(k); // scrolls the mark itself into view
+  const seg = $("transcript").children[index];
+  if (!seg) return;
+  if (k < 0) seg.scrollIntoView({ block: "center" });
+  seg.classList.remove("flash");
+  void seg.offsetWidth; // restart the animation if the same segment is re-opened
+  seg.classList.add("flash");
+}
+
+function setupGlobalSearch() {
+  $("search-clear").addEventListener("click", clearSearchBox);
+  $("meeting-search").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      clearSearchBox();
+      return;
+    }
+    // Enter brings back the results after following a hit into a meeting.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const q = e.currentTarget.value;
+      if (q === gsearch.query && gsearch.results.length) renderSearchResults();
+      else queueGlobalSearch(q);
+    }
+  });
+}
+
+function clearSearchBox() {
+  $("meeting-search").value = "";
+  searchQuery = "";
+  renderMeetingList();
+  clearGlobalSearch();
+}
+
+/// Drop the results and put back whichever meeting view was open.
+function clearGlobalSearch() {
+  clearTimeout(gsearch.timer);
+  gsearch.token++; // any in-flight response is now stale
+  gsearch.query = "";
+  gsearch.results = [];
+  gsearch.collapsed.clear();
+  hideSearchResults();
+  $("search-groups").innerHTML = "";
+  renderMeetingList();
+  if (activeId) showActiveMeeting();
+  else $("empty").classList.remove("hidden");
 }
 
 // --------------------------------------------------------------------------
@@ -2780,6 +3026,8 @@ function fmtTs(seconds) {
   return h ? `${h}:${m.toString().padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -2838,6 +3086,7 @@ function initApp() {
   setupDropzone();
   setupPrepare();
   setupFind();
+  setupGlobalSearch();
   $("settings-btn").addEventListener("click", openSettings);
   $("settings-back").addEventListener("click", closeSettings);
   $("speakers-btn").addEventListener("click", openSpeakers);
@@ -2852,7 +3101,8 @@ function initApp() {
   $("reveal-btn").addEventListener("click", revealDataDir);
   $("meeting-search").addEventListener("input", (e) => {
     searchQuery = e.target.value;
-    renderMeetingList();
+    renderMeetingList(); // the sidebar title filter stays instant
+    queueGlobalSearch(searchQuery); // the disk scan waits for a pause
   });
   refreshMeetings();
   refreshSpeakers();

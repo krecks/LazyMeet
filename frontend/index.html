@@ -134,7 +134,8 @@
         </div>
         <div class="search-field">
           <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
-          <input id="meeting-search" type="search" placeholder="Search meetings" aria-label="Search meetings" />
+          <input id="meeting-search" type="search" placeholder="Search meetings and transcripts"
+            aria-label="Search meetings and transcripts" />
         </div>
         <ul id="meeting-list" class="meeting-list"></ul>
       </aside>
@@ -146,6 +147,14 @@
           <p class="muted">Drop a recording on the left, or pick a meeting from the list.<br />
             Everything is transcribed and summarized on this computer.</p>
         </div>
+
+        <section id="search-results" class="hidden search-results">
+          <div class="search-head">
+            <h2 id="search-summary" class="serif" aria-live="polite"></h2>
+            <button id="search-clear" class="btn ghost" type="button"><span>Clear</span></button>
+          </div>
+          <div id="search-groups"></div>
+        </section>
 
         <div id="processing" class="hidden processing-card" aria-live="polite">
           <h2 id="proc-title" class="serif">Processing…</h2>
