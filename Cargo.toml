@@ -9,3 +9,10 @@ members = ["crates/lazymeet-core", "src-tauri"]
 opt-level = "s"
 lto = true
 strip = true
+
+# Build scripts and proc-macros never ship, and stripping them breaks the
+# build on newer macOS: the stripped proc-macro dylibs are rejected by dyld
+# ("mis-aligned LINKEDIT string pool") and rustc then reports E0463
+# "can't find crate". The app binary above stays stripped.
+[profile.release.build-override]
+strip = false
