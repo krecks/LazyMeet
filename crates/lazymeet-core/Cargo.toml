@@ -1,6 +1,6 @@
 [package]
 name = "lazymeet-core"
-version = "0.1.5"
+version = "0.1.6"
 description = "LazyMeet backend: config, storage, model management, and the processing pipeline"
 license = "GPL-3.0-or-later"
 edition = "2021"

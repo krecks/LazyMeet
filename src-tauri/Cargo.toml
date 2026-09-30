@@ -1,6 +1,6 @@
 [package]
 name = "lazymeet"
-version = "0.1.5"
+version = "0.1.6"
 description = "Local, private meeting transcription & summaries"
 license = "GPL-3.0-or-later"
 authors = ["LazyMeet"]
