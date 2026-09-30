@@ -1,10 +1,10 @@
 //! Real ML pipeline: ffmpeg (bundled binary) → sherpa-onnx VAD + ASR →
-//! diarization → speaker embeddings → llama.cpp summarization.
+//! diarization (Nemotron via onnxruntime, or classic pyannote in sherpa-onnx)
+//! → speaker embeddings → llama.cpp summarization.
 //!
-//! Port of `backend/pipeline/{audio,transcribe,diarize,identify,summarize}.py`
-//! on top of the crate-validated spike (`spike/src/main.rs`). Models load per
-//! job and drop at the end — matching the memory behavior of the old
-//! per-meeting worker process.
+//! Port of `backend/pipeline/{audio,transcribe,diarize,identify,summarize}.py`.
+//! Models load per job and drop at the end — matching the memory behavior of
+//! the old per-meeting worker process.
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -13,12 +13,14 @@ use std::sync::OnceLock;
 
 use serde_json::{Map, Value};
 
-use sherpa_rs::diarize::{Diarize, DiarizeConfig};
-use sherpa_rs::read_audio_file;
-use sherpa_rs::silero_vad::{SileroVad, SileroVadConfig};
-use sherpa_rs::speaker_id::{EmbeddingExtractor, ExtractorConfig};
-use sherpa_rs::transducer::{TransducerConfig, TransducerRecognizer};
-use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
+use sherpa_onnx::{
+    FastClusteringConfig, OfflineQwen3ASRModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
+    OfflineSpeakerDiarization, OfflineSpeakerDiarizationConfig,
+    OfflineSpeakerSegmentationModelConfig, OfflineSpeakerSegmentationPyannoteModelConfig,
+    OfflineTransducerModelConfig, OfflineWhisperModelConfig, SileroVadModelConfig,
+    SpeakerEmbeddingExtractor, SpeakerEmbeddingExtractorConfig, VadModelConfig,
+    VoiceActivityDetector,
+};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -31,12 +33,13 @@ use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 
+use super::nemotron::{self, Nemotron};
 use super::{
     remap_turns, round3, MediaProbe, MergedSegment, PipelineCtx, Segment, Summary, Turn,
     Voiceprints,
 };
 use crate::config;
-use crate::models::resolve_asr_at;
+use crate::models::{resolve_asr_at, resolve_diar_at, AsrPaths};
 
 const SAMPLE_RATE: u32 = 16000;
 
@@ -228,67 +231,106 @@ pub fn probe_media(ctx: &PipelineCtx, src: &Path) -> Result<MediaProbe, String> 
 // VAD + ASR (port of transcribe.py)
 // --------------------------------------------------------------------------
 
-enum Recognizer {
-    Transducer(TransducerRecognizer),
-    Whisper(WhisperRecognizer),
+fn path_str(p: &Path) -> Option<String> {
+    Some(p.to_string_lossy().into_owned())
+}
+
+/// One offline recognizer for every ASR family; `language` is the per-stream
+/// hint for Qwen3-ASR (Whisper takes its hint in the model config).
+struct Recognizer {
+    inner: OfflineRecognizer,
+    language: Option<&'static str>,
 }
 
 impl Recognizer {
-    fn transcribe(&mut self, sample_rate: u32, samples: &[f32]) -> String {
-        match self {
-            Recognizer::Transducer(r) => r.transcribe(sample_rate, samples),
-            Recognizer::Whisper(r) => r.transcribe(sample_rate, samples).text,
+    fn transcribe(&mut self, samples: &[f32]) -> String {
+        let stream = self.inner.create_stream();
+        if let Some(language) = self.language {
+            stream.set_option("language", language);
+        }
+        stream.accept_waveform(SAMPLE_RATE as i32, samples);
+        self.inner.decode(&stream);
+        stream.get_result().map(|r| r.text).unwrap_or_default()
+    }
+}
+
+/// The recognizer config for one ASR model on disk.
+fn recognizer_config(spec: &AsrPaths, language: &str, provider: &str, threads: i32) -> OfflineRecognizerConfig {
+    let mut config = OfflineRecognizerConfig::default();
+    let model = &mut config.model_config;
+    model.num_threads = threads;
+    model.provider = Some(provider.to_string());
+    match spec.kind {
+        "whisper" => {
+            model.whisper = OfflineWhisperModelConfig {
+                encoder: path_str(&spec.encoder),
+                decoder: path_str(&spec.decoder),
+                // "" lets Whisper detect the language itself.
+                language: Some(language.to_string()),
+                task: Some("transcribe".into()),
+                ..Default::default()
+            };
+            model.tokens = path_str(&spec.tokens);
+            config.feat_config.feature_dim = 512;
+        }
+        "qwen3_asr" => {
+            model.qwen3_asr = OfflineQwen3ASRModelConfig {
+                conv_frontend: path_str(&spec.conv_frontend),
+                encoder: path_str(&spec.encoder),
+                decoder: path_str(&spec.decoder),
+                tokenizer: path_str(&spec.tokenizer),
+                // A 20 s VAD segment of fast speech runs past the default 128.
+                max_new_tokens: 256,
+                ..Default::default()
+            };
+            model.tokens = Some(String::new());
+        }
+        _ => {
+            // Parakeet (nemo_transducer) — multilingual, always auto-detects.
+            model.transducer = OfflineTransducerModelConfig {
+                encoder: path_str(&spec.encoder),
+                decoder: path_str(&spec.decoder),
+                joiner: path_str(&spec.joiner),
+            };
+            model.tokens = path_str(&spec.tokens);
+            model.model_type = Some("nemo_transducer".into());
         }
     }
+    config.decoding_method = Some("greedy_search".into());
+    config
 }
 
 fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recognizer, String> {
     let spec = resolve_asr_at(ctx.models_dir, ctx.fake, &ctx.config.asr_model());
-    let provider = ctx.config.asr_provider();
-    let language = match ctx.config.asr_language().as_str() {
-        "auto" => String::new(), // "" lets Whisper detect the language itself
-        code => code.to_string(),
+    let code = ctx.config.asr_language();
+    let code = if code == "auto" { "" } else { code.as_str() };
+    let config = recognizer_config(&spec, code, &ctx.config.asr_provider(), threads);
+    let inner = OfflineRecognizer::create(&config)
+        .ok_or_else(|| format!("could not load the {} transcription model", spec.kind))?;
+    // Qwen3-ASR takes the hint as a language name ("German"), not a code.
+    // Ukrainian is not among its languages, so that hint is left to its
+    // own detection rather than forced.
+    let language = match spec.kind {
+        "qwen3_asr" if !code.is_empty() && code != "uk" => {
+            super::LANGUAGE_NAMES.iter().find(|(c, _)| *c == code).map(|(_, name)| *name)
+        }
+        _ => None,
     };
-    if spec.kind == "whisper" {
-        WhisperRecognizer::new(WhisperConfig {
-            encoder: spec.encoder.to_string_lossy().into_owned(),
-            decoder: spec.decoder.to_string_lossy().into_owned(),
-            tokens: spec.tokens.to_string_lossy().into_owned(),
-            language,
-            bpe_vocab: None,
-            tail_paddings: None,
-            provider: Some(provider.clone()),
-            num_threads: Some(threads),
-            debug: false,
-        })
-        .map(Recognizer::Whisper)
-        .map_err(|e| format!("whisper load: {e}"))
-    } else {
-        // Parakeet (nemo_transducer) — multilingual, always auto-detects.
-        TransducerRecognizer::new(TransducerConfig {
-            encoder: spec.encoder.to_string_lossy().into_owned(),
-            decoder: spec.decoder.to_string_lossy().into_owned(),
-            joiner: spec.joiner.to_string_lossy().into_owned(),
-            tokens: spec.tokens.to_string_lossy().into_owned(),
-            model_type: "nemo_transducer".into(),
-            num_threads: threads,
-            sample_rate: SAMPLE_RATE as i32,
-            feature_dim: 80,
-            decoding_method: "greedy_search".into(),
-            provider: Some(provider),
-            ..Default::default()
-        })
-        .map(Recognizer::Transducer)
-        .map_err(|e| format!("parakeet load: {e}"))
-    }
+    Ok(Recognizer { inner, language })
 }
 
+/// 16-bit PCM WAV → samples scaled by 1/32767, as the pipeline always has
+/// (voiceprints saved in the speaker library were computed this way).
 fn load_wav(wav: &Path) -> Result<Vec<f32>, String> {
-    let (samples, sr) = read_audio_file(&wav.to_string_lossy()).map_err(|e| e.to_string())?;
+    let mut reader = hound::WavReader::open(wav).map_err(|e| e.to_string())?;
+    let sr = reader.spec().sample_rate;
     if sr != SAMPLE_RATE {
         return Err(format!("expected 16 kHz mono wav, got {sr} Hz"));
     }
-    Ok(samples)
+    reader
+        .samples::<i16>()
+        .map(|s| s.map(|v| v as f32 / i16::MAX as f32).map_err(|e| e.to_string()))
+        .collect()
 }
 
 /// Seconds (original-media time) → clamped, non-empty sample index spans into
@@ -305,41 +347,39 @@ fn sample_ranges(ranges: &[(f64, f64)], len: usize) -> Vec<(usize, usize)> {
         .collect()
 }
 
-fn new_vad(ctx: &PipelineCtx) -> Result<SileroVad, String> {
-    SileroVad::new(
-        SileroVadConfig {
-            model: ctx.models_dir.join("silero_vad.onnx").to_string_lossy().into_owned(),
+fn new_vad(ctx: &PipelineCtx) -> Result<VoiceActivityDetector, String> {
+    let config = VadModelConfig {
+        silero_vad: SileroVadModelConfig {
+            model: path_str(&ctx.models_dir.join("silero_vad.onnx")),
             // sherpa-onnx defaults (Python left them implicit).
             threshold: 0.5,
             min_silence_duration: 0.5,
             min_speech_duration: 0.25,
             max_speech_duration: 20.0,
-            sample_rate: SAMPLE_RATE,
             window_size: 512,
-            provider: Some(ctx.config.asr_provider()),
-            num_threads: Some(ctx.config.num_threads() as i32),
-            debug: false,
         },
-        100.0,
-    )
-    .map_err(|e| format!("vad load: {e}"))
+        sample_rate: SAMPLE_RATE as i32,
+        num_threads: ctx.config.num_threads() as i32,
+        provider: Some(ctx.config.asr_provider()),
+        ..Default::default()
+    };
+    VoiceActivityDetector::create(&config, 100.0).ok_or_else(|| "could not load the VAD model".into())
 }
 
 /// Feed one contiguous sample span through VAD + recognizer, appending
 /// segments stamped in original-media time (`offset` = span start, seconds).
 fn transcribe_span(
-    vad: &mut SileroVad,
+    vad: &VoiceActivityDetector,
     recognizer: &mut Recognizer,
     samples: &[f32],
     offset: f64,
     out: &mut Vec<Segment>,
 ) {
-    let drain = |vad: &mut SileroVad, recognizer: &mut Recognizer, out: &mut Vec<Segment>| {
-        while !vad.is_empty() {
-            let seg = vad.front();
-            let start = offset + seg.start as f64 / SAMPLE_RATE as f64;
-            let end = start + seg.samples.len() as f64 / SAMPLE_RATE as f64;
-            let text = recognizer.transcribe(SAMPLE_RATE, &seg.samples);
+    let drain = |recognizer: &mut Recognizer, out: &mut Vec<Segment>| {
+        while let Some(seg) = vad.front() {
+            let start = offset + seg.start() as f64 / SAMPLE_RATE as f64;
+            let end = start + seg.samples().len() as f64 / SAMPLE_RATE as f64;
+            let text = recognizer.transcribe(seg.samples());
             let text = text.trim();
             if !text.is_empty() {
                 out.push(Segment {
@@ -352,11 +392,11 @@ fn transcribe_span(
         }
     };
     for chunk in samples.chunks(512) {
-        vad.accept_waveform(chunk.to_vec());
-        drain(vad, recognizer, out);
+        vad.accept_waveform(chunk);
+        drain(recognizer, out);
     }
     vad.flush();
-    drain(vad, recognizer, out);
+    drain(recognizer, out);
 }
 
 /// The ASR models are utterance-level, so Silero VAD cuts the audio into
@@ -378,9 +418,9 @@ pub fn transcribe(
     };
     let mut segments: Vec<Segment> = Vec::new();
     for (a, b) in spans {
-        let mut vad = new_vad(ctx)?;
+        let vad = new_vad(ctx)?;
         transcribe_span(
-            &mut vad,
+            &vad,
             &mut recognizer,
             &samples[a..b],
             a as f64 / SAMPLE_RATE as f64,
@@ -394,6 +434,76 @@ pub fn transcribe(
 // Diarization (port of diarize.py)
 // --------------------------------------------------------------------------
 
+/// The classic diarizer: pyannote segmentation + TitaNet embeddings +
+/// clustering, inside sherpa-onnx.
+fn pyannote_diarizer(
+    segmentation: &Path,
+    models_dir: &Path,
+    num_clusters: i32,
+    threshold: f32,
+    provider: &str,
+    threads: i32,
+) -> Result<OfflineSpeakerDiarization, String> {
+    let config = OfflineSpeakerDiarizationConfig {
+        segmentation: OfflineSpeakerSegmentationModelConfig {
+            pyannote: OfflineSpeakerSegmentationPyannoteModelConfig {
+                model: path_str(segmentation),
+                ..Default::default()
+            },
+            num_threads: threads,
+            debug: false,
+            provider: Some(provider.to_string()),
+        },
+        embedding: SpeakerEmbeddingExtractorConfig {
+            model: path_str(&models_dir.join("speaker_embedding.onnx")),
+            num_threads: threads,
+            debug: false,
+            provider: Some(provider.to_string()),
+        },
+        // num_clusters > 0 forces an exact speaker count; -1 lets the
+        // threshold decide (higher => fewer speakers).
+        clustering: FastClusteringConfig { num_clusters, threshold, compute_confidence: false },
+        // smooth out sub-second fragments that would explode into hundreds
+        // of spurious speakers
+        min_duration_on: 0.3,
+        min_duration_off: 0.5,
+    };
+    OfflineSpeakerDiarization::create(&config)
+        .ok_or_else(|| "could not load the classic diarization models".into())
+}
+
+/// Diarize `samples` with the given engine: (start, end, speaker index).
+fn diarize_samples(
+    ctx: &PipelineCtx,
+    engine: &str,
+    model: &Path,
+    samples: &[f32],
+    num_speakers: i64,
+    threads: i32,
+) -> Result<Vec<(f64, f64, usize)>, String> {
+    if engine == "nemotron" {
+        let probs = Nemotron::load(model, threads)?.probabilities(samples)?;
+        return Ok(nemotron::turns(&probs, num_speakers)
+            .into_iter()
+            .map(|t| (t.start, t.end, t.speaker))
+            .collect());
+    }
+    let diarizer = pyannote_diarizer(
+        model,
+        ctx.models_dir,
+        num_speakers as i32,
+        ctx.config.diar_threshold() as f32,
+        &ctx.config.diar_provider(),
+        threads,
+    )?;
+    let result = diarizer.process(samples).ok_or("diarization failed")?;
+    Ok(result
+        .sort_by_start_time()
+        .into_iter()
+        .map(|s| (s.start as f64, s.end as f64, s.speaker.max(0) as usize))
+        .collect())
+}
+
 pub fn diarize(
     ctx: &PipelineCtx,
     wav: &Path,
@@ -403,24 +513,7 @@ pub fn diarize(
 ) -> Result<Vec<Turn>, String> {
     // A meeting-supplied count (>0) wins; otherwise the env default (-1 auto).
     let n = if num_speakers > 0 { num_speakers } else { config::env_num_speakers() };
-    let mut diarizer = Diarize::new(
-        ctx.models_dir.join("diarization_segmentation.onnx"),
-        ctx.models_dir.join("speaker_embedding.onnx"),
-        DiarizeConfig {
-            // num_clusters > 0 forces an exact speaker count; -1 lets the
-            // threshold decide (higher => fewer speakers).
-            num_clusters: Some(n as i32),
-            threshold: Some(ctx.config.diar_threshold() as f32),
-            // smooth out sub-second fragments that would explode into
-            // hundreds of spurious speakers
-            min_duration_on: Some(0.3),
-            min_duration_off: Some(0.5),
-            provider: Some(ctx.config.diar_provider()),
-            num_threads: Some(threads),
-            debug: false,
-        },
-    )
-    .map_err(|e| format!("diarizer load: {e}"))?;
+    let (engine, model) = resolve_diar_at(ctx.models_dir, ctx.fake, &ctx.config.diar_model(), n);
 
     let samples = load_wav(wav)?;
     // With ranges, the diarizer runs once over the spliced selection (speaker
@@ -446,14 +539,12 @@ pub fn diarize(
             (concat, Some(secs))
         }
     };
-    let mut turns: Vec<Turn> = diarizer
-        .compute(input, None)
-        .map_err(|e| format!("diarize: {e}"))?
+    let mut turns: Vec<Turn> = diarize_samples(ctx, engine, &model, &input, n, threads)?
         .into_iter()
-        .map(|s| Turn {
-            start: round3(s.start as f64),
-            end: round3(s.end as f64),
-            speaker: format!("SPEAKER_{:02}", s.speaker),
+        .map(|(start, end, speaker)| Turn {
+            start: round3(start),
+            end: round3(end),
+            speaker: format!("SPEAKER_{speaker:02}"),
         })
         .collect();
     if let Some(secs) = remap {
@@ -467,6 +558,31 @@ pub fn diarize(
 // Voiceprints (port of identify.py's extractor half)
 // --------------------------------------------------------------------------
 
+fn new_extractor(models_dir: &Path, provider: &str, threads: i32) -> Result<SpeakerEmbeddingExtractor, String> {
+    let model = models_dir.join("speaker_embedding.onnx");
+    if !model.exists() {
+        return Err(format!("speaker model not found at {}", model.display()));
+    }
+    SpeakerEmbeddingExtractor::create(&SpeakerEmbeddingExtractorConfig {
+        model: path_str(&model),
+        num_threads: threads,
+        debug: false,
+        provider: Some(provider.to_string()),
+    })
+    .ok_or_else(|| "could not load the speaker model".into())
+}
+
+/// The voice embedding of one stretch of audio; None if it is too short.
+fn speaker_embedding(extractor: &SpeakerEmbeddingExtractor, samples: &[f32]) -> Option<Vec<f32>> {
+    let stream = extractor.create_stream()?;
+    stream.accept_waveform(SAMPLE_RATE as i32, samples);
+    stream.input_finished();
+    if !extractor.is_ready(&stream) {
+        return None;
+    }
+    extractor.compute(&stream)
+}
+
 /// One averaged voiceprint per diarized speaker, from its longest turns.
 pub fn compute_voiceprints(
     ctx: &PipelineCtx,
@@ -474,13 +590,11 @@ pub fn compute_voiceprints(
     turns: &[Turn],
 ) -> Result<Voiceprints, String> {
     let samples = load_wav(wav)?;
-    let mut extractor = EmbeddingExtractor::new(ExtractorConfig {
-        model: ctx.models_dir.join("speaker_embedding.onnx").to_string_lossy().into_owned(),
-        provider: Some(ctx.config.speaker_provider()),
-        num_threads: Some(ctx.config.num_threads() as usize),
-        debug: false,
-    })
-    .map_err(|e| format!("extractor load: {e}"))?;
+    let extractor = new_extractor(
+        ctx.models_dir,
+        &ctx.config.speaker_provider(),
+        ctx.config.num_threads() as i32,
+    )?;
 
     let mut speakers: Vec<&str> = Vec::new();
     for t in turns {
@@ -501,8 +615,7 @@ pub fn compute_voiceprints(
             if b.saturating_sub(a) < (SAMPLE_RATE as f64 * 0.3) as usize {
                 continue; // skip < 0.3s
             }
-            if let Ok(e) = extractor.compute_speaker_embedding(samples[a..b].to_vec(), SAMPLE_RATE)
-            {
+            if let Some(e) = speaker_embedding(&extractor, &samples[a..b]) {
                 embs.push(e);
             }
         }
@@ -881,11 +994,13 @@ pub fn bench_audio_from_file(
 }
 
 /// Time the three ONNX stages on the given execution provider over `samples`
-/// (16 kHz mono). Returns (stage name, seconds, seconds of audio processed).
+/// (16 kHz mono), diarizing with `diar_model` (the one the settings select).
+/// Returns (stage name, seconds, seconds of audio processed).
 pub fn bench_onnx(
     models_dir: &Path,
     threads: i32,
     provider: &str,
+    diar_model: &str,
     samples: &[f32],
 ) -> Result<Vec<(String, f64, f64)>, String> {
     use std::time::Instant;
@@ -895,68 +1010,46 @@ pub fn bench_onnx(
     // ASR: default model, up to 120 s through the recognizer (no VAD — the
     // recognizer cost is what differs between providers).
     let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
-    let mut recognizer = TransducerRecognizer::new(TransducerConfig {
-        encoder: spec.encoder.to_string_lossy().into_owned(),
-        decoder: spec.decoder.to_string_lossy().into_owned(),
-        joiner: spec.joiner.to_string_lossy().into_owned(),
-        tokens: spec.tokens.to_string_lossy().into_owned(),
-        model_type: "nemo_transducer".into(),
-        num_threads: threads,
-        sample_rate: SAMPLE_RATE as i32,
-        feature_dim: 80,
-        decoding_method: "greedy_search".into(),
-        provider: Some(provider.into()),
-        ..Default::default()
-    })
-    .map_err(|e| format!("ASR load ({provider}): {e}"))?;
+    let inner = OfflineRecognizer::create(&recognizer_config(&spec, "", provider, threads))
+        .ok_or_else(|| format!("ASR load ({provider}) failed"))?;
+    let mut recognizer = Recognizer { inner, language: None };
     let asr = &samples[..samples.len().min(120 * sr)];
     // One warmup pass (first call pays one-time graph setup), then measure.
-    let _ = recognizer.transcribe(SAMPLE_RATE, &asr[..sr.min(asr.len())]);
+    let _ = recognizer.transcribe(&asr[..sr.min(asr.len())]);
     let t = Instant::now();
     for chunk in asr.chunks(10 * sr) {
-        let _ = recognizer.transcribe(SAMPLE_RATE, chunk);
+        let _ = recognizer.transcribe(chunk);
     }
     rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), asr.len() as f64 / sr as f64));
     drop(recognizer);
 
     // Diarization: up to 300 s.
-    let mut diarizer = Diarize::new(
-        models_dir.join("diarization_segmentation.onnx"),
-        models_dir.join("speaker_embedding.onnx"),
-        DiarizeConfig {
-            num_clusters: Some(-1),
-            threshold: Some(0.7),
-            min_duration_on: Some(0.3),
-            min_duration_off: Some(0.5),
-            provider: Some(provider.into()),
-            num_threads: Some(threads),
-            debug: false,
-        },
-    )
-    .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
-    let diar = samples[..samples.len().min(300 * sr)].to_vec();
+    let diar = &samples[..samples.len().min(300 * sr)];
     let diar_secs = diar.len() as f64 / sr as f64;
+    let (engine, model) = resolve_diar_at(models_dir, false, diar_model, -1);
     let t = Instant::now();
-    let _ = diarizer.compute(diar, None);
+    if engine == "nemotron" {
+        let mut diarizer =
+            Nemotron::load(&model, threads).map_err(|e| format!("diarizer load: {e}"))?;
+        let _ = diarizer.probabilities(diar);
+    } else {
+        let diarizer = pyannote_diarizer(&model, models_dir, -1, 0.7, provider, threads)
+            .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
+        let _ = diarizer.process(diar);
+    }
     rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), diar_secs));
-    drop(diarizer);
 
     // Speaker embeddings: 40 × 5 s windows (matches how voiceprints are made).
-    let mut extractor = EmbeddingExtractor::new(ExtractorConfig {
-        model: models_dir.join("speaker_embedding.onnx").to_string_lossy().into_owned(),
-        provider: Some(provider.into()),
-        num_threads: Some(threads as usize),
-        debug: false,
-    })
-    .map_err(|e| format!("extractor load ({provider}): {e}"))?;
+    let extractor = new_extractor(models_dir, provider, threads)
+        .map_err(|e| format!("extractor load ({provider}): {e}"))?;
     // A 5 s window from the middle of the source (whole clip if shorter).
     let win_len = (5 * sr).min(samples.len());
     let start = (samples.len() - win_len) / 2;
-    let window = samples[start..start + win_len].to_vec();
-    let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
+    let window = &samples[start..start + win_len];
+    let _ = speaker_embedding(&extractor, window);
     let t = Instant::now();
     for _ in 0..40 {
-        let _ = extractor.compute_speaker_embedding(window.clone(), SAMPLE_RATE);
+        let _ = speaker_embedding(&extractor, window);
     }
     let spk_secs = 40.0 * win_len as f64 / sr as f64;
     rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), spk_secs));

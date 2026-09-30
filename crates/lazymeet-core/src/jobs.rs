@@ -392,11 +392,19 @@ fn run_full(
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
     let voiceprints = pipeline::compute_voiceprints(pctx, &wav, &turns)?;
+    // Folding short speakers into the closest main voice cleans up the
+    // classic diarizer's over-clustering. Nemotron tracks speakers itself and
+    // keeps someone who only says a sentence or two as a speaker of their
+    // own, so its output only merges voices that match outright.
+    let min_speaker_seconds = match pipeline::diar_engine(pctx, num_speakers) {
+        "nemotron" => 0.0,
+        _ => config.min_speaker_seconds(),
+    };
     let (turns, voiceprints) = pipeline::consolidate_speakers(
         &turns,
         &voiceprints,
         config.speaker_merge_threshold(),
-        config.min_speaker_seconds(),
+        min_speaker_seconds,
     );
     let library = store::load_speaker_library(&ctx.paths, &ctx.locks);
     let (speakers, recognized) =

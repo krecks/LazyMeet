@@ -79,6 +79,12 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             return Err(ApiError::invalid("unknown transcription model"));
         }
     }
+    if let Some(v) = fields.get("DIAR_MODEL").filter(|v| !v.is_null()) {
+        let id = v.as_str().unwrap_or_default();
+        if !models::diar_catalog().iter().any(|e| e.id == id) {
+            return Err(ApiError::invalid("unknown speaker diarization model"));
+        }
+    }
     if let Some(v) = fields.get("SUMMARY_MODEL").filter(|v| !v.is_null()) {
         let id = v.as_str().unwrap_or_default();
         if !models::llm_catalog().iter().any(|e| e.id == id) {

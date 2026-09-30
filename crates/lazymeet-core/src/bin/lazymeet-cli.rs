@@ -1,5 +1,5 @@
 //! Process one recording end-to-end from the terminal and print the meeting
-//! JSON — the parity/verification tool for the Rust pipeline (absorbs spike/).
+//! JSON — the parity/verification tool for the Rust pipeline.
 //!
 //! Usage:
 //!   lazymeet-cli <recording> [--data-dir DIR] [--models-dir DIR]

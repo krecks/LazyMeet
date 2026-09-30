@@ -1,12 +1,13 @@
 //! First-run model downloader with progress events + the selectable model
 //! catalogs. Port of `backend/models_setup.py`.
 //!
-//! All weights are token-free: ASR / VAD / diarization models come from
-//! sherpa-onnx GitHub releases and the summarization GGUF from an ungated
-//! Hugging Face repo. Missing models download concurrently, one thread per
-//! file. Progress is pushed as `setup-progress` / `models-progress` events
-//! (throttled) instead of the old poll-only dict; the payloads are identical
-//! to what `GET /api/setup` / `GET /api/models` returned.
+//! All weights are token-free: ASR / VAD / speaker-embedding models come from
+//! sherpa-onnx GitHub releases; the Nemotron diarizer and the summarization
+//! GGUFs from ungated Hugging Face repos. Missing models download
+//! concurrently, one thread per model. Progress is pushed as `setup-progress`
+//! / `models-progress` events (throttled) instead of the old poll-only dict;
+//! the payloads are identical to what `GET /api/setup` / `GET /api/models`
+//! returned.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -25,6 +26,10 @@ fn env_or(name: &str, default: String) -> String {
 
 const REL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download";
 
+/// The int8 ONNX export of NVIDIA's Nemotron 3 Diarization, pinned to one
+/// revision so an upstream change never reaches the app unseen.
+const NEMOTRON_DIAR: &str = "https://huggingface.co/onnx-community/Nemotron-3-Diarization-ONNX/resolve/353b6f8ad2cac3580e982d7fbdf0a010786b0406/onnx";
+
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub name: String,
@@ -35,6 +40,10 @@ pub struct ModelSpec {
     pub archive: bool,
     /// For archives: (path-inside-archive needle -> destination relative to models_dir)
     pub extract_map: Vec<(String, PathBuf)>,
+    /// Plain files fetched before `url`: (url, destination relative to
+    /// models_dir). The marker file comes last, so it only appears once the
+    /// whole set is on disk.
+    pub parts: Vec<(String, PathBuf)>,
 }
 
 impl ModelSpec {
@@ -45,6 +54,7 @@ impl ModelSpec {
             marker: PathBuf::from(marker),
             archive: false,
             extract_map: Vec::new(),
+            parts: Vec::new(),
         }
     }
     fn archive(name: &str, url: String, marker: &str, map: &[(&str, &str)]) -> Self {
@@ -54,8 +64,39 @@ impl ModelSpec {
             marker: PathBuf::from(marker),
             archive: true,
             extract_map: map.iter().map(|(n, d)| (n.to_string(), PathBuf::from(d))).collect(),
+            parts: Vec::new(),
         }
     }
+}
+
+/// Nemotron 3 Diarization: the graph (the marker) plus its external weights
+/// file, which must sit next to it under the name the graph refers to.
+fn nemotron_diar_spec() -> ModelSpec {
+    ModelSpec {
+        parts: vec![(
+            env_or("LAZYMEET_DIAR_DATA_URL", format!("{NEMOTRON_DIAR}/model_quantized.onnx_data")),
+            PathBuf::from("nemotron-3-diarization/model_quantized.onnx_data"),
+        )],
+        ..ModelSpec::plain(
+            "Speaker diarization",
+            env_or("LAZYMEET_DIAR_URL", format!("{NEMOTRON_DIAR}/model_quantized.onnx")),
+            "nemotron-3-diarization/model_quantized.onnx",
+        )
+    }
+}
+
+/// pyannote segmentation 3.0 — the classic diarizer's first half (its
+/// speaker embeddings are the shared TitaNet model below).
+fn pyannote_seg_spec() -> ModelSpec {
+    ModelSpec::archive(
+        "Diarization segmentation",
+        env_or(
+            "LAZYMEET_DIAR_SEG_URL",
+            format!("{REL}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"),
+        ),
+        "diarization_segmentation.onnx",
+        &[("model.onnx", "diarization_segmentation.onnx")],
+    )
 }
 
 /// The five first-run models (order matters — the setup screen lists them).
@@ -80,19 +121,10 @@ pub fn model_specs() -> Vec<ModelSpec> {
             env_or("LAZYMEET_VAD_URL", format!("{REL}/asr-models/silero_vad.onnx")),
             "silero_vad.onnx",
         ),
-        ModelSpec::archive(
-            "Diarization segmentation",
-            env_or(
-                "LAZYMEET_DIAR_SEG_URL",
-                format!(
-                    "{REL}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-                ),
-            ),
-            "diarization_segmentation.onnx",
-            &[("model.onnx", "diarization_segmentation.onnx")],
-        ),
+        nemotron_diar_spec(),
         // English TitaNet — discriminates English/German voices far better than
-        // the zh-cn model (which over-segmented real meetings).
+        // the zh-cn model (which over-segmented real meetings). Voiceprints for
+        // speaker recognition come from it whichever diarizer runs.
         ModelSpec::plain(
             "Speaker embedding",
             env_or(
@@ -118,9 +150,11 @@ pub struct CatalogEntry {
     pub id: &'static str,
     pub label: String,
     pub size: String,
-    /// ASR: loader kind ("nemo_transducer" | "whisper"); empty for LLMs.
+    /// ASR: loader kind ("nemo_transducer" | "whisper" | "qwen3_asr");
+    /// diarization: engine ("nemotron" | "pyannote"); empty for LLMs.
     pub kind: &'static str,
-    /// ASR: model dir under models_dir; LLM: the GGUF filename.
+    /// ASR: model dir under models_dir; diarization: the model file; LLM:
+    /// the GGUF filename.
     pub path: PathBuf,
     pub pros: Vec<&'static str>,
     pub cons: Vec<&'static str>,
@@ -128,6 +162,7 @@ pub struct CatalogEntry {
 }
 
 pub const ASR_DEFAULT: &str = "parakeet-tdt-0.6b-v3";
+pub const DIAR_DEFAULT: &str = "nemotron-3-diarization";
 pub const LLM_DEFAULT: &str = "qwen3.5-4b";
 
 pub fn asr_catalog() -> Vec<CatalogEntry> {
@@ -207,6 +242,80 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
                     ("base-tokens.txt", "whisper-base/tokens.txt"),
                 ],
             ),
+        },
+        CatalogEntry {
+            id: "qwen3-asr-0.6b",
+            label: "Qwen3-ASR 0.6B — 30 languages incl. Chinese, Japanese, Korean".into(),
+            size: "≈880 MB download".into(),
+            kind: "qwen3_asr",
+            path: PathBuf::from("qwen3-asr-0.6b"),
+            pros: vec![
+                "Wide coverage — 30 languages plus 22 Chinese dialects",
+                "Published accuracy on par with Whisper Large v3, well ahead of Whisper Small",
+                "Detects the language by itself; accepts a spoken-language hint",
+            ],
+            cons: vec![
+                "Largest download of the transcription models",
+                "About half as fast as Parakeet on the CPU",
+            ],
+            spec: ModelSpec::archive(
+                "Qwen3-ASR 0.6B",
+                env_or(
+                    "LAZYMEET_QWEN3_ASR_URL",
+                    format!("{REL}/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2"),
+                ),
+                "qwen3-asr-0.6b/encoder.onnx",
+                &[
+                    ("conv_frontend.onnx", "qwen3-asr-0.6b/conv_frontend.onnx"),
+                    ("encoder", "qwen3-asr-0.6b/encoder.onnx"),
+                    ("decoder", "qwen3-asr-0.6b/decoder.onnx"),
+                    ("vocab.json", "qwen3-asr-0.6b/tokenizer/vocab.json"),
+                    ("merges.txt", "qwen3-asr-0.6b/tokenizer/merges.txt"),
+                    ("tokenizer_config.json", "qwen3-asr-0.6b/tokenizer/tokenizer_config.json"),
+                ],
+            ),
+        },
+    ]
+}
+
+/// Most speakers Nemotron 3 Diarization tells apart; a meeting set to more
+/// runs on the classic diarizer when that is installed.
+pub const NEMOTRON_MAX_SPEAKERS: i64 = 8;
+
+pub fn diar_catalog() -> Vec<CatalogEntry> {
+    vec![
+        CatalogEntry {
+            id: "nemotron-3-diarization",
+            label: "Nemotron 3 Diarization — up to 8 speakers (default)".into(),
+            size: "≈120 MB".into(),
+            kind: "nemotron",
+            path: PathBuf::from("nemotron-3-diarization/model_quantized.onnx"),
+            pros: vec![
+                "Fewer mixed-up or invented speakers",
+                "More than twice as fast as the classic model",
+                "Follows people talking over each other",
+            ],
+            cons: vec![
+                "Tells at most 8 speakers apart",
+                "The separation setting below has no effect on it",
+            ],
+            spec: nemotron_diar_spec(), // installed on first run
+        },
+        CatalogEntry {
+            id: "pyannote-3.0",
+            label: "Classic (pyannote 3.0) — any number of speakers".into(),
+            size: "≈6 MB download".into(),
+            kind: "pyannote",
+            path: PathBuf::from("diarization_segmentation.onnx"),
+            pros: vec![
+                "No limit on the number of speakers",
+                "Tunable with the speaker separation setting",
+            ],
+            cons: vec![
+                "Mixes up or invents speakers more often",
+                "Less than half as fast",
+            ],
+            spec: pyannote_seg_spec(),
         },
     ]
 }
@@ -491,6 +600,9 @@ pub struct AsrPaths {
     pub decoder: PathBuf,
     pub joiner: PathBuf,
     pub tokens: PathBuf,
+    /// Qwen3-ASR only: the audio front end and the tokenizer directory.
+    pub conv_frontend: PathBuf,
+    pub tokenizer: PathBuf,
 }
 
 /// Paths + loader kind for the active ASR model, defaulting when missing.
@@ -514,7 +626,32 @@ pub fn resolve_asr_at(models_dir: &std::path::Path, fake: bool, model_id: &str) 
         decoder: d.join("decoder.onnx"),
         joiner: d.join("joiner.onnx"),
         tokens: d.join("tokens.txt"),
+        conv_frontend: d.join("conv_frontend.onnx"),
+        tokenizer: d.join("tokenizer"),
     }
+}
+
+/// The diarization engine to run and its model file. A meeting set to more
+/// speakers than Nemotron can follow uses the classic model when it is on
+/// disk; an unknown or not-yet-downloaded selection falls back to the
+/// default, which the first run installs.
+pub fn resolve_diar_at(
+    models_dir: &std::path::Path,
+    fake: bool,
+    model_id: &str,
+    num_speakers: i64,
+) -> (&'static str, PathBuf) {
+    let catalog = diar_catalog();
+    let ready = |e: &&CatalogEntry| fake || models_dir.join(&e.spec.marker).exists();
+    let wanted = if num_speakers > NEMOTRON_MAX_SPEAKERS { "pyannote-3.0" } else { model_id };
+    let entry = catalog
+        .iter()
+        .find(|e| e.id == wanted)
+        .filter(ready)
+        .or_else(|| catalog.iter().find(|e| e.id == model_id).filter(ready))
+        .or_else(|| catalog.iter().find(|e| e.id == DIAR_DEFAULT))
+        .unwrap();
+    (entry.kind, models_dir.join(&entry.path))
 }
 
 /// GGUF path for the active summarizer, defaulting when missing.
@@ -561,6 +698,7 @@ pub fn models_status(ctx: &Ctx) -> Value {
     let config = ctx.config.read().unwrap();
     json!({
         "asr": {"active": config.asr_model(), "options": catalog_options(ctx, &asr_catalog())},
+        "diar": {"active": config.diar_model(), "options": catalog_options(ctx, &diar_catalog())},
         "summary": {"active": config.summary_model(), "options": catalog_options(ctx, &llm_catalog())},
     })
 }
@@ -571,6 +709,7 @@ pub fn models_status(ctx: &Ctx) -> Value {
 pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
     let catalog = match step {
         "asr" => asr_catalog(),
+        "diar" => diar_catalog(),
         "summary" => llm_catalog(),
         _ => return false,
     };
@@ -612,11 +751,12 @@ pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
 
 /// Kick off downloads for the currently selected models, if missing.
 pub fn ensure_selected_async(ctx: &Arc<Ctx>) {
-    let (asr, summary) = {
+    let (asr, diar, summary) = {
         let config = ctx.config.read().unwrap();
-        (config.asr_model(), config.summary_model())
+        (config.asr_model(), config.diar_model(), config.summary_model())
     };
     request_download(ctx, "asr", &asr);
+    request_download(ctx, "diar", &diar);
     request_download(ctx, "summary", &summary);
 }
 
@@ -633,16 +773,46 @@ fn set_item_progress(ctx: &Ctx, name: &str, downloaded: u64, total: u64) {
 
 fn download_one(ctx: &Arc<Ctx>, spec: &ModelSpec, event: &str) -> Result<(), String> {
     let tmp = ctx.paths.models_dir.join(format!("{}.download", spec.name.replace(' ', "_")));
-    let resp = ureq::get(&spec.url)
+    // Parts first, the marker's URL last: progress runs over the whole set
+    // (each file's size is only known once its response arrives, so list the
+    // big files first and the percentage stays honest).
+    let mut done: u64 = 0;
+    for (url, dest_rel) in &spec.parts {
+        done += fetch(ctx, spec, event, url, &tmp, done)?;
+        place(&tmp, &ctx.paths.models_dir.join(dest_rel))?;
+    }
+    fetch(ctx, spec, event, &spec.url, &tmp, done)?;
+
+    if spec.archive {
+        let result = extract_archive(ctx, &tmp, spec);
+        let _ = std::fs::remove_file(&tmp);
+        result?;
+    } else {
+        place(&tmp, &marker_path(ctx, spec))?;
+    }
+    Ok(())
+}
+
+/// Stream `url` into `tmp`, reporting progress for `spec` on top of the
+/// `offset` bytes its earlier parts took. Returns the bytes written.
+fn fetch(
+    ctx: &Arc<Ctx>,
+    spec: &ModelSpec,
+    event: &str,
+    url: &str,
+    tmp: &std::path::Path,
+    offset: u64,
+) -> Result<u64, String> {
+    let resp = ureq::get(url)
         .set("User-Agent", "LazyMeet")
         .call()
         .map_err(|e| e.to_string())?;
     let total: u64 =
         resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0);
-    set_item_progress(ctx, &spec.name, 0, total);
+    set_item_progress(ctx, &spec.name, offset, offset + total);
 
     let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(tmp).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; 1 << 20];
     let mut downloaded: u64 = 0;
     loop {
@@ -652,24 +822,19 @@ fn download_one(ctx: &Arc<Ctx>, spec: &ModelSpec, event: &str) -> Result<(), Str
         }
         std::io::Write::write_all(&mut file, &buf[..n]).map_err(|e| e.to_string())?;
         downloaded += n as u64;
-        set_item_progress(ctx, &spec.name, downloaded, total);
+        set_item_progress(ctx, &spec.name, offset + downloaded, offset + total);
         let payload = if event == "setup-progress" { status(ctx) } else { models_status(ctx) };
         emit_throttled(ctx, event, payload, false);
     }
-    drop(file);
+    Ok(downloaded)
+}
 
-    if spec.archive {
-        let result = extract_archive(ctx, &tmp, spec);
-        let _ = std::fs::remove_file(&tmp);
-        result?;
-    } else {
-        let dest = marker_path(ctx, spec);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+/// Move a finished download into place, creating its directory.
+fn place(tmp: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    Ok(())
+    std::fs::rename(tmp, dest).map_err(|e| e.to_string())
 }
 
 /// Extract the mapped files, committing them atomically: everything staged as

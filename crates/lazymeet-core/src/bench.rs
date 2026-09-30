@@ -56,7 +56,10 @@ pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
 
 #[cfg(feature = "native-pipeline")]
 fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
-    let threads = ctx.config.read().unwrap().num_threads() as i32;
+    let (threads, diar_model) = {
+        let config = ctx.config.read().unwrap();
+        (config.num_threads() as i32, config.diar_model())
+    };
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     let models_dir = ctx.paths.models_dir.clone();
     let mut rows: Vec<Value> = Vec::new();
@@ -108,14 +111,14 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
         None => crate::pipeline::native::bench_audio_synth(),
     };
 
-    // ONNX stages per provider. CoreML only exists on macOS.
-    let mut providers = vec![("cpu", "CPU")];
-    if cfg!(target_os = "macos") {
-        providers.push(("coreml", "CoreML (ANE)"));
-    }
-    for (provider, label) in providers {
+    // ONNX stages per provider this build offers (currently the CPU only).
+    for provider in crate::config::onnx_provider_options() {
+        let label = match provider {
+            "coreml" => "CoreML (ANE)",
+            _ => "CPU",
+        };
         emit(&rows, &format!("ONNX models on {label}…"));
-        match crate::pipeline::native::bench_onnx(&models_dir, threads, provider, &samples) {
+        match crate::pipeline::native::bench_onnx(&models_dir, threads, provider, &diar_model, &samples) {
             Ok(stage_rows) => {
                 for (stage, secs, audio_secs) in stage_rows {
                     rows.push(json!({

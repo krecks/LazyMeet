@@ -1,19 +1,11 @@
 # Workspace: lazymeet-core holds all backend domain logic (config, store,
 # models, jobs, pipeline) with no Tauri dependency; src-tauri is the thin
-# desktop shell exposing it as Tauri commands + events. The spike/ crate is a
-# standalone experiment and stays out of the workspace.
+# desktop shell exposing it as Tauri commands + events.
 [workspace]
 resolver = "2"
 members = ["crates/lazymeet-core", "src-tauri"]
-exclude = ["spike"]
 
 [profile.release]
 opt-level = "s"
 lto = true
 strip = true
-
-# Vendored Rust layer of sherpa-rs (the C++ sherpa-rs-sys stays the registry
-# build) — exposes diarization num_threads, which upstream hardcodes to 1.
-# Upstream is archived, so this is permanent; see crates/vendor/sherpa-rs.
-[patch.crates-io]
-sherpa-rs = { path = "crates/vendor/sherpa-rs" }

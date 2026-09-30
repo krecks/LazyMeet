@@ -2365,8 +2365,14 @@ const CONFIG_META = {
   ASR_LANGUAGE: {
     section: "config-transcription",
     label: "Spoken language",
-    help: "Hint for Whisper models — Parakeet always detects the language itself.",
+    help: "Hint for Whisper and Qwen3-ASR — Parakeet always detects the language itself.",
     languages: "Auto-detect",
+  },
+  DIAR_MODEL: {
+    section: "config-transcription",
+    label: "Speaker separation model",
+    help: "The model that works out who spoke when. A newly selected model downloads once, then runs offline.",
+    model: "diar",
   },
   SPEAKER_THRESHOLD: {
     section: "config-transcription",
@@ -2376,7 +2382,7 @@ const CONFIG_META = {
   DIAR_THRESHOLD: {
     section: "config-transcription",
     label: "Speaker separation",
-    help: "How different voices must sound to count as separate people. Higher means fewer speakers.",
+    help: "How different voices must sound to count as separate people. Higher means fewer speakers. Classic model only.",
   },
   SPEAKER_MERGE_THRESHOLD: {
     section: "config-transcription",
@@ -2386,7 +2392,7 @@ const CONFIG_META = {
   MIN_SPEAKER_SECONDS: {
     section: "config-transcription",
     label: "Minimum speaking time",
-    help: "Speakers with fewer seconds of speech than this are merged into the closest main voice.",
+    help: "Speakers with fewer seconds of speech than this are merged into the closest main voice. Classic model only — Nemotron keeps short speakers as their own.",
     step: 5,
   },
   SUMMARY_MODEL: {
@@ -2416,19 +2422,19 @@ const CONFIG_META = {
   ASR_PROVIDER: {
     section: "config-processing",
     label: "Transcription compute",
-    help: "Where the speech-to-text model runs. Its engine (onnxruntime) accelerates on the Neural Engine on Apple Silicon; the GPU is not available for it. CPU measures fastest on most machines.",
+    help: "Where the speech-to-text model runs. Its engine (onnxruntime) runs on the CPU in this build — the Neural Engine measured slower for these models.",
     providers: true,
   },
   DIAR_PROVIDER: {
     section: "config-processing",
     label: "Speaker separation compute",
-    help: "Where the who-spoke-when model runs: CPU or Neural Engine.",
+    help: "Where the who-spoke-when model runs (CPU in this build).",
     providers: true,
   },
   SPEAKER_PROVIDER: {
     section: "config-processing",
     label: "Voice matching compute",
-    help: "Where the voiceprint model runs: CPU or Neural Engine.",
+    help: "Where the voiceprint model runs (CPU in this build).",
     providers: true,
   },
   NUM_THREADS: {
@@ -2848,14 +2854,14 @@ function refreshModelStatuses() {
 function onModelsProgress(models) {
   const before = lastModels
     ? new Set(
-        ["asr", "summary"].flatMap((s) =>
+        ["asr", "diar", "summary"].flatMap((s) =>
           lastModels[s].options.filter((o) => o.downloading).map((o) => `${s}:${o.id}`)
         )
       )
     : new Set();
   lastModels = models;
   refreshModelStatuses();
-  for (const s of ["asr", "summary"]) {
+  for (const s of ["asr", "diar", "summary"]) {
     for (const o of models[s].options) {
       if (before.has(`${s}:${o.id}`) && o.ready) {
         showToast(`Model downloaded — it will be used for the next recording.`, 4000, true);

@@ -1,5 +1,5 @@
 # Forces the static MSVC runtime (/MT) for every cmake-built native dep on
-# Windows. sherpa-onnx (and the prebuilt onnxruntime inside it) use /MT;
+# Windows. sherpa-onnx's prebuilt static libs (onnxruntime included) use /MT;
 # llama.cpp silently ignores the cmake crate's static_crt knob because its
 # cmake_minimum_required predates policy CMP0091, leaving it on /MD — and the
 # two runtimes cannot link into one binary (LNK2038).

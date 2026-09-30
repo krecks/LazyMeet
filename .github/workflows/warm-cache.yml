@@ -2,7 +2,8 @@ name: warm-cache
 
 # Release builds run only on tags, but GitHub cache scoping means a tag run
 # can restore caches only from its own ref or from main. This MANUAL workflow
-# fills the release cache (sherpa-onnx + llama.cpp compile from source) from
+# fills the release cache (llama.cpp compiles from source; the prebuilt
+# sherpa-onnx libs are downloaded into target/) from
 # main — run it from the Actions tab before tagging a release whenever
 # dependencies changed, and the tag build restores it instead of compiling
 # cold. Pushes to main never build anything; they only run the test job.
@@ -28,8 +29,8 @@ jobs:
       # build can't (or worse, shouldn't) reuse. 12.0 matches
       # bundle.macOS.minimumSystemVersion, which `cargo tauri build` exports.
       RUSTFLAGS: ${{ matrix.os == 'ubuntu-22.04' && '-C relocation-model=dynamic-no-pic' || matrix.os == 'windows-latest' && '-C target-feature=+crt-static -C link-arg=advapi32.lib' || '' }}
-      # sherpa-onnx's static build uses the static CRT (/MT) on Windows; llama.cpp
-      # must match or the two can't link into one binary (LNK2038).
+      # sherpa-onnx's prebuilt static libs use the static CRT (/MT) on Windows;
+      # llama.cpp must match or the two can't link into one binary (LNK2038).
       LLAMA_STATIC_CRT: ${{ matrix.os == 'windows-latest' && '1' || '' }}
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.os == 'macos-latest' && '12.0' || '' }}
 
@@ -51,13 +52,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
             file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
-      # sherpa-onnx 1.12.9's cmake calls wmic for OS info; new runner images
-      # removed it (deprecated), which crashes the configure step. Restore it.
-      - name: Restore wmic (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: DISM /Online /Add-Capability /CapabilityName:WMIC~~~~
 
       # llama.cpp ignores the cmake crate's static_crt knob (its cmake
       # predates policy CMP0091) and stays on /MD while sherpa-onnx is /MT.

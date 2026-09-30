@@ -341,7 +341,7 @@
           </select>
         </label>
         <label class="speakers-field"
-          title="Language spoken in the recording — a hint for Whisper models; Parakeet always detects it automatically.">
+          title="Language spoken in the recording — a hint for Whisper and Qwen3-ASR; Parakeet always detects it automatically.">
           <span class="field-label">Language</span>
           <select id="prep-language"></select>
         </label>
@@ -453,8 +453,8 @@
         <div class="settings-section-head">
           <p class="muted">Measures each processing stage on every backend this
             machine offers: the transcription, speaker-separation, and
-            voice-matching models on the CPU and — on Apple Silicon — the Neural
-            Engine (CoreML); the summarizer LLM on the GPU and the CPU. Takes a
+            voice-matching models on the CPU; the summarizer LLM on the GPU and
+            the CPU. Takes a
             few minutes and needs the models downloaded. LazyMeet ships with the
             configuration that is fastest on most machines; after a run it can
             apply the combination that measured fastest on yours.</p>
@@ -480,8 +480,8 @@
               audio through the speech-to-text model (VAD bypassed, one warm-up
               pass first).</li>
             <li><strong>Diarization</strong> — a full who-spoke-when pass over
-              up to 5 minutes of audio (segmentation, embeddings,
-              clustering).</li>
+              up to 5 minutes of audio with the selected speaker separation
+              model.</li>
             <li><strong>Speaker ID</strong> — 40 voiceprint extractions from
               5-second windows, the same way meeting voiceprints are built.</li>
             <li><strong>Summarizer LLM</strong> — loads the summary model and

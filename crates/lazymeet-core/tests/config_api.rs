@@ -179,11 +179,13 @@ fn onnx_providers_default_to_cpu_and_validate() {
     let err =
         api::put_config(&app.ctx, &obj(&[("SUMMARY_PROVIDER", json!("npu"))])).unwrap_err();
     assert_eq!(err.code, 422);
-    if cfg!(target_os = "macos") {
-        api::put_config(&app.ctx, &obj(&[("DIAR_PROVIDER", json!("coreml"))])).unwrap();
-        assert_eq!(app.ctx.config.read().unwrap().diar_provider(), "coreml");
-        assert_eq!(app.ctx.config.read().unwrap().asr_provider(), "cpu"); // untouched
-    }
+    // CoreML is no longer compiled in: rejected on every platform, and a
+    // value saved by an older version reads as the CPU.
+    let err = api::put_config(&app.ctx, &obj(&[("ASR_PROVIDER", json!("coreml"))])).unwrap_err();
+    assert_eq!(err.code, 422);
+    std::fs::write(app.ctx.paths.config_file(), r#"{"DIAR_PROVIDER": "coreml"}"#).unwrap();
+    app.ctx.refresh_config();
+    assert_eq!(app.ctx.config.read().unwrap().diar_provider(), "cpu");
     // The UI learns what this platform offers from the config payload.
     let payload = api::config_payload(&app.ctx);
     assert!(payload["compute_options"]["SUMMARY_PROVIDER"][0].is_string());

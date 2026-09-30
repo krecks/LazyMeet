@@ -11,7 +11,15 @@ rust-version = "1.77"
 # FAKE pipeline is compiled, so the behavioral test suite builds in seconds:
 #   cargo test -p lazymeet-core --no-default-features
 default = ["native-pipeline"]
-native-pipeline = ["dep:sherpa-rs", "dep:llama-cpp-2", "dep:whatlang"]
+native-pipeline = [
+    "dep:sherpa-onnx",
+    "dep:ort",
+    "dep:ort-sys",
+    "dep:realfft",
+    "dep:hound",
+    "dep:llama-cpp-2",
+    "dep:whatlang",
+]
 # Build llama.cpp's CPU kernels as runtime-dispatched loadable modules
 # (GGML_CPU_ALL_VARIANTS): one binary serves SSE2-only through AVX512 CPUs at
 # full speed. Turns libllama into shared libs — the backend modules must ship
@@ -31,11 +39,25 @@ required-features = ["native-pipeline"]
 name = "bench_prefill"
 required-features = ["native-pipeline"]
 
+[[example]]
+name = "diarize"
+required-features = ["native-pipeline"]
+
 [dependencies]
-# `static` builds sherpa-onnx from source and links it statically — no dylib
-# rpath issues, one self-contained binary. (Linux needs
-# RUSTFLAGS="-C relocation-model=dynamic-no-pic", set in CI.)
-sherpa-rs = { version = "0.6.8", default-features = false, features = ["static"], optional = true }
+# The official sherpa-onnx bindings. The default `static` feature links the
+# prebuilt static libraries from the sherpa-onnx GitHub release (onnxruntime
+# included) — no C++ build, no dylib rpath issues, one self-contained binary.
+# Pinned exactly: the C API structs change between releases.
+sherpa-onnx = { version = "=1.13.8", optional = true }
+# Nemotron 3 Diarization runs on the onnxruntime that sherpa-onnx already
+# links statically (1.28.2): `disable-linking` makes ort-sys resolve the ORT
+# C API from those same symbols instead of linking or downloading a second
+# runtime. ort-sys is listed only to switch that feature on.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std"], optional = true }
+ort-sys = { version = "=2.0.0-rc.13", default-features = false, features = ["disable-linking"], optional = true }
+realfft = { version = "3", optional = true }
+# 16-bit WAV reading, scaled exactly as the pipeline always has (1/32767).
+hound = { version = "3.5", optional = true }
 llama-cpp-2 = { version = "0.1.151", optional = true }
 # preserve_order keeps JSON object key order stable across read-modify-write,
 # matching Python's dict semantics for records written by the old backend.

@@ -9,6 +9,8 @@
 pub mod fake;
 #[cfg(feature = "native-pipeline")]
 pub mod native;
+#[cfg(feature = "native-pipeline")]
+pub mod nemotron;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -221,6 +223,15 @@ pub fn diarize(
     native_only(ctx, |_| {
         native_impl::diarize(ctx, wav, num_speakers, ranges, ctx.config.num_threads() as i32)
     })
+}
+
+/// The diarization engine a meeting runs on ("nemotron" | "pyannote"): the
+/// selected model, the classic one for more speakers than Nemotron follows,
+/// the default while a selection is still downloading. A meeting-supplied
+/// speaker count (>0) wins over the env default.
+pub fn diar_engine(ctx: &PipelineCtx, num_speakers: i64) -> &'static str {
+    let n = if num_speakers > 0 { num_speakers } else { crate::config::env_num_speakers() };
+    crate::models::resolve_diar_at(ctx.models_dir, ctx.fake, &ctx.config.diar_model(), n).0
 }
 
 /// Transcription and diarization read the same WAV with disjoint models, so

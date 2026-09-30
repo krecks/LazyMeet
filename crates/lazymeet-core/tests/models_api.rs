@@ -14,7 +14,11 @@ use std::time::{Duration, Instant};
 fn models_catalog_shape() {
     let app = TestApp::fake();
     let data = api::get_models(&app.ctx);
-    for (step, default) in [("asr", "parakeet-tdt-0.6b-v3"), ("summary", "qwen3.5-4b")] {
+    for (step, default) in [
+        ("asr", "parakeet-tdt-0.6b-v3"),
+        ("diar", "nemotron-3-diarization"),
+        ("summary", "qwen3.5-4b"),
+    ] {
         assert_eq!(data[step]["active"], default);
         let options = data[step]["options"].as_array().unwrap();
         let ids: Vec<&str> = options.iter().map(|o| o["id"].as_str().unwrap()).collect();
@@ -35,6 +39,14 @@ fn models_catalog_shape() {
         .map(|o| o["id"].as_str().unwrap())
         .collect();
     assert!(asr_ids.contains(&"whisper-small") && asr_ids.contains(&"whisper-base"));
+    assert!(asr_ids.contains(&"qwen3-asr-0.6b"));
+    let diar_ids: Vec<&str> = data["diar"]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(diar_ids, ["nemotron-3-diarization", "pyannote-3.0"]);
     let llm_ids: Vec<&str> = data["summary"]["options"]
         .as_array()
         .unwrap()
@@ -52,6 +64,7 @@ fn put_model_and_language_settings() {
         &obj(&[
             ("ASR_MODEL", json!("whisper-small")),
             ("ASR_LANGUAGE", json!("de")),
+            ("DIAR_MODEL", json!("pyannote-3.0")),
             ("SUMMARY_MODEL", json!("qwen3.5-9b")),
             ("SUMMARY_LANGUAGE", json!("de")),
         ]),
@@ -60,8 +73,10 @@ fn put_model_and_language_settings() {
     let snapshot = app.ctx.config.read().unwrap();
     assert_eq!(snapshot.asr_model(), "whisper-small");
     assert_eq!(snapshot.summary_language(), "de");
+    assert_eq!(snapshot.diar_model(), "pyannote-3.0");
     drop(snapshot);
     assert_eq!(api::get_models(&app.ctx)["asr"]["active"], "whisper-small");
+    assert_eq!(api::get_models(&app.ctx)["diar"]["active"], "pyannote-3.0");
 }
 
 #[test]
@@ -70,6 +85,7 @@ fn put_rejects_unknown_models_and_languages() {
     for body in [
         obj(&[("ASR_MODEL", json!("whisper-nonexistent"))]),
         obj(&[("SUMMARY_MODEL", json!("gpt-4"))]),
+        obj(&[("DIAR_MODEL", json!("pyannote-2.1"))]),
         obj(&[("ASR_LANGUAGE", json!("klingon"))]),
         obj(&[("SUMMARY_LANGUAGE", json!("xx"))]),
     ] {
@@ -82,6 +98,7 @@ fn download_endpoint_validates() {
     let app = TestApp::fake();
     assert_eq!(api::download_model(&app.ctx, "asr", "nope").unwrap_err().code, 404);
     assert_eq!(api::download_model(&app.ctx, "bogus", "whisper-small").unwrap_err().code, 404);
+    assert_eq!(api::download_model(&app.ctx, "diar", "whisper-small").unwrap_err().code, 404);
     // FAKE mode: everything counts as ready, request is a no-op success.
     assert_eq!(api::download_model(&app.ctx, "asr", "whisper-small").unwrap(), json!({"ok": true}));
 }
@@ -97,6 +114,30 @@ fn resolvers_fall_back_to_defaults() {
         models::resolve_llm(&app.ctx, "does-not-exist"),
         app.ctx.paths.models_dir.join("qwen3.5-4b-q4_k_m.gguf")
     );
+    let qwen = models::resolve_asr(&app.ctx, "qwen3-asr-0.6b");
+    assert_eq!(qwen.kind, "qwen3_asr");
+    assert_eq!(qwen.tokenizer, app.ctx.paths.models_dir.join("qwen3-asr-0.6b").join("tokenizer"));
+}
+
+#[test]
+fn diarizer_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = dir.path();
+    let nemotron = m.join("nemotron-3-diarization").join("model_quantized.onnx");
+    // Only the first-run default is on disk: a classic selection (not
+    // downloaded yet) and a >8-speaker meeting both stay on Nemotron.
+    std::fs::create_dir_all(nemotron.parent().unwrap()).unwrap();
+    std::fs::write(&nemotron, b"").unwrap();
+    assert_eq!(models::resolve_diar_at(m, false, "pyannote-3.0", -1), ("nemotron", nemotron.clone()));
+    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 12), ("nemotron", nemotron.clone()));
+    assert_eq!(models::resolve_diar_at(m, false, "unknown", -1), ("nemotron", nemotron.clone()));
+    // With the classic model installed it serves its selection and any
+    // meeting with more speakers than Nemotron follows.
+    let classic = m.join("diarization_segmentation.onnx");
+    std::fs::write(&classic, b"").unwrap();
+    assert_eq!(models::resolve_diar_at(m, false, "pyannote-3.0", 3), ("pyannote", classic.clone()));
+    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 9), ("pyannote", classic));
+    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 8), ("nemotron", nemotron));
 }
 
 #[test]

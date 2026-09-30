@@ -24,7 +24,7 @@ Tauri desktop app — one binary, everything in Rust
      1. ffmpeg (bundled)        → 16 kHz mono audio
      2. sherpa-onnx VAD         → speech utterances
      3. NVIDIA Parakeet (ONNX)  → transcript with timestamps
-     4. sherpa-onnx diarization → who-spoke-when
+     4. Nemotron 3 Diarization  → who-spoke-when (onnxruntime)
      5. speaker identification  → match/name voices via a saved speaker library
      6. llama.cpp (in-process)  → summary, takeaways, action items
 ```
@@ -37,9 +37,10 @@ fully offline:
 
 | Component | Model | Source |
 |---|---|---|
-| Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
+| Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Qwen3-ASR 0.6B and Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
 | Voice activity | Silero VAD | sherpa-onnx GitHub releases |
-| Diarization + speaker ID | pyannote-seg + speaker-embedding (ONNX) | sherpa-onnx GitHub releases |
+| Diarization | NVIDIA Nemotron 3 Diarization, int8 ONNX (up to 8 speakers; classic pyannote-seg 3.0 selectable) | Hugging Face (ungated) / sherpa-onnx GitHub releases |
+| Speaker ID | NeMo TitaNet speaker embedding (ONNX) | sherpa-onnx GitHub releases |
 | Summarization | Qwen 3.5 (0.8B–9B selectable, GGUF) via llama.cpp | Hugging Face (ungated) |
 | ffmpeg | static binary | bundled with the app |
 
@@ -97,40 +98,44 @@ saved voices in the **Known speakers** panel.
 Measured on a real 28.5-minute, 1.23 GB OBS recording (HEVC 1728×1122@60,
 167 transcript segments, full notes produced) on an **Apple M1 Pro with the
 default settings** (7 CPU threads: ~75 % of cores). End to end the recording
-processes in **~3.2 minutes — about 9× faster than realtime**, twice as fast
-as v0.1.2, thanks to two pipeline changes:
+processes in **~2.6 minutes — about 11× faster than realtime**:
 
 - **Transcription and diarization run concurrently.** They read the same
   decoded audio with disjoint models, so each gets half the thread budget
   and they run side by side — measurably faster than either full-budget
-  ordering (a 28.5-minute meeting: 190 s overlapped vs 271 s sequential).
-- **Diarization is multi-threaded.** Upstream sherpa-rs pins the diarization
-  models to one ONNX thread; a vendored copy (`crates/vendor/sherpa-rs`)
-  exposes the thread count, which alone makes the stage 2× faster
-  (229 s → 122 s on the recording above).
+  ordering.
+- **Nemotron 3 Diarization** separates the speakers 2.5× faster than the
+  classic pyannote pipeline (43 s vs 106 s for this recording on 7 threads),
+  so diarization now finishes well inside the transcription time and frees
+  the cores for it. Peak memory drops from 3.3 GB to 1.8 GB.
 
-Stage durations on that recording, before → after:
+Stage durations on that recording, measured back to back:
 
-| Stage | v0.1.2 (sequential) | now |
+| Stage | classic diarizer (v0.1.5) | Nemotron (v0.1.6) |
 |---|---|---|
-| Transcription (Parakeet) | 103 s | 172 s combined — the two run |
-| Diarization | 229 s | concurrently on half the threads each |
-| Speaker ID | 7.7 s | 7.8 s |
-| Summarization (Metal GPU) | 33 s | 33 s |
-| **Total** | **375 s** | **190 s** |
+| Transcription + diarization (concurrent) | 147 s | 127 s |
+| Speaker ID | 6.8 s | 2.4 s |
+| Summarization (Metal GPU) | 26 s | 25 s |
+| **Total** | **181 s** | **156 s** |
 
-**Backends:** the ONNX models always run on the **CPU** — CoreML/ANE was
-re-measured with the multi-threaded diarizer and is still slower on every
-stage (onnxruntime can only place a fraction of the ops on the Neural
-Engine, and the CPU↔ANE hand-offs cost more than the acceleration saves).
-The summarizer LLM runs on the **GPU** where llama.cpp supports it (the
-*Hardware acceleration* setting toggles this): Metal generates ~25 % faster
-than CPU and loads the model far faster.
+The diarizer port was checked against the Hugging Face transformers
+reference implementation (identical speaker decisions on 99.999 % of frames
+with the fp32 weights; the shipped int8 model agrees on 99.99 %) and on
+meetings with known participants: a 2-person call the classic
+diarizer split into 3 speakers comes out as 2, and a 4-person meeting keeps
+all 4, including one who speaks for only 8 seconds.
+
+**Backends:** the ONNX models run on the **CPU**. The static onnxruntime
+inside sherpa-onnx ships without CoreML, and CoreML/ANE measured slower than
+the CPU for these models anyway (onnxruntime can only place a fraction of the
+ops on the Neural Engine, and the CPU↔ANE hand-offs cost more than the
+acceleration saves). The summarizer LLM runs on the **GPU** where llama.cpp
+supports it (the *Hardware acceleration* setting toggles this): Metal
+generates ~25 % faster than CPU and loads the model far faster.
 
 Hardware differs, so the app includes a built-in benchmark (gauge icon, top
 right) that measures ASR, diarization, speaker ID, and the summarizer on
-your machine across the available backends. Power users can also force an
-ONNX execution provider with `LAZYMEET_ONNX_PROVIDER` (default `cpu`).
+your machine across the available backends.
 
 ## Privacy
 
@@ -147,8 +152,11 @@ processing finishes instead.
 ## Development / building from source
 
 Requirements: Rust (stable) + Tauri CLI (`cargo install tauri-cli --version
-"^2"`), cmake (sherpa-onnx and llama.cpp build from source), and the platform
-webview libs (Linux: `libwebkit2gtk-4.1-dev`).
+"^2"`), cmake (llama.cpp builds from source), and the platform webview libs
+(Linux: `libwebkit2gtk-4.1-dev`). sherpa-onnx links the prebuilt static
+libraries of its GitHub release, which its build script downloads on the
+first build; to build offline, put that archive in a directory and point
+`SHERPA_ONNX_ARCHIVE_DIR` at it.
 
 ```bash
 # 1. Fetch the bundled ffmpeg for your platform (once)
@@ -164,8 +172,6 @@ The workspace has two crates: `crates/lazymeet-core` (config, storage, model
 downloads, job queue, the ML pipeline — no Tauri dependency) and `src-tauri`
 (the desktop shell: thin Tauri commands + events over core).
 
-On Linux, static sherpa-onnx needs
-`RUSTFLAGS="-C relocation-model=dynamic-no-pic"` (CI sets it).
 
 ### CLI (process a file without the app)
 
@@ -174,6 +180,14 @@ models and prints the meeting JSON — useful for debugging and benchmarks:
 
 ```bash
 cargo run --release -p lazymeet-core --bin lazymeet-cli -- recording.mp4
+```
+
+To compare diarization engines on one recording, the `diarize` example runs
+only that stage on a 16 kHz mono WAV and prints the speaker turns as JSON:
+
+```bash
+cargo run --release -p lazymeet-core --example diarize -- audio.wav \
+    --model pyannote-3.0   # or nemotron-3-diarization (default)
 ```
 
 ### Tests
@@ -201,6 +215,7 @@ Environment variables (all optional):
 |---|---|---|
 | `LAZYMEET_DATA_DIR` | OS app-data dir | Where models + transcripts live |
 | `LAZYMEET_SPEAKER_THRESHOLD` | `0.6` | Voice-match strictness (cosine) |
+| `LAZYMEET_DIAR_MODEL` | `nemotron-3-diarization` | Diarizer: `nemotron-3-diarization` (up to 8 speakers) or `pyannote-3.0` (classic) |
 | `LAZYMEET_MERGE_THRESHOLD` | `0.6` | Voiceprint similarity at which over-split diarized labels merge |
 | `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Speakers with less speech fold into the closest main voice |
 | `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |
@@ -225,4 +240,5 @@ must make the source available under the same license.
 The bundled ffmpeg binary is a separate program invoked by the app and remains
 under its own LGPL/GPL license. The AI models are downloaded at first run
 directly from their publishers and keep their respective licenses (Parakeet:
-CC-BY-4.0, Qwen: Apache-2.0).
+CC-BY-4.0, Nemotron 3 Diarization: OpenMDW-1.1, Qwen and Qwen3-ASR:
+Apache-2.0).

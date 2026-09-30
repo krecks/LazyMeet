@@ -139,13 +139,14 @@ pub fn tunables() -> Vec<TunableSpec> {
     vec![
         t("ASR_MODEL", "LAZYMEET_ASR_MODEL", Kind::Str, None, None),
         t("ASR_LANGUAGE", "LAZYMEET_ASR_LANGUAGE", Kind::Str, None, None),
+        t("DIAR_MODEL", "LAZYMEET_DIAR_MODEL", Kind::Str, None, None),
         t("SUMMARY_MODEL", "LAZYMEET_SUMMARY_MODEL", Kind::Str, None, None),
         t("SUMMARY_LANGUAGE", "LAZYMEET_SUMMARY_LANGUAGE", Kind::Str, None, None),
         // For Str tunables, `max` is the character cap (default 200 when None).
         t("SUMMARY_PROMPT", "LAZYMEET_SUMMARY_PROMPT", Kind::Str, None, Some(2000.0)),
-        // Per-stage ONNX execution provider ("cpu" | "coreml"). CPU is the
-        // fastest on every machine measured so far; the built-in benchmark
-        // verifies per machine and can apply the fastest combination.
+        // Per-stage ONNX execution provider — only "cpu" in this build (see
+        // onnx_provider_options); kept per stage so an accelerator can slot
+        // in again without a settings migration.
         t("ASR_PROVIDER", "LAZYMEET_ASR_PROVIDER", Kind::Str, None, None),
         t("DIAR_PROVIDER", "LAZYMEET_DIAR_PROVIDER", Kind::Str, None, None),
         t("SPEAKER_PROVIDER", "LAZYMEET_SPEAKER_PROVIDER", Kind::Str, None, None),
@@ -170,6 +171,7 @@ pub fn default_value(name: &str) -> Value {
     match name {
         "ASR_MODEL" => json!("parakeet-tdt-0.6b-v3"),
         "ASR_LANGUAGE" => json!("auto"),
+        "DIAR_MODEL" => json!("nemotron-3-diarization"),
         "SUMMARY_MODEL" => json!("qwen3.5-4b"),
         "SUMMARY_LANGUAGE" => json!("auto"),
         "SUMMARY_PROMPT" => json!(DEFAULT_SUMMARY_PROMPT),
@@ -289,6 +291,9 @@ impl Config {
     pub fn asr_language(&self) -> String {
         self.str_of("ASR_LANGUAGE")
     }
+    pub fn diar_model(&self) -> String {
+        self.str_of("DIAR_MODEL")
+    }
     pub fn summary_model(&self) -> String {
         self.str_of("SUMMARY_MODEL")
     }
@@ -326,12 +331,18 @@ impl Config {
     }
 
     /// Per-stage ONNX execution provider; `LAZYMEET_ONNX_PROVIDER` forces all
-    /// three at once (benchmark scripts / experiments).
+    /// three at once (benchmark scripts / experiments). A value this build
+    /// doesn't offer (e.g. "coreml" saved by an older version) means the CPU.
     fn provider_of(&self, name: &str) -> String {
-        std::env::var("LAZYMEET_ONNX_PROVIDER")
+        let value = std::env::var("LAZYMEET_ONNX_PROVIDER")
             .ok()
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| self.str_of(name))
+            .unwrap_or_else(|| self.str_of(name));
+        if onnx_provider_options().contains(&value.as_str()) {
+            value
+        } else {
+            "cpu".into()
+        }
     }
     pub fn asr_provider(&self) -> String {
         self.provider_of("ASR_PROVIDER")
@@ -344,16 +355,13 @@ impl Config {
     }
 }
 
-/// ONNX execution providers available in this build on this platform. The
-/// recognition models run via onnxruntime, whose accelerator on Apple
-/// Silicon is the Neural Engine (CoreML); CUDA/DirectML would slot in here
-/// once compiled in.
+/// ONNX execution providers available in this build on this platform. Only
+/// the CPU: the prebuilt static onnxruntime that sherpa-onnx links ships
+/// without the CoreML provider (sherpa-onnx compiles CoreML out for static
+/// builds), and CoreML measured slower than the CPU for these models anyway.
+/// CoreML/CUDA/DirectML would slot in here once compiled in.
 pub fn onnx_provider_options() -> Vec<&'static str> {
-    let mut v = vec!["cpu"];
-    if cfg!(target_os = "macos") {
-        v.push("coreml");
-    }
-    v
+    vec!["cpu"]
 }
 
 /// Summarizer backends available in this build on this platform. llama.cpp's
@@ -426,17 +434,6 @@ pub fn env_num_speakers() -> i64 {
 
 /// Embedding dimension used by the deterministic fake embedder.
 pub const FAKE_EMBED_DIM: usize = 192;
-
-/// Execution provider for the sherpa-onnx models. Defaults to CPU: CoreML
-/// measured ~2x slower for these models (onnxruntime places only a fraction
-/// of their ops on the ANE and the CPU<->CoreML hand-offs cost more than the
-/// acceleration saves). `LAZYMEET_ONNX_PROVIDER` overrides for benchmarking.
-pub fn onnx_provider() -> String {
-    std::env::var("LAZYMEET_ONNX_PROVIDER")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "cpu".into())
-}
 
 /// True when the upload is already audio-only (no video track to strip).
 pub fn is_audio_file(path: &Path) -> bool {
