@@ -26,7 +26,6 @@ fn preview_audio_lands_under_uploads() {
 #[test]
 fn preview_of_missing_file_is_422() {
     let app = TestApp::fake();
-    let err =
-        api::extract_preview_audio(&app.ctx, std::path::Path::new("/nope.mkv")).unwrap_err();
+    let err = api::extract_preview_audio(&app.ctx, std::path::Path::new("/nope.mkv")).unwrap_err();
     assert_eq!(err.code, 422);
 }

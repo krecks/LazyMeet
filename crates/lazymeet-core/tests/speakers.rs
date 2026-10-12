@@ -62,7 +62,8 @@ fn rename_invalid_names_are_422() {
 fn meeting_rename_moves_library_entry() {
     // Renaming an enrolled speaker in a meeting must not leave a duplicate.
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "lib.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "lib.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -90,7 +91,8 @@ fn meeting_rename_merges_into_existing_entry() {
     // Renaming a voice to a name already in the library keeps one entry.
     let app = TestApp::fake();
     upsert(&app, "Anna", &[0.9, 0.9]);
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "merge.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "merge.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -133,7 +135,8 @@ fn correcting_wrong_match_keeps_victim_entry() {
     // matched person's library entry — only enrol the voice under the new name.
     let app = TestApp::fake();
     upsert(&app, "Christine Schneider", &[0.9, 0.9]);
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "wrong.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "wrong.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -161,7 +164,8 @@ fn confirm_recognized_speaker_learns() {
     let app = TestApp::fake();
     upsert(&app, "Dimitri", &[1.0, 0.0]);
     let record =
-        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "confirm.mp4", -1, None, None).unwrap();
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "confirm.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -186,7 +190,8 @@ fn reject_recognized_speaker_unlinks_without_poison() {
     let app = TestApp::fake();
     upsert(&app, "Christine Schneider", &[0.9, 0.9]);
     let record =
-        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "reject.mp4", -1, None, None).unwrap();
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "reject.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,

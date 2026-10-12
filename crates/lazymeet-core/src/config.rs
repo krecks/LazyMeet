@@ -73,12 +73,7 @@ impl Paths {
     }
 
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
-        for d in [
-            &self.data_dir,
-            &self.models_dir,
-            &self.meetings_dir(),
-            &self.uploads_dir(),
-        ] {
+        for d in [&self.data_dir, &self.models_dir, &self.meetings_dir(), &self.uploads_dir()] {
             std::fs::create_dir_all(d)?;
         }
         Ok(())
@@ -153,7 +148,13 @@ pub fn tunables() -> Vec<TunableSpec> {
         t("SPEAKER_THRESHOLD", "LAZYMEET_SPEAKER_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("DIAR_THRESHOLD", "LAZYMEET_DIAR_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
         t("SPEAKER_MERGE_THRESHOLD", "LAZYMEET_MERGE_THRESHOLD", Kind::Float, Some(0.0), Some(1.0)),
-        t("MIN_SPEAKER_SECONDS", "LAZYMEET_MIN_SPEAKER_SECONDS", Kind::Float, Some(0.0), Some(600.0)),
+        t(
+            "MIN_SPEAKER_SECONDS",
+            "LAZYMEET_MIN_SPEAKER_SECONDS",
+            Kind::Float,
+            Some(0.0),
+            Some(600.0),
+        ),
         t("SUMMARY_PROVIDER", "LAZYMEET_SUMMARY_PROVIDER", Kind::Str, None, None),
         t("NUM_THREADS", "LAZYMEET_NUM_THREADS", Kind::Int, Some(1.0), Some(max_threads() as f64)),
         t("KEEP_AUDIO", "LAZYMEET_KEEP_AUDIO", Kind::Bool, None, None),
@@ -386,8 +387,7 @@ pub fn load_overrides(paths: &Paths) -> Map<String, Value> {
         Err(_) => return Map::new(),
     };
     let Value::Object(data) = data else { return Map::new() };
-    let specs: BTreeMap<&str, TunableSpec> =
-        tunables().into_iter().map(|s| (s.name, s)).collect();
+    let specs: BTreeMap<&str, TunableSpec> = tunables().into_iter().map(|s| (s.name, s)).collect();
     let mut out = Map::new();
     for (name, raw) in data {
         if let Some(spec) = specs.get(name.as_str()) {

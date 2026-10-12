@@ -128,16 +128,28 @@ fn diarizer_resolution() {
     // downloaded yet) and a >8-speaker meeting both stay on Nemotron.
     std::fs::create_dir_all(nemotron.parent().unwrap()).unwrap();
     std::fs::write(&nemotron, b"").unwrap();
-    assert_eq!(models::resolve_diar_at(m, false, "pyannote-3.0", -1), ("nemotron", nemotron.clone()));
-    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 12), ("nemotron", nemotron.clone()));
+    assert_eq!(
+        models::resolve_diar_at(m, false, "pyannote-3.0", -1),
+        ("nemotron", nemotron.clone())
+    );
+    assert_eq!(
+        models::resolve_diar_at(m, false, "nemotron-3-diarization", 12),
+        ("nemotron", nemotron.clone())
+    );
     assert_eq!(models::resolve_diar_at(m, false, "unknown", -1), ("nemotron", nemotron.clone()));
     // With the classic model installed it serves its selection and any
     // meeting with more speakers than Nemotron follows.
     let classic = m.join("diarization_segmentation.onnx");
     std::fs::write(&classic, b"").unwrap();
     assert_eq!(models::resolve_diar_at(m, false, "pyannote-3.0", 3), ("pyannote", classic.clone()));
-    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 9), ("pyannote", classic));
-    assert_eq!(models::resolve_diar_at(m, false, "nemotron-3-diarization", 8), ("nemotron", nemotron));
+    assert_eq!(
+        models::resolve_diar_at(m, false, "nemotron-3-diarization", 9),
+        ("pyannote", classic)
+    );
+    assert_eq!(
+        models::resolve_diar_at(m, false, "nemotron-3-diarization", 8),
+        ("nemotron", nemotron)
+    );
 }
 
 #[test]
@@ -155,18 +167,13 @@ fn uploads_process_sequentially() {
         .events
         .payloads("meeting-updated")
         .into_iter()
-        .map(|p| {
-            (p["id"].as_str().unwrap().to_string(), p["status"].as_str().unwrap().to_string())
-        })
+        .map(|p| (p["id"].as_str().unwrap().to_string(), p["status"].as_str().unwrap().to_string()))
         .collect();
     let first_done = all
         .iter()
         .position(|(id, s)| *id == first && (s == "done" || s == "error"))
         .expect("first finished");
-    let second_started = all
-        .iter()
-        .position(|(id, _)| *id == second)
-        .expect("second processed");
+    let second_started = all.iter().position(|(id, _)| *id == second).expect("second processed");
     assert!(
         second_started > first_done,
         "second meeting started before the first finished: {all:?}"
@@ -191,10 +198,7 @@ fn uploads_wait_for_model_downloads() {
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut status = String::new();
     while Instant::now() < deadline {
-        status = api::get_meeting(&app.ctx, &mid).unwrap()["status"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        status = api::get_meeting(&app.ctx, &mid).unwrap()["status"].as_str().unwrap().to_string();
         if status == "done" || status == "error" {
             break;
         }

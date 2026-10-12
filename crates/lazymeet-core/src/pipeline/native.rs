@@ -255,7 +255,12 @@ impl Recognizer {
 }
 
 /// The recognizer config for one ASR model on disk.
-fn recognizer_config(spec: &AsrPaths, language: &str, provider: &str, threads: i32) -> OfflineRecognizerConfig {
+fn recognizer_config(
+    spec: &AsrPaths,
+    language: &str,
+    provider: &str,
+    threads: i32,
+) -> OfflineRecognizerConfig {
     let mut config = OfflineRecognizerConfig::default();
     let model = &mut config.model_config;
     model.num_threads = threads;
@@ -363,7 +368,8 @@ fn new_vad(ctx: &PipelineCtx) -> Result<VoiceActivityDetector, String> {
         provider: Some(ctx.config.asr_provider()),
         ..Default::default()
     };
-    VoiceActivityDetector::create(&config, 100.0).ok_or_else(|| "could not load the VAD model".into())
+    VoiceActivityDetector::create(&config, 100.0)
+        .ok_or_else(|| "could not load the VAD model".into())
 }
 
 /// Feed one contiguous sample span through VAD + recognizer, appending
@@ -558,7 +564,11 @@ pub fn diarize(
 // Voiceprints (port of identify.py's extractor half)
 // --------------------------------------------------------------------------
 
-fn new_extractor(models_dir: &Path, provider: &str, threads: i32) -> Result<SpeakerEmbeddingExtractor, String> {
+fn new_extractor(
+    models_dir: &Path,
+    provider: &str,
+    threads: i32,
+) -> Result<SpeakerEmbeddingExtractor, String> {
     let model = models_dir.join("speaker_embedding.onnx");
     if !model.exists() {
         return Err(format!("speaker model not found at {}", model.display()));
@@ -648,16 +658,13 @@ const RESERVE: usize = 2560;
 const FORMAT: &str = "Respond with ONLY a JSON object of the form \
     {\"summary\": str, \"takeaways\": [str], \"action_items\": [str]}.";
 
-const NOTES_SYSTEM: &str = "You are a meeting assistant. Summarize this portion of a meeting transcript \
+const NOTES_SYSTEM: &str =
+    "You are a meeting assistant. Summarize this portion of a meeting transcript \
     into concise bullet notes capturing decisions, topics, and any action items. \
     Return plain text bullets only.";
 
 fn language_name<'a>(code: &'a str) -> &'a str {
-    super::LANGUAGE_NAMES
-        .iter()
-        .find(|(c, _)| *c == code)
-        .map(|(_, n)| *n)
-        .unwrap_or(code)
+    super::LANGUAGE_NAMES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or(code)
 }
 
 /// Detect the transcript's language, restricted to the languages the
@@ -721,9 +728,9 @@ fn llama_backend() -> Result<&'static LlamaBackend, String> {
             // machine that compiled the binary (dev builds, CI benches).
             #[cfg(feature = "llama-dynamic-backends")]
             match std::env::var_os("LAZYMEET_LLM_BACKENDS_DIR") {
-                Some(dir) => llama_cpp_2::llama_backend::load_backends_from_path(
-                    std::path::Path::new(&dir),
-                ),
+                Some(dir) => {
+                    llama_cpp_2::llama_backend::load_backends_from_path(std::path::Path::new(&dir))
+                }
                 None => llama_cpp_2::llama_backend::load_backends(),
             }
             LlamaBackend::init().map_err(|e| e.to_string())
@@ -741,7 +748,8 @@ struct Llm {
 impl Llm {
     fn load(ctx: &PipelineCtx) -> Result<Self, String> {
         let backend = llama_backend()?;
-        let path = crate::models::resolve_llm_at(ctx.models_dir, ctx.fake, &ctx.config.summary_model());
+        let path =
+            crate::models::resolve_llm_at(ctx.models_dir, ctx.fake, &ctx.config.summary_model());
         // Offload all layers to the GPU (Metal on Apple Silicon) when built
         // with GPU support; if that load fails (driver/VRAM), fall back to a
         // CPU-only load rather than failing the meeting. SUMMARY_PROVIDER
@@ -756,11 +764,7 @@ impl Llm {
             LlamaModel::load_from_file(backend, &path, &cpu())
         }
         .map_err(|e| format!("llm load: {e}"))?;
-        Ok(Self {
-            model,
-            n_ctx: config::llm_n_ctx(),
-            threads: ctx.config.num_threads() as i32,
-        })
+        Ok(Self { model, n_ctx: config::llm_n_ctx(), threads: ctx.config.num_threads() as i32 })
     }
 
     fn count_tokens(&self, text: &str) -> usize {
@@ -790,10 +794,7 @@ impl Llm {
     /// decode greedily at temp 0.2.
     fn chat(&self, system: &str, user: &str, max_tokens: usize) -> Result<String, String> {
         let backend = llama_backend()?;
-        let template = self
-            .model
-            .chat_template(None)
-            .map_err(|e| format!("chat template: {e}"))?;
+        let template = self.model.chat_template(None).map_err(|e| format!("chat template: {e}"))?;
         let mut prompt = self
             .model
             .apply_chat_template(
@@ -801,8 +802,7 @@ impl Llm {
                 &[
                     LlamaChatMessage::new("system".into(), system.into())
                         .map_err(|e| e.to_string())?,
-                    LlamaChatMessage::new("user".into(), user.into())
-                        .map_err(|e| e.to_string())?,
+                    LlamaChatMessage::new("user".into(), user.into()).map_err(|e| e.to_string())?,
                 ],
                 true,
             )
@@ -861,10 +861,7 @@ fn transcript_lines(segments: &[MergedSegment], speakers: &Map<String, Value>) -
     segments
         .iter()
         .map(|seg| {
-            let name = speakers
-                .get(&seg.speaker)
-                .and_then(|v| v.as_str())
-                .unwrap_or(&seg.speaker);
+            let name = speakers.get(&seg.speaker).and_then(|v| v.as_str()).unwrap_or(&seg.speaker);
             format!("{name}: {}", seg.text)
         })
         .collect()
@@ -902,11 +899,14 @@ fn parse_summary(content: &str) -> Summary {
         (Some(a), Some(b)) if b > a => &content[a..=b],
         _ => content.as_str(),
     };
-    let data: Option<Value> = serde_json::from_str(&content)
-        .ok()
-        .or_else(|| serde_json::from_str(candidate).ok());
+    let data: Option<Value> =
+        serde_json::from_str(&content).ok().or_else(|| serde_json::from_str(candidate).ok());
     let Some(Value::Object(data)) = data else {
-        return Summary { summary: content.trim().to_string(), takeaways: vec![], action_items: vec![] };
+        return Summary {
+            summary: content.trim().to_string(),
+            takeaways: vec![],
+            action_items: vec![],
+        };
     };
     let strings = |key: &str| -> Vec<String> {
         data.get(key)
@@ -1020,7 +1020,11 @@ pub fn bench_onnx(
     for chunk in asr.chunks(10 * sr) {
         let _ = recognizer.transcribe(chunk);
     }
-    rows.push(("Transcription".to_string(), t.elapsed().as_secs_f64(), asr.len() as f64 / sr as f64));
+    rows.push((
+        "Transcription".to_string(),
+        t.elapsed().as_secs_f64(),
+        asr.len() as f64 / sr as f64,
+    ));
     drop(recognizer);
 
     // Diarization: up to 300 s.
@@ -1073,8 +1077,8 @@ pub fn bench_llm(
         LlamaModelParams::default().with_n_gpu_layers(0)
     };
     let t = Instant::now();
-    let model =
-        LlamaModel::load_from_file(backend, &path, &params).map_err(|e| format!("llm load: {e}"))?;
+    let model = LlamaModel::load_from_file(backend, &path, &params)
+        .map_err(|e| format!("llm load: {e}"))?;
     let load_s = t.elapsed().as_secs_f64();
 
     let llm = Llm { model, n_ctx: 2048, threads };

@@ -35,10 +35,7 @@ fn full_lifecycle() {
     names.insert(speaker_id.clone(), json!("Alice"));
     let updated = api::rename_speakers(&app.ctx, &mid, &names).unwrap();
     assert_eq!(updated["speakers"][&speaker_id], "Alice");
-    assert!(api::get_speakers(&app.ctx)
-        .as_array()
-        .unwrap()
-        .contains(&json!("Alice")));
+    assert!(api::get_speakers(&app.ctx).as_array().unwrap().contains(&json!("Alice")));
 
     api::patch_meeting(&app.ctx, &mid, &changes("title", json!("Daily Standup"))).unwrap();
 
@@ -64,10 +61,7 @@ fn audio_upload_kept_unchanged() {
     let upload_dir = app.uploads_dir().join(&mid);
     assert!(upload_dir.join("standup.m4a").is_file());
     let record = store::get_meeting(&app.ctx.paths, &app.ctx.locks, &mid).unwrap();
-    assert_eq!(
-        store::audio_path(&app.ctx.paths, &record),
-        Some(upload_dir.join("standup.m4a"))
-    );
+    assert_eq!(store::audio_path(&app.ctx.paths, &record), Some(upload_dir.join("standup.m4a")));
     let audio = api::get_meeting_audio_path(&app.ctx, &mid).unwrap();
     assert_eq!(std::fs::read(audio["path"].as_str().unwrap()).unwrap(), b"fake audio bytes");
 
@@ -78,7 +72,8 @@ fn audio_upload_kept_unchanged() {
 fn worker_write_preserves_user_renames() {
     let app = TestApp::fake();
     let record =
-        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "clobber.mp4", -1, None, None).unwrap();
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "clobber.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -104,7 +99,8 @@ fn worker_write_preserves_user_renames() {
 #[test]
 fn rename_updates_generated_notes() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "notes.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "notes.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -132,7 +128,8 @@ fn rename_updates_generated_notes() {
 #[test]
 fn concurrent_renames_both_survive() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "race.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "race.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap().to_string();
     store::update_meeting(
         &app.ctx.paths,
@@ -173,7 +170,9 @@ fn corrupt_meeting_json_is_tolerated() {
 #[test]
 fn orphan_sweep_marks_dead_worker_error() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "orphan.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "orphan.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,

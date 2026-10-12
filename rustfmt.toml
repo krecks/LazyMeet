@@ -1,0 +1,3 @@
+# Long chains and argument lists stay on one line up to max_width (100), as
+# the code was written; the default heuristics break them much earlier.
+use_small_heuristics = "Max"

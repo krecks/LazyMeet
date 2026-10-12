@@ -49,10 +49,7 @@ fn substring_match_is_case_insensitive() {
     api::patch_segments(
         &app.ctx,
         mid,
-        &[
-            (0, "Das Arbeitspaket ist fertig.".into()),
-            (1, "PAKET drei verschieben wir.".into()),
-        ],
+        &[(0, "Das Arbeitspaket ist fertig.".into()), (1, "PAKET drei verschieben wir.".into())],
     )
     .unwrap();
 
@@ -142,10 +139,7 @@ fn every_field_kind_is_searched_and_labelled() {
     let group = group_for(&results, mid);
     assert_eq!(group["count"], 6);
     assert_eq!(group["truncated"], false);
-    assert_eq!(
-        kinds(group),
-        ["title", "speaker", "segment", "summary", "takeaway", "action_item"]
-    );
+    assert_eq!(kinds(group), ["title", "speaker", "segment", "summary", "takeaway", "action_item"]);
 
     // Group header carries what the result list renders.
     assert_eq!(group["title"], "Paket Kickoff");
@@ -261,11 +255,8 @@ fn hits_per_meeting_are_capped_but_the_count_is_honest() {
         "speakers": {"SPEAKER_00": "Anna"},
         "segments": segments,
     });
-    store::atomic_write_json(
-        &app.ctx.paths.meetings_dir().join(format!("{mid}.json")),
-        &record,
-    )
-    .unwrap();
+    store::atomic_write_json(&app.ctx.paths.meetings_dir().join(format!("{mid}.json")), &record)
+        .unwrap();
 
     let results = search(&app, "arbeitspaket");
     let group = group_for(&results, mid);

@@ -50,7 +50,11 @@ fn main() {
         let probs = nemotron::Nemotron::load(&onnx, threads)
             .and_then(|mut m| m.probabilities(&samples))
             .expect("nemotron");
-        eprintln!("{} frames in {:.1}s", probs.len() / nemotron::SPEAKERS, t.elapsed().as_secs_f64());
+        eprintln!(
+            "{} frames in {:.1}s",
+            probs.len() / nemotron::SPEAKERS,
+            t.elapsed().as_secs_f64()
+        );
         let bytes: Vec<u8> = probs.iter().flat_map(|p| p.to_le_bytes()).collect();
         std::fs::write(dump, bytes).expect("write probs");
         return;
@@ -64,7 +68,8 @@ fn main() {
     let ctx = PipelineCtx { fake: false, config: &config, models_dir: &models_dir, ffmpeg: None };
     let t = Instant::now();
     let turns = native::diarize(&ctx, &wav, num_speakers, None, threads).expect("diarize");
-    let speakers: std::collections::BTreeSet<&str> = turns.iter().map(|t| t.speaker.as_str()).collect();
+    let speakers: std::collections::BTreeSet<&str> =
+        turns.iter().map(|t| t.speaker.as_str()).collect();
     eprintln!(
         "{} turns, {} speakers in {:.1}s",
         turns.len(),

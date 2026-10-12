@@ -92,9 +92,9 @@ pub fn create_meeting(
     record.insert("status".into(), json!("queued"));
     record.insert("error".into(), Value::Null);
     record.insert("num_speakers".into(), json!(num_speakers)); // -1 = auto-detect
-    // null = whole file; [[start, end], ...] = the spans to transcribe
-    // (seconds, original-media time), normalized at the API layer. Records
-    // from before this feature lack the key, which reads the same as null.
+                                                               // null = whole file; [[start, end], ...] = the spans to transcribe
+                                                               // (seconds, original-media time), normalized at the API layer. Records
+                                                               // from before this feature lack the key, which reads the same as null.
     record.insert(
         "ranges".into(),
         match ranges {
@@ -347,17 +347,11 @@ pub fn merge_speaker_names(
 ) -> Option<Record> {
     let _g = locks.meetings.lock().unwrap();
     let mut record = get_meeting_unlocked(paths, meeting_id)?;
-    let mut speakers = record
-        .get("speakers")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let mut speakers =
+        record.get("speakers").and_then(|v| v.as_object()).cloned().unwrap_or_default();
     let mut recognized: Vec<String> = as_string_vec(record.get("recognized"));
-    let voiceprints = record
-        .get("voiceprints")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let voiceprints =
+        record.get("voiceprints").and_then(|v| v.as_object()).cloned().unwrap_or_default();
 
     for (diarized_id, new_name) in names {
         let new_name = new_name.as_str().unwrap_or_default().trim().to_string();
@@ -456,11 +450,8 @@ pub fn reject_speaker(
     if !recognized.iter().any(|r| r == diarized_id) {
         return Err(StoreError::NotRecognized);
     }
-    let mut speakers = record
-        .get("speakers")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let mut speakers =
+        record.get("speakers").and_then(|v| v.as_object()).cloned().unwrap_or_default();
     let taken: Vec<String> =
         speakers.values().filter_map(|v| v.as_str().map(String::from)).collect();
     let mut n = 1;
@@ -474,10 +465,8 @@ pub fn reject_speaker(
         rename_in_notes(&mut record, &old_name, &new_name);
     }
     recognized.retain(|r| r != diarized_id);
-    let confirmed: Vec<String> = as_string_vec(record.get("confirmed"))
-        .into_iter()
-        .filter(|c| c != diarized_id)
-        .collect();
+    let confirmed: Vec<String> =
+        as_string_vec(record.get("confirmed")).into_iter().filter(|c| c != diarized_id).collect();
     record.insert("speakers".into(), Value::Object(speakers));
     record.insert("recognized".into(), json!(recognized));
     record.insert("confirmed".into(), json!(confirmed));
@@ -575,13 +564,14 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
         // keeps counting past the cap so `truncated` stays honest.
         let mut count = 0usize;
         let mut rows = 0usize;
-        let push = |hit: Value, n: usize, hits: &mut Vec<Value>, count: &mut usize, rows: &mut usize| {
-            *count += n;
-            *rows += 1;
-            if hits.len() < MAX_HITS_PER_MEETING {
-                hits.push(hit);
-            }
-        };
+        let push =
+            |hit: Value, n: usize, hits: &mut Vec<Value>, count: &mut usize, rows: &mut usize| {
+                *count += n;
+                *rows += 1;
+                if hits.len() < MAX_HITS_PER_MEETING {
+                    hits.push(hit);
+                }
+            };
         // 0 when the field doesn't match at all.
         let occurrences = |text: &str| re.find_iter(text).count();
 
@@ -602,7 +592,8 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
                 );
             }
         }
-        for (i, seg) in rec.get("segments").and_then(|v| v.as_array()).into_iter().flatten().enumerate()
+        for (i, seg) in
+            rec.get("segments").and_then(|v| v.as_array()).into_iter().flatten().enumerate()
         {
             let text = seg.get("text").and_then(|v| v.as_str()).unwrap_or("");
             let n = occurrences(text);
@@ -635,11 +626,18 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
         if let Some(summary) = rec.get("summary").and_then(|v| v.as_str()) {
             let n = occurrences(summary);
             if n > 0 {
-                push(json!({"kind": "summary", "text": summary}), n, &mut hits, &mut count, &mut rows);
+                push(
+                    json!({"kind": "summary", "text": summary}),
+                    n,
+                    &mut hits,
+                    &mut count,
+                    &mut rows,
+                );
             }
         }
         for (key, kind) in [("takeaways", "takeaway"), ("action_items", "action_item")] {
-            for (i, item) in rec.get(key).and_then(|v| v.as_array()).into_iter().flatten().enumerate()
+            for (i, item) in
+                rec.get(key).and_then(|v| v.as_array()).into_iter().flatten().enumerate()
             {
                 let Some(text) = item.as_str() else { continue };
                 let n = occurrences(text);

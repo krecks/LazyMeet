@@ -58,8 +58,14 @@ fn pre_history_meeting_gets_backfilled_v1_with_snapshot() {
     let old_summary = m["summary"].clone();
 
     // Simulate a meeting processed before version history existed.
-    store::update_meeting(&app.ctx.paths, &app.ctx.locks, &mid, false, obj(&[("versions", json!([]))]))
-        .unwrap();
+    store::update_meeting(
+        &app.ctx.paths,
+        &app.ctx.locks,
+        &mid,
+        false,
+        obj(&[("versions", json!([]))]),
+    )
+    .unwrap();
 
     api::reprocess_meeting(&app.ctx, &mid, "notes").unwrap();
     let m = app.wait_terminal(&mid);

@@ -36,11 +36,7 @@ fn python_written_meeting_loads_identically() {
     let fixture = include_str!("fixtures/python_meeting.json");
     let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
     let mid = record["id"].as_str().unwrap();
-    std::fs::write(
-        app.ctx.paths.meetings_dir().join(format!("{mid}.json")),
-        fixture,
-    )
-    .unwrap();
+    std::fs::write(app.ctx.paths.meetings_dir().join(format!("{mid}.json")), fixture).unwrap();
 
     let meeting = api::get_meeting(&app.ctx, mid).unwrap();
     assert_eq!(meeting["title"], "standup.mp4");
@@ -54,12 +50,7 @@ fn python_written_meeting_loads_identically() {
     assert_eq!(meeting["has_audio"], false); // no upload on disk
 
     // ...but survive an edit round-trip in the stored record.
-    api::patch_meeting(
-        &app.ctx,
-        mid,
-        &common::changes("title", json!("Ported Standup")),
-    )
-    .unwrap();
+    api::patch_meeting(&app.ctx, mid, &common::changes("title", json!("Ported Standup"))).unwrap();
     let stored = store::get_meeting(&app.ctx.paths, &app.ctx.locks, mid).unwrap();
     assert_eq!(stored["worker_pid"], 12345);
     assert_eq!(stored["voiceprints"]["SPEAKER_00"], json!([0.1, 0.2]));
@@ -71,11 +62,8 @@ fn python_written_speaker_library_matches() {
     // speakers.json written by Python: entries keep working for matching and
     // enrolment (sample append + centroid recompute).
     let app = TestApp::fake();
-    std::fs::write(
-        app.ctx.paths.speakers_file(),
-        include_str!("fixtures/python_speakers.json"),
-    )
-    .unwrap();
+    std::fs::write(app.ctx.paths.speakers_file(), include_str!("fixtures/python_speakers.json"))
+        .unwrap();
 
     let names = store::get_speaker_names(&app.ctx.paths, &app.ctx.locks);
     assert_eq!(names, ["Anna"]);
@@ -100,14 +88,13 @@ fn created_at_sorts_against_python_timestamps() {
     let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
     let mid = record["id"].as_str().unwrap();
     std::fs::write(app.ctx.paths.meetings_dir().join(format!("{mid}.json")), fixture).unwrap();
-    let ours = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "new.mp4", -1, None, None).unwrap();
+    let ours =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "new.mp4", -1, None, None).unwrap();
 
     // Same timestamp format (microseconds + +00:00 offset)...
     let py_ts = record["created_at"].as_str().unwrap();
     let rs_ts = ours["created_at"].as_str().unwrap();
-    let shape = |ts: &str| {
-        (ts.len(), ts.contains('T'), ts.ends_with("+00:00"), ts.contains('.'))
-    };
+    let shape = |ts: &str| (ts.len(), ts.contains('T'), ts.ends_with("+00:00"), ts.contains('.'));
     assert_eq!(shape(py_ts), shape(rs_ts), "python: {py_ts} rust: {rs_ts}");
 
     // ...and the new record (created later) lists first.

@@ -32,9 +32,9 @@ fn main() {
     // backends the kernels are loadable modules that must be found first.
     #[cfg(feature = "llama-dynamic-backends")]
     match std::env::var_os("LAZYMEET_LLM_BACKENDS_DIR") {
-        Some(dir) => llama_cpp_2::llama_backend::load_backends_from_path(
-            std::path::Path::new(&dir),
-        ),
+        Some(dir) => {
+            llama_cpp_2::llama_backend::load_backends_from_path(std::path::Path::new(&dir))
+        }
         None => llama_cpp_2::llama_backend::load_backends(),
     }
     let backend = LlamaBackend::init().expect("backend init");
@@ -45,14 +45,17 @@ fn main() {
     // A ~2k-token prompt of repeated fake transcript lines.
     let mut text = String::new();
     while text.len() < 60_000 {
-        text.push_str("Alice: We agreed to move the rollout to Thursday so QA can sign off first.\n");
-        text.push_str("Bob: The migration script still needs a dry run against the staging database.\n");
+        text.push_str(
+            "Alice: We agreed to move the rollout to Thursday so QA can sign off first.\n",
+        );
+        text.push_str(
+            "Bob: The migration script still needs a dry run against the staging database.\n",
+        );
     }
     let mut tokens = model.str_to_token(&text, AddBos::Always).expect("tokenize");
     tokens.truncate(2048);
 
-    let threads =
-        std::thread::available_parallelism().map(|n| n.get() as i32).unwrap_or(4).max(1);
+    let threads = std::thread::available_parallelism().map(|n| n.get() as i32).unwrap_or(4).max(1);
     let mut lctx = model
         .new_context(
             &backend,
@@ -74,8 +77,7 @@ fn main() {
     let prefill = t0.elapsed().as_secs_f64();
 
     // Short generation pass as the bandwidth-bound reference point.
-    let mut sampler =
-        LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::dist(42)]);
+    let mut sampler = LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::dist(42)]);
     let gen_n = 64usize;
     let mut n_cur = batch.n_tokens();
     let t1 = Instant::now();

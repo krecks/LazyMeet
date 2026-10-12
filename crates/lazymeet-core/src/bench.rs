@@ -41,8 +41,7 @@ pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
 
     let ctx = ctx.clone();
     std::thread::spawn(move || {
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&ctx, source)));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&ctx, source)));
         if let Err(_panic) = result {
             ctx.events.emit(
                 "benchmark-progress",
@@ -118,7 +117,13 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
             _ => "CPU",
         };
         emit(&rows, &format!("ONNX models on {label}…"));
-        match crate::pipeline::native::bench_onnx(&models_dir, threads, provider, &diar_model, &samples) {
+        match crate::pipeline::native::bench_onnx(
+            &models_dir,
+            threads,
+            provider,
+            &diar_model,
+            &samples,
+        ) {
             Ok(stage_rows) => {
                 for (stage, secs, audio_secs) in stage_rows {
                     rows.push(json!({
@@ -166,14 +171,13 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
 
     // Fastest backend per stage → a ready-to-apply config recommendation.
     let fastest_onnx = |stage: &str| -> &'static str {
-        let best = rows
-            .iter()
-            .filter(|r| r["stage"] == stage && r.get("error").is_none())
-            .min_by(|a, b| {
+        let best = rows.iter().filter(|r| r["stage"] == stage && r.get("error").is_none()).min_by(
+            |a, b| {
                 let a = a["seconds"].as_f64().unwrap_or(f64::MAX);
                 let b = b["seconds"].as_f64().unwrap_or(f64::MAX);
                 a.total_cmp(&b)
-            });
+            },
+        );
         match best.and_then(|r| r["backend"].as_str()) {
             Some("CoreML (ANE)") => "coreml",
             _ => "cpu",

@@ -31,12 +31,7 @@ fn title_rename_flows_everywhere() {
     assert_eq!(updated["filename"], "edit.mp4"); // original stays immutable
 
     let listed = api::list_meetings(&app.ctx);
-    let entry = listed
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|m| m["id"].as_str() == Some(mid))
-        .unwrap();
+    let entry = listed.as_array().unwrap().iter().find(|m| m["id"].as_str() == Some(mid)).unwrap();
     assert_eq!(entry["title"], "Weekly Standup");
 
     let (md, filename) = api::export_meeting(&app.ctx, mid).unwrap();
@@ -59,7 +54,8 @@ fn title_rejects_empty_and_too_long() {
 #[test]
 fn title_editable_while_processing() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busy.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busy.mp4", -1, None, None).unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,
@@ -77,7 +73,9 @@ fn title_editable_while_processing() {
 #[test]
 fn old_records_without_title_get_fallback() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "legacy.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "legacy.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     // Simulate a record from before titles existed.
     let path = app.ctx.paths.meetings_dir().join(format!("{mid}.json"));
@@ -88,12 +86,7 @@ fn old_records_without_title_get_fallback() {
 
     assert_eq!(api::get_meeting(&app.ctx, mid).unwrap()["title"], "legacy.mp4");
     let listed = api::list_meetings(&app.ctx);
-    let entry = listed
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|m| m["id"].as_str() == Some(mid))
-        .unwrap();
+    let entry = listed.as_array().unwrap().iter().find(|m| m["id"].as_str() == Some(mid)).unwrap();
     assert_eq!(entry["title"], "legacy.mp4");
 }
 
@@ -128,7 +121,9 @@ fn content_edit_on_done_meeting() {
 #[test]
 fn content_edit_blocked_while_processing_or_error() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "locked.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "locked.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     for status in ["queued", "summarizing", "error"] {
         store::update_meeting(
@@ -149,8 +144,9 @@ fn content_edit_blocked_while_processing_or_error() {
 fn patch_with_no_fields_is_422() {
     let app = TestApp::fake();
     let meeting = process_meeting(&app, "edit.mp4");
-    let err = api::patch_meeting(&app.ctx, meeting["id"].as_str().unwrap(), &serde_json::Map::new())
-        .unwrap_err();
+    let err =
+        api::patch_meeting(&app.ctx, meeting["id"].as_str().unwrap(), &serde_json::Map::new())
+            .unwrap_err();
     assert_eq!(err.code, 422);
 }
 
@@ -180,14 +176,10 @@ fn segment_speaker_reassignment() {
     let mid = meeting["id"].as_str().unwrap();
     let ids: Vec<String> = meeting["speakers"].as_object().unwrap().keys().cloned().collect();
     assert!(ids.len() >= 2, "fake pipeline should produce two speakers");
-    let other = if meeting["segments"][0]["speaker"].as_str() == Some(&ids[0]) {
-        &ids[1]
-    } else {
-        &ids[0]
-    };
+    let other =
+        if meeting["segments"][0]["speaker"].as_str() == Some(&ids[0]) { &ids[1] } else { &ids[0] };
 
-    let updated =
-        api::patch_segment(&app.ctx, mid, 0, &changes("speaker", json!(other))).unwrap();
+    let updated = api::patch_segment(&app.ctx, mid, 0, &changes("speaker", json!(other))).unwrap();
     assert_eq!(updated["segments"][0]["speaker"].as_str(), Some(other.as_str()));
     // speakers map and rename history stay intact
     assert_eq!(updated["speakers"], meeting["speakers"]);
@@ -207,8 +199,7 @@ fn segment_edit_error_cases() {
     assert_eq!(err.code, 422);
     let err = api::patch_segment(&app.ctx, mid, 0, &serde_json::Map::new()).unwrap_err();
     assert_eq!(err.code, 422);
-    let err =
-        api::patch_segment(&app.ctx, "nope", 0, &changes("text", json!("x"))).unwrap_err();
+    let err = api::patch_segment(&app.ctx, "nope", 0, &changes("text", json!("x"))).unwrap_err();
     assert_eq!(err.code, 404);
 }
 
@@ -216,7 +207,8 @@ fn segment_edit_error_cases() {
 fn segment_edit_blocked_while_processing() {
     let app = TestApp::fake();
     let record =
-        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busyseg.mp4", -1, None, None).unwrap();
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "busyseg.mp4", -1, None, None)
+            .unwrap();
     let mid = record["id"].as_str().unwrap();
     store::update_meeting(
         &app.ctx.paths,

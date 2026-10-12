@@ -77,7 +77,10 @@ fn main() {
     let ffmpeg = ffmpeg.or_else(find_ffmpeg);
     eprintln!("data:   {}", paths.data_dir.display());
     eprintln!("models: {}", paths.models_dir.display());
-    eprintln!("ffmpeg: {}", ffmpeg.as_deref().map(|p| p.display().to_string()).unwrap_or("NOT FOUND".into()));
+    eprintln!(
+        "ffmpeg: {}",
+        ffmpeg.as_deref().map(|p| p.display().to_string()).unwrap_or("NOT FOUND".into())
+    );
 
     let mut ctx = Ctx::new(
         paths,
@@ -87,7 +90,10 @@ fn main() {
     Arc::get_mut(&mut ctx).unwrap().ffmpeg = ffmpeg;
     ctx.paths.ensure_dirs().expect("could not create data dirs");
     if !models::is_ready(&ctx) {
-        eprintln!("models are missing under {} — run the app once or pass --models-dir", ctx.paths.models_dir.display());
+        eprintln!(
+            "models are missing under {} — run the app once or pass --models-dir",
+            ctx.paths.models_dir.display()
+        );
         std::process::exit(1);
     }
 

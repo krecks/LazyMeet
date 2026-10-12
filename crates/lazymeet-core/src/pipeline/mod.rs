@@ -347,7 +347,11 @@ mod native_impl {
     pub fn probe_media(_: &PipelineCtx, _: &Path) -> Result<MediaProbe, String> {
         unreachable!()
     }
-    pub fn compute_voiceprints(_: &PipelineCtx, _: &Path, _: &[Turn]) -> Result<Voiceprints, String> {
+    pub fn compute_voiceprints(
+        _: &PipelineCtx,
+        _: &Path,
+        _: &[Turn],
+    ) -> Result<Voiceprints, String> {
         unreachable!()
     }
     pub fn summarize(
@@ -449,13 +453,12 @@ pub fn consolidate_speakers(
         if alias.contains_key(a) || alias.contains_key(b) {
             continue;
         }
-        let (loser, winner) = if dur.get(a).copied().unwrap_or(0.0)
-            < dur.get(b).copied().unwrap_or(0.0)
-        {
-            (a, b)
-        } else {
-            (b, a)
-        };
+        let (loser, winner) =
+            if dur.get(a).copied().unwrap_or(0.0) < dur.get(b).copied().unwrap_or(0.0) {
+                (a, b)
+            } else {
+                (b, a)
+            };
         fold(&mut alias, &mut dur, &mut vp, loser, winner);
     }
 
@@ -468,8 +471,7 @@ pub fn consolidate_speakers(
         .collect();
     let mut dropped: std::collections::BTreeSet<String> = Default::default();
     if !cores.is_empty() {
-        let smalls: Vec<String> =
-            vp.keys().filter(|s| !cores.contains(s)).cloned().collect();
+        let smalls: Vec<String> = vp.keys().filter(|s| !cores.contains(s)).cloned().collect();
         for spk in smalls {
             // max(cores, key=cosine) — first max wins ties, cores in order.
             let mut best: Option<(&String, f64)> = None;

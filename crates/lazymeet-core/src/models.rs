@@ -92,7 +92,9 @@ fn pyannote_seg_spec() -> ModelSpec {
         "Diarization segmentation",
         env_or(
             "LAZYMEET_DIAR_SEG_URL",
-            format!("{REL}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"),
+            format!(
+                "{REL}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
+            ),
         ),
         "diarization_segmentation.onnx",
         &[("model.onnx", "diarization_segmentation.onnx")],
@@ -311,10 +313,7 @@ pub fn diar_catalog() -> Vec<CatalogEntry> {
                 "No limit on the number of speakers",
                 "Tunable with the speaker separation setting",
             ],
-            cons: vec![
-                "Mixes up or invents speakers more often",
-                "Less than half as fast",
-            ],
+            cons: vec!["Mixes up or invents speakers more often", "Less than half as fast"],
             spec: pyannote_seg_spec(),
         },
     ]
@@ -377,10 +376,7 @@ pub fn llm_catalog() -> Vec<CatalogEntry> {
             "LAZYMEET_LLM_2B_URL",
             "≈1.3 GB",
             "fast, light",
-            vec![
-                "Quick summaries with about 2 GB of memory",
-                "Clearly better notes than the 0.8B",
-            ],
+            vec!["Quick summaries with about 2 GB of memory", "Clearly better notes than the 0.8B"],
             vec![
                 "Takeaways stay brief — subtle decisions can be missed",
                 "Less reliable than the 4B in languages other than English",
@@ -507,11 +503,8 @@ pub fn status(ctx: &Ctx) -> Value {
             })
         })
         .collect();
-    let ready = if ctx.fake {
-        true
-    } else {
-        model_specs().iter().all(|s| marker_path(ctx, s).exists())
-    };
+    let ready =
+        if ctx.fake { true } else { model_specs().iter().all(|s| marker_path(ctx, s).exists()) };
     json!({
         "ready": ready,
         "state": if ready { "ready" } else { prog.state.as_str() },
@@ -736,9 +729,11 @@ pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
     emit_throttled(ctx, "models-progress", models_status(ctx), true);
     let ctx = ctx.clone();
     std::thread::spawn(move || {
-        let result = ctx.paths.ensure_dirs().map_err(|e| e.to_string()).and_then(|_| {
-            download_one(&ctx, &spec, "models-progress")
-        });
+        let result = ctx
+            .paths
+            .ensure_dirs()
+            .map_err(|e| e.to_string())
+            .and_then(|_| download_one(&ctx, &spec, "models-progress"));
         if let Err(e) = result {
             let mut prog = ctx.models.progress.lock().unwrap();
             prog.items.entry(spec.name.clone()).or_default().error = Some(e);
@@ -803,12 +798,8 @@ fn fetch(
     tmp: &std::path::Path,
     offset: u64,
 ) -> Result<u64, String> {
-    let resp = ureq::get(url)
-        .set("User-Agent", "LazyMeet")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let total: u64 =
-        resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let resp = ureq::get(url).set("User-Agent", "LazyMeet").call().map_err(|e| e.to_string())?;
+    let total: u64 = resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0);
     set_item_progress(ctx, &spec.name, offset, offset + total);
 
     let mut reader = resp.into_reader();

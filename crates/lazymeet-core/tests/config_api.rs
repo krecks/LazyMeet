@@ -176,8 +176,7 @@ fn onnx_providers_default_to_cpu_and_validate() {
 
     let err = api::put_config(&app.ctx, &obj(&[("DIAR_PROVIDER", json!("cuda"))])).unwrap_err();
     assert_eq!(err.code, 422);
-    let err =
-        api::put_config(&app.ctx, &obj(&[("SUMMARY_PROVIDER", json!("npu"))])).unwrap_err();
+    let err = api::put_config(&app.ctx, &obj(&[("SUMMARY_PROVIDER", json!("npu"))])).unwrap_err();
     assert_eq!(err.code, 422);
     // CoreML is no longer compiled in: rejected on every platform, and a
     // value saved by an older version reads as the CPU.
@@ -194,7 +193,8 @@ fn onnx_providers_default_to_cpu_and_validate() {
 #[test]
 fn atomic_writes_leave_no_temp_files() {
     let app = TestApp::fake();
-    let record = store::create_meeting(&app.ctx.paths, &app.ctx.locks, "tmp.mp4", -1, None, None).unwrap();
+    let record =
+        store::create_meeting(&app.ctx.paths, &app.ctx.locks, "tmp.mp4", -1, None, None).unwrap();
     store::delete_meeting(&app.ctx.paths, &app.ctx.locks, record["id"].as_str().unwrap());
     let leftovers: Vec<_> = std::fs::read_dir(app.ctx.paths.meetings_dir())
         .unwrap()

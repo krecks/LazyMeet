@@ -44,16 +44,17 @@ pub fn dispatch(ctx: &Arc<Ctx>, meeting_id: String, job: Job) {
 
 /// Queue a notes/transcription re-run on an existing meeting: mark it queued
 /// (with the `rejob` marker sweep_orphans uses after a crash), emit, dispatch.
-pub fn queue_rejob(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str, job: Job) -> Option<store::Record> {
+pub fn queue_rejob(
+    ctx: &Arc<Ctx>,
+    meeting_id: &str,
+    mode: &str,
+    job: Job,
+) -> Option<store::Record> {
     let record = update_and_emit(
         ctx,
         meeting_id,
         false,
-        obj(&[
-            ("status", json!("queued")),
-            ("error", Value::Null),
-            ("rejob", json!(mode)),
-        ]),
+        obj(&[("status", json!("queued")), ("error", Value::Null), ("rejob", json!(mode))]),
     )?;
     dispatch(ctx, meeting_id.to_string(), job);
     Some(record)
@@ -75,10 +76,7 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
         while let Some((meeting_id, job)) = queue.pop_front() {
             // Skip entries deleted while they waited.
             let record = store::get_meeting(&ctx.paths, &ctx.locks, &meeting_id);
-            let queued = record
-                .as_ref()
-                .and_then(|r| r.get("status"))
-                .and_then(|v| v.as_str())
+            let queued = record.as_ref().and_then(|r| r.get("status")).and_then(|v| v.as_str())
                 == Some("queued");
             if queued {
                 *active = Some(meeting_id.clone());
@@ -128,10 +126,7 @@ fn start_worker(ctx: &Arc<Ctx>, meeting_id: String, job: Job) {
                     &ctx,
                     &meeting_id,
                     false,
-                    obj(&[
-                        ("status", json!("error")),
-                        ("error", json!("processing crashed")),
-                    ]),
+                    obj(&[("status", json!("error")), ("error", json!("processing crashed"))]),
                 );
             }
         }
@@ -196,10 +191,7 @@ pub fn sweep_orphans(ctx: &Arc<Ctx>) {
             ctx,
             &id,
             false,
-            obj(&[
-                ("status", json!("error")),
-                ("error", json!("processing was interrupted")),
-            ]),
+            obj(&[("status", json!("error")), ("error", json!("processing was interrupted"))]),
         );
     }
 }
@@ -228,10 +220,7 @@ fn update_and_emit(
     payload.insert("id".into(), json!(meeting_id));
     payload.insert("status".into(), json!(status));
     if status == "done" || status == "error" {
-        payload.insert(
-            "meeting".into(),
-            Value::Object(store::public_meeting(&ctx.paths, &record)),
-        );
+        payload.insert("meeting".into(), Value::Object(store::public_meeting(&ctx.paths, &record)));
     }
     ctx.events.emit("meeting-updated", Value::Object(payload));
     Some(record)
@@ -262,11 +251,8 @@ fn versions_with(
     summary_model: Value,
     snapshot: Value,
 ) -> Value {
-    let mut versions = record
-        .get("versions")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let mut versions =
+        record.get("versions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if versions.is_empty() && action != "processed" {
         versions.push(json!({
             "v": 1,
@@ -312,9 +298,13 @@ pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
     };
 
     let result = match job {
-        Job::Process { upload } => run_full(ctx, meeting_id, &pctx, &config, &record, upload, "processed"),
+        Job::Process { upload } => {
+            run_full(ctx, meeting_id, &pctx, &config, &record, upload, "processed")
+        }
         Job::Retranscribe => match store::audio_path(&ctx.paths, &record) {
-            Some(audio) => run_full(ctx, meeting_id, &pctx, &config, &record, &audio, "transcription"),
+            Some(audio) => {
+                run_full(ctx, meeting_id, &pctx, &config, &record, &audio, "transcription")
+            }
             None => Err("the recording is no longer on disk".into()),
         },
         Job::Resummarize => resummarize(ctx, meeting_id, &pctx, &config, &record),
@@ -325,11 +315,7 @@ pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
             ctx,
             meeting_id,
             false,
-            obj(&[
-                ("status", json!("error")),
-                ("error", json!(exc)),
-                ("rejob", Value::Null),
-            ]),
+            obj(&[("status", json!("error")), ("error", json!(exc)), ("rejob", Value::Null)]),
         );
     }
 }
@@ -368,11 +354,7 @@ fn run_full(
     // retry so playback is never lost. (A re-transcription's source is the
     // kept audio itself — never a video, so none of this triggers.)
     let is_video = !crate::config::is_audio_file(upload_path);
-    let playback = ctx
-        .paths
-        .uploads_dir()
-        .join(meeting_id)
-        .join(crate::config::PLAYBACK_FILENAME);
+    let playback = ctx.paths.uploads_dir().join(meeting_id).join(crate::config::PLAYBACK_FILENAME);
     let want_playback = config.keep_audio() && is_video;
     pipeline::extract_audio(pctx, upload_path, &wav, want_playback.then_some(&*playback))?;
     if is_video && (!config.keep_audio() || playback.is_file()) {
@@ -380,15 +362,10 @@ fn run_full(
     }
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("transcribing"))]));
-    let (segments, turns) = pipeline::transcribe_and_diarize(
-        pctx,
-        &wav,
-        num_speakers,
-        ranges.as_deref(),
-        || {
+    let (segments, turns) =
+        pipeline::transcribe_and_diarize(pctx, &wav, num_speakers, ranges.as_deref(), || {
             update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
-        },
-    )?;
+        })?;
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
     let voiceprints = pipeline::compute_voiceprints(pctx, &wav, &turns)?;
@@ -502,11 +479,7 @@ fn resummarize(
     if merged.is_empty() {
         return Err("there is no transcript to summarize".into());
     }
-    let speakers = record
-        .get("speakers")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let speakers = record.get("speakers").and_then(|v| v.as_object()).cloned().unwrap_or_default();
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("summarizing"))]));
     let result = pipeline::summarize(pctx, &merged, &speakers)?;

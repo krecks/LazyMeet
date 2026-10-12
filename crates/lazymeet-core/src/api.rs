@@ -198,9 +198,8 @@ pub fn create_meeting(
     let upload_dir = ctx.paths.uploads_dir().join(&id);
     std::fs::create_dir_all(&upload_dir)?;
     let dest = upload_dir.join(&filename);
-    std::fs::copy(src, &dest).map_err(|e| {
-        ApiError::internal(format!("could not copy the recording: {e}"))
-    })?;
+    std::fs::copy(src, &dest)
+        .map_err(|e| ApiError::internal(format!("could not copy the recording: {e}")))?;
     jobs::dispatch(ctx, id.clone(), jobs::Job::Process { upload: dest });
     Ok(json!({"id": id}))
 }
@@ -278,14 +277,19 @@ pub fn reprocess_meeting(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str) -> ApiRes
 }
 
 pub fn list_meetings(ctx: &Ctx) -> Value {
-    Value::Array(store::list_meetings(&ctx.paths, &ctx.locks).into_iter().map(Value::Object).collect())
+    Value::Array(
+        store::list_meetings(&ctx.paths, &ctx.locks).into_iter().map(Value::Object).collect(),
+    )
 }
 
 /// Literal, case-insensitive search over every meeting on disk. An empty query
 /// is a legitimate empty result, not a validation error.
 pub fn search_meetings(ctx: &Ctx, query: &str) -> Value {
     Value::Array(
-        store::search_meetings(&ctx.paths, &ctx.locks, query).into_iter().map(Value::Object).collect(),
+        store::search_meetings(&ctx.paths, &ctx.locks, query)
+            .into_iter()
+            .map(Value::Object)
+            .collect(),
     )
 }
 
@@ -403,11 +407,7 @@ pub fn patch_segment(
 /// (the frontend's search & replace). Unlike `patch_segment`, an edit may
 /// leave a segment empty: replacing a phrase with nothing is legitimate, and
 /// the segment keeps its speaker and timestamps.
-pub fn patch_segments(
-    ctx: &Ctx,
-    meeting_id: &str,
-    edits: &[(usize, String)],
-) -> ApiResult<Value> {
+pub fn patch_segments(ctx: &Ctx, meeting_id: &str, edits: &[(usize, String)]) -> ApiResult<Value> {
     if edits.is_empty() {
         return Err(ApiError::invalid("no segments to update"));
     }
@@ -420,7 +420,11 @@ pub fn patch_segments(
     Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
 }
 
-pub fn rename_speakers(ctx: &Ctx, meeting_id: &str, names: &Map<String, Value>) -> ApiResult<Value> {
+pub fn rename_speakers(
+    ctx: &Ctx,
+    meeting_id: &str,
+    names: &Map<String, Value>,
+) -> ApiResult<Value> {
     let updated = store::merge_speaker_names(&ctx.paths, &ctx.locks, meeting_id, names)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;
     Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
@@ -562,17 +566,22 @@ fn to_markdown(record: &store::Record) -> String {
         .or_else(|| record.get("filename").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
         .unwrap_or("Meeting");
     out.push_str(&format!("# {title}\n\n"));
-    if let Some(summary) = record.get("summary").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(summary) = record.get("summary").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    {
         out.push_str(&format!("## Summary\n\n{summary}\n\n"));
     }
-    if let Some(takeaways) = record.get("takeaways").and_then(|v| v.as_array()).filter(|a| !a.is_empty()) {
+    if let Some(takeaways) =
+        record.get("takeaways").and_then(|v| v.as_array()).filter(|a| !a.is_empty())
+    {
         out.push_str("## Key takeaways\n\n");
         for t in takeaways {
             out.push_str(&format!("- {}\n", t.as_str().unwrap_or_default()));
         }
         out.push('\n');
     }
-    if let Some(items) = record.get("action_items").and_then(|v| v.as_array()).filter(|a| !a.is_empty()) {
+    if let Some(items) =
+        record.get("action_items").and_then(|v| v.as_array()).filter(|a| !a.is_empty())
+    {
         out.push_str("## Action items\n\n");
         for a in items {
             out.push_str(&format!("- [ ] {}\n", a.as_str().unwrap_or_default()));
@@ -583,10 +592,8 @@ fn to_markdown(record: &store::Record) -> String {
     if let Some(segments) = record.get("segments").and_then(|v| v.as_array()) {
         for seg in segments {
             let spk_id = seg.get("speaker").and_then(|v| v.as_str()).unwrap_or("");
-            let name = speakers
-                .and_then(|m| m.get(spk_id))
-                .and_then(|v| v.as_str())
-                .unwrap_or(spk_id);
+            let name =
+                speakers.and_then(|m| m.get(spk_id)).and_then(|v| v.as_str()).unwrap_or(spk_id);
             let start = seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let text = seg.get("text").and_then(|v| v.as_str()).unwrap_or("");
             out.push_str(&format!("**{name}** [{}]: {text}\n\n", fmt_ts(start)));

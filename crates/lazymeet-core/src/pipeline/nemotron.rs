@@ -98,7 +98,8 @@ impl Nemotron {
             let cached_rows = cached.len() / HIDDEN;
             // Cached frames are always valid; a chunk frame is valid when its
             // first spectrogram frame is (`attention_mask[:, ::8]`).
-            let mask: Vec<bool> = std::iter::repeat(true).take(cached_rows)
+            let mask: Vec<bool> = std::iter::repeat(true)
+                .take(cached_rows)
                 .chain((start..lookahead_end).map(|e| e * SUBSAMPLING < mel.valid))
                 .collect();
 
@@ -116,7 +117,8 @@ impl Nemotron {
                     ).map_err(ort_err)?,
                 ])
                 .map_err(ort_err)?;
-            let (_, step_logits) = outputs["logits"].try_extract_tensor::<f32>().map_err(ort_err)?;
+            let (_, step_logits) =
+                outputs["logits"].try_extract_tensor::<f32>().map_err(ort_err)?;
             let (_, chunk_embeds) =
                 outputs["chunk_embeds"].try_extract_tensor::<f32>().map_err(ort_err)?;
             if step_logits.len() != mask.len() * SUBSAMPLING * SPEAKERS
@@ -130,7 +132,8 @@ impl Nemotron {
                 self.silence = silence.to_vec();
             }
 
-            let kept = cached_rows * SUBSAMPLING * SPEAKERS..(cached_rows + end - start) * SUBSAMPLING * SPEAKERS;
+            let kept = cached_rows * SUBSAMPLING * SPEAKERS
+                ..(cached_rows + end - start) * SUBSAMPLING * SPEAKERS;
             logits.extend_from_slice(&step_logits[kept]);
 
             let mut input = cached;
@@ -303,7 +306,14 @@ impl SpeakerCache {
     /// input (cache, FIFO, chunk, look-ahead), `logits` its logits at the
     /// spectrogram rate, `mask` its valid frames; only the `chunk_rows`
     /// chunk frames join the FIFO — the look-ahead is fed again next step.
-    fn update(&mut self, input: &[f32], logits: &[f32], mask: &[bool], chunk_rows: usize, silence: &[f32]) {
+    fn update(
+        &mut self,
+        input: &[f32],
+        logits: &[f32],
+        mask: &[bool],
+        chunk_rows: usize,
+        silence: &[f32],
+    ) {
         let cache_rows = self.embeds.len() / HIDDEN;
         let fifo_rows = self.fifo.len() / HIDDEN;
         let probs = pool_probs(logits, mask);
@@ -421,7 +431,12 @@ fn compress(embeds: &[f32], probs: &[f32], silence: &[f32]) -> (Vec<f32>, Vec<f3
         *v += LATEST_FRAMES_BOOST;
     }
     let log_half = 0.5f32.ln();
-    boost(&mut scores, frames, (BUDGET as f32 * STRONG_BOOST_RATE).floor() as usize, -2.0 * log_half);
+    boost(
+        &mut scores,
+        frames,
+        (BUDGET as f32 * STRONG_BOOST_RATE).floor() as usize,
+        -2.0 * log_half,
+    );
     boost(&mut scores, frames, (BUDGET as f32 * WEAK_BOOST_RATE).floor() as usize, -log_half);
 
     // Speaker-major flat index over the frames plus the silence slots, which

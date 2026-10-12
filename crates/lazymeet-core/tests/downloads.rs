@@ -124,7 +124,11 @@ fn first_run_download_end_to_end() {
 
     let deadline = Instant::now() + Duration::from_secs(20);
     while !models::is_ready(&app.ctx) {
-        assert!(Instant::now() < deadline, "downloads never finished: {:?}", models::status(&app.ctx));
+        assert!(
+            Instant::now() < deadline,
+            "downloads never finished: {:?}",
+            models::status(&app.ctx)
+        );
         std::thread::sleep(Duration::from_millis(25));
     }
 
@@ -148,10 +152,7 @@ fn first_run_download_end_to_end() {
     // No temp/staging leftovers.
     for entry in std::fs::read_dir(m).unwrap().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        assert!(
-            !name.ends_with(".download") && !name.ends_with(".part"),
-            "leftover {name}"
-        );
+        assert!(!name.ends_with(".download") && !name.ends_with(".part"), "leftover {name}");
     }
 
     // Progress events were emitted, ending in a ready state.
@@ -164,7 +165,10 @@ fn first_run_download_end_to_end() {
 fn qwen3_asr_archive_lands_where_the_recognizer_looks() {
     let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let port = spawn_server();
-    std::env::set_var("LAZYMEET_QWEN3_ASR_URL", format!("http://127.0.0.1:{port}/qwen3-asr.tar.bz2"));
+    std::env::set_var(
+        "LAZYMEET_QWEN3_ASR_URL",
+        format!("http://127.0.0.1:{port}/qwen3-asr.tar.bz2"),
+    );
     let _guard = EnvGuard(vec!["LAZYMEET_QWEN3_ASR_URL"]);
 
     let app = TestApp::with_fake(false);

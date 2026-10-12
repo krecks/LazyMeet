@@ -10,10 +10,7 @@ use lazymeet_core::{api, store};
 fn data_info_shape() {
     let app = TestApp::fake();
     let data = api::get_data_info(&app.ctx);
-    assert_eq!(
-        data["data_dir"].as_str().unwrap(),
-        app.ctx.paths.data_dir.to_str().unwrap()
-    );
+    assert_eq!(data["data_dir"].as_str().unwrap(), app.ctx.paths.data_dir.to_str().unwrap());
     for key in ["meetings_bytes", "uploads_bytes", "models_bytes", "total_bytes"] {
         assert!(data[key].as_u64().is_some(), "{key} missing or negative");
     }

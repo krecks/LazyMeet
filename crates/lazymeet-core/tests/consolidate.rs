@@ -26,8 +26,14 @@ fn oversplit_labels_merge_to_real_speakers() {
         ("B", &[0.0, 1.0, 0.0]),
         ("N", &[0.0, 0.0, 1.0]),
     ]);
-    let turns = vec![turn("A", 0.0, 100.0), turn("B", 100.0, 50.0), turn("A2", 150.0, 10.0), turn("N", 160.0, 1.0)];
-    let (out_turns, out_vp) = consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
+    let turns = vec![
+        turn("A", 0.0, 100.0),
+        turn("B", 100.0, 50.0),
+        turn("A2", 150.0, 10.0),
+        turn("N", 160.0, 1.0),
+    ];
+    let (out_turns, out_vp) =
+        consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
     let keys: Vec<&str> = out_vp.keys().map(String::as_str).collect();
     assert_eq!(keys, ["A", "B"]);
     let speakers: Vec<&str> = out_turns.iter().map(|t| t.speaker.as_str()).collect();
@@ -37,13 +43,10 @@ fn oversplit_labels_merge_to_real_speakers() {
 #[test]
 fn tiny_speaker_folds_into_closest_main_speaker() {
     // cos(C, A) = 0.5 — below the merge threshold but above the tiny floor.
-    let vp = vp(&[
-        ("A", &[1.0, 0.0, 0.0]),
-        ("B", &[0.0, 1.0, 0.0]),
-        ("C", &[0.5, 0.0, 0.8660254]),
-    ]);
+    let vp = vp(&[("A", &[1.0, 0.0, 0.0]), ("B", &[0.0, 1.0, 0.0]), ("C", &[0.5, 0.0, 0.8660254])]);
     let turns = vec![turn("A", 0.0, 60.0), turn("B", 60.0, 60.0), turn("C", 120.0, 8.0)];
-    let (out_turns, out_vp) = consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
+    let (out_turns, out_vp) =
+        consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
     let keys: Vec<&str> = out_vp.keys().map(String::as_str).collect();
     assert_eq!(keys, ["A", "B"]);
     let speakers: Vec<&str> = out_turns.iter().map(|t| t.speaker.as_str()).collect();
@@ -55,7 +58,8 @@ fn quiet_distinct_speaker_survives() {
     // 10 s of a genuinely different voice must not be folded or dropped.
     let vp = vp(&[("A", &[1.0, 0.0, 0.0]), ("B", &[0.0, 1.0, 0.0])]);
     let turns = vec![turn("A", 0.0, 60.0), turn("B", 60.0, 10.0)];
-    let (out_turns, out_vp) = consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
+    let (out_turns, out_vp) =
+        consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
     assert_eq!(out_vp.len(), 2);
     assert_eq!(out_turns.len(), 2);
 }
@@ -65,7 +69,8 @@ fn short_clip_without_main_speaker_kept_as_is() {
     // Both under MIN_SPEAKER_SECONDS: no main speaker, nothing gets touched.
     let vp = vp(&[("A", &[1.0, 0.0, 0.0]), ("B", &[0.0, 1.0, 0.0])]);
     let turns = vec![turn("A", 0.0, 8.0), turn("B", 8.0, 6.0)];
-    let (out_turns, out_vp) = consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
+    let (out_turns, out_vp) =
+        consolidate_speakers(&turns, &vp, MERGE_THRESHOLD, MIN_SPEAKER_SECONDS);
     assert_eq!(out_vp.len(), 2);
     assert_eq!(out_turns.len(), 2);
 }
