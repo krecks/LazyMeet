@@ -152,13 +152,19 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
     }
     for (gpu, label) in llm_variants {
         emit(&rows, &format!("Summarizer LLM on {label}…"));
-        match crate::pipeline::native::bench_llm(&models_dir, threads, gpu, 384) {
-            Ok((load_s, tok_per_s)) => rows.push(json!({
+        // A 2048-token transcript (~10 minutes of meeting) and a 384-token
+        // answer: the time column is reading plus answering, which is what a
+        // summary costs; load time is excluded (it mostly measures the disk).
+        match crate::pipeline::native::bench_llm(&models_dir, threads, gpu, 2048, 384) {
+            Ok(b) => rows.push(json!({
                 "stage": "Summarizer LLM",
                 "backend": label,
-                "seconds": (load_s * 10.0).round() / 10.0,
-                "speed": format!("{tok_per_s:.1} tokens/s"),
-                "tps": tok_per_s,
+                "seconds": ((b.prefill_secs + b.generate_secs) * 10.0).round() / 10.0,
+                "speed": format!(
+                    "reads {:.0} tokens/s, writes {:.1} tokens/s",
+                    b.prompt_tokens as f64 / b.prefill_secs,
+                    b.generated_tokens as f64 / b.generate_secs,
+                ),
             })),
             Err(e) => rows.push(json!({
                 "stage": "Summarizer LLM",
@@ -183,13 +189,13 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
             _ => "cpu",
         }
     };
-    // The LLM winner is generation throughput, not load time.
+    // The LLM winner is the faster summary workload (reading + answering).
     let fastest_llm_gpu = rows
         .iter()
         .filter(|r| r["stage"] == "Summarizer LLM" && r.get("error").is_none())
-        .max_by(|a, b| {
-            let a = a["tps"].as_f64().unwrap_or(0.0);
-            let b = b["tps"].as_f64().unwrap_or(0.0);
+        .min_by(|a, b| {
+            let a = a["seconds"].as_f64().unwrap_or(f64::MAX);
+            let b = b["seconds"].as_f64().unwrap_or(f64::MAX);
             a.total_cmp(&b)
         })
         .map(|r| r["backend"] == "Metal GPU")

@@ -476,17 +476,21 @@
             audio length, so more minutes only add waiting. The summarizer test
             always uses the fixed prompt.</p>
           <ul class="muted">
-            <li><strong>Transcription</strong> — the first 120&thinsp;s of the
-              audio through the speech-to-text model (VAD bypassed, one warm-up
-              pass first).</li>
+            <li><strong>Transcription</strong> — up to 5 minutes of audio
+              through the speech-to-text model in 10-second pieces, decoded in
+              parallel the way a meeting is (VAD bypassed, one warm-up pass
+              first).</li>
             <li><strong>Diarization</strong> — a full who-spoke-when pass over
               up to 5 minutes of audio with the selected speaker separation
               model.</li>
             <li><strong>Speaker ID</strong> — 40 voiceprint extractions from
               5-second windows, the same way meeting voiceprints are built.</li>
-            <li><strong>Summarizer LLM</strong> — loads the summary model and
-              generates 384 tokens from a fixed prompt; the time column is the
-              model load, the speed column is generation throughput.</li>
+            <li><strong>Summarizer LLM</strong> — the summary model reads a fixed
+              2048-token transcript (about 10 minutes of meeting) with the real
+              summary instructions and writes up to 384 tokens. The time column
+              is reading plus writing; the speed column shows both rates.
+              Reading dominates real summaries and is where the GPU gains
+              most.</li>
             <li><strong>CPU threads</strong> — all CPU stages use the thread
               count from Settings → CPU threads (default: about 75&thinsp;% of
               the machine's cores); the run shows the exact number used.</li>

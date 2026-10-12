@@ -9,7 +9,8 @@
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Condvar, Mutex, OnceLock};
 
 use serde_json::{Map, Value};
 
@@ -243,7 +244,9 @@ struct Recognizer {
 }
 
 impl Recognizer {
-    fn transcribe(&mut self, samples: &[f32]) -> String {
+    /// Safe to call from several threads at once: every call decodes its own
+    /// stream, and sherpa-onnx's recognizers keep no per-decode state.
+    fn transcribe(&self, samples: &[f32]) -> String {
         let stream = self.inner.create_stream();
         if let Some(language) = self.language {
             stream.set_option("language", language);
@@ -364,7 +367,10 @@ fn new_vad(ctx: &PipelineCtx) -> Result<VoiceActivityDetector, String> {
             window_size: 512,
         },
         sample_rate: SAMPLE_RATE as i32,
-        num_threads: ctx.config.num_threads() as i32,
+        // Silero runs on 32 ms windows — too small to split across cores;
+        // extra threads only add synchronization (5.3 s vs 4.2 s at 7 vs 1
+        // for a 28.5-minute recording).
+        num_threads: 1,
         provider: Some(ctx.config.asr_provider()),
         ..Default::default()
     };
@@ -372,68 +378,209 @@ fn new_vad(ctx: &PipelineCtx) -> Result<VoiceActivityDetector, String> {
         .ok_or_else(|| "could not load the VAD model".into())
 }
 
-/// Feed one contiguous sample span through VAD + recognizer, appending
-/// segments stamped in original-media time (`offset` = span start, seconds).
-fn transcribe_span(
+/// One VAD-cut speech segment waiting for the recognizer; `start` is in
+/// original-media seconds.
+struct Utterance {
+    start: f64,
+    samples: Vec<f32>,
+}
+
+/// Feed one contiguous sample span through VAD, queueing its utterances
+/// stamped in original-media time (`offset` = span start, seconds). Returns
+/// false once nobody is listening any more.
+fn cut_span(
     vad: &VoiceActivityDetector,
-    recognizer: &mut Recognizer,
     samples: &[f32],
     offset: f64,
-    out: &mut Vec<Segment>,
-) {
-    let drain = |recognizer: &mut Recognizer, out: &mut Vec<Segment>| {
+    tx: &SyncSender<Utterance>,
+) -> bool {
+    let drain = || {
         while let Some(seg) = vad.front() {
-            let start = offset + seg.start() as f64 / SAMPLE_RATE as f64;
-            let end = start + seg.samples().len() as f64 / SAMPLE_RATE as f64;
-            let text = recognizer.transcribe(seg.samples());
+            let utterance = Utterance {
+                start: offset + seg.start() as f64 / SAMPLE_RATE as f64,
+                samples: seg.samples().to_vec(),
+            };
+            vad.pop();
+            if tx.send(utterance).is_err() {
+                return false;
+            }
+        }
+        true
+    };
+    for chunk in samples.chunks(512) {
+        vad.accept_waveform(chunk);
+        if !drain() {
+            return false;
+        }
+    }
+    vad.flush();
+    drain()
+}
+
+/// A transcription in progress. The ASR models are utterance-level, so
+/// Silero VAD cuts the audio into speech segments on its own thread, and any
+/// number of workers (`work`) decode them concurrently with the one shared
+/// recognizer.
+///
+/// Workers decode with a single ONNX thread each: segments are independent,
+/// and one-thread-per-segment parallelism scales where onnxruntime's
+/// intra-op threading does not — Parakeet on a 28.5-minute recording took
+/// 142 s at 4 threads, 147 s at 7, and 67 s as 8 one-thread workers (M3
+/// Pro), with identical output. Whisper and Qwen3-ASR gain the same way.
+pub struct Transcription {
+    recognizer: Recognizer,
+    queue: Mutex<Receiver<Utterance>>,
+    /// Utterances taken off the queue whose decode hasn't finished yet.
+    busy: Mutex<usize>,
+    idle: Condvar,
+    segments: Mutex<Vec<Segment>>,
+}
+
+impl Transcription {
+    /// Load the recognizer and VAD; returns the transcription plus the VAD
+    /// job, which the caller runs on its own thread to feed the workers.
+    /// With `ranges`, only the selected spans are fed — each through a fresh
+    /// VAD (sherpa's VAD has no reset API, and a fresh one makes the sample
+    /// counter unambiguous) — so no utterance can straddle a splice.
+    pub fn start(
+        ctx: &PipelineCtx,
+        wav: &Path,
+        ranges: Option<&[(f64, f64)]>,
+    ) -> Result<(Self, impl FnOnce() + Send + 'static), String> {
+        let samples = load_wav(wav)?;
+        let recognizer = load_recognizer(ctx, 1)?;
+        let spans = match ranges {
+            Some(rs) => sample_ranges(rs, samples.len()),
+            None => vec![(0, samples.len())],
+        };
+        let vads = spans.iter().map(|_| new_vad(ctx)).collect::<Result<Vec<_>, _>>()?;
+        // Bounded so the VAD, which runs far ahead of the recognizers, doesn't
+        // hold a second copy of all the speech in memory.
+        let (tx, rx) = mpsc::sync_channel(64);
+        let cut = move || {
+            for (vad, (a, b)) in vads.iter().zip(spans) {
+                if !cut_span(vad, &samples[a..b], a as f64 / SAMPLE_RATE as f64, &tx) {
+                    return;
+                }
+            }
+        };
+        let transcription = Self {
+            recognizer,
+            queue: Mutex::new(rx),
+            busy: Mutex::new(0),
+            idle: Condvar::new(),
+            segments: Mutex::new(Vec::new()),
+        };
+        Ok((transcription, cut))
+    }
+
+    /// Decode queued utterances until the VAD is done and the queue is empty.
+    /// Workers can join at any time.
+    pub fn work(&self) {
+        loop {
+            let utterance = {
+                let queue = self.queue.lock().unwrap();
+                match queue.recv() {
+                    // Counted while the queue is still locked, so once the
+                    // queue reports empty-and-closed every taken utterance
+                    // is visible in `busy`.
+                    Ok(u) => {
+                        *self.busy.lock().unwrap() += 1;
+                        u
+                    }
+                    Err(_) => return,
+                }
+            };
+            let text = self.recognizer.transcribe(&utterance.samples);
             let text = text.trim();
             if !text.is_empty() {
-                out.push(Segment {
-                    start: round3(start),
+                let end = utterance.start + utterance.samples.len() as f64 / SAMPLE_RATE as f64;
+                self.segments.lock().unwrap().push(Segment {
+                    start: round3(utterance.start),
                     end: round3(end),
                     text: text.to_string(),
                 });
             }
-            vad.pop();
+            let mut busy = self.busy.lock().unwrap();
+            *busy -= 1;
+            if *busy == 0 {
+                self.idle.notify_all();
+            }
         }
-    };
-    for chunk in samples.chunks(512) {
-        vad.accept_waveform(chunk);
-        drain(recognizer, out);
     }
-    vad.flush();
-    drain(recognizer, out);
+
+    /// Run `workers` workers to completion, wait out any that joined from
+    /// elsewhere, and return the segments in time order.
+    pub fn finish(&self, workers: usize) -> Vec<Segment> {
+        std::thread::scope(|s| {
+            for _ in 0..workers.max(1) {
+                s.spawn(|| self.work());
+            }
+        });
+        let mut busy = self.busy.lock().unwrap();
+        while *busy > 0 {
+            busy = self.idle.wait(busy).unwrap();
+        }
+        drop(busy);
+        let mut segments = std::mem::take(&mut *self.segments.lock().unwrap());
+        segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+        segments
+    }
 }
 
-/// The ASR models are utterance-level, so Silero VAD cuts the audio into
-/// speech segments first; the timing comes from the VAD. With `ranges`, only
-/// the selected spans are fed — each through a fresh VAD (sherpa's VAD has no
-/// reset API, and a fresh one makes the sample counter unambiguous) — so no
-/// utterance can straddle a splice.
+/// Transcribe with `threads` concurrent workers (see `Transcription`).
 pub fn transcribe(
     ctx: &PipelineCtx,
     wav: &Path,
     ranges: Option<&[(f64, f64)]>,
     threads: i32,
 ) -> Result<Vec<Segment>, String> {
-    let samples = load_wav(wav)?;
-    let mut recognizer = load_recognizer(ctx, threads)?;
-    let spans = match ranges {
-        Some(rs) => sample_ranges(rs, samples.len()),
-        None => vec![(0, samples.len())],
+    let (transcription, cut) = Transcription::start(ctx, wav, ranges)?;
+    std::thread::scope(|s| {
+        s.spawn(cut);
+        Ok(transcription.finish(threads as usize))
+    })
+}
+
+/// Transcription and diarization read the same WAV with disjoint models, so
+/// they run concurrently (see `super::transcribe_and_diarize`).
+///
+/// Diarization gets a third of the thread budget: Nemotron is most efficient
+/// per core at low thread counts (2 threads take 77 s on a 28.5-minute
+/// recording, 4 take 49 s, 7 take 59 s on an M3 Pro), and transcription is
+/// the longer stage. When diarization finishes, its threads join the
+/// transcription workers. The classic pyannote diarizer is far slower and
+/// keeps half the budget.
+pub fn transcribe_and_diarize(
+    ctx: &PipelineCtx,
+    wav: &Path,
+    num_speakers: i64,
+    ranges: Option<&[(f64, f64)]>,
+    on_transcribed: impl FnOnce(),
+) -> Result<(Vec<Segment>, Vec<Turn>), String> {
+    let threads = ctx.config.num_threads().max(1) as usize;
+    let diar_threads = match super::diar_engine(ctx, num_speakers) {
+        "nemotron" => ((threads + 1) / 3).max(1),
+        _ => ((threads + 1) / 2).max(1),
     };
-    let mut segments: Vec<Segment> = Vec::new();
-    for (a, b) in spans {
-        let vad = new_vad(ctx)?;
-        transcribe_span(
-            &vad,
-            &mut recognizer,
-            &samples[a..b],
-            a as f64 / SAMPLE_RATE as f64,
-            &mut segments,
-        );
-    }
-    Ok(segments)
+    let (transcription, cut) = Transcription::start(ctx, wav, ranges)?;
+    let transcription = &transcription;
+    std::thread::scope(|s| {
+        s.spawn(cut);
+        let diar = s.spawn(move || {
+            let turns = diarize(ctx, wav, num_speakers, ranges, diar_threads as i32);
+            std::thread::scope(|s| {
+                for _ in 0..diar_threads {
+                    s.spawn(|| transcription.work());
+                }
+            });
+            turns
+        });
+        let segments = transcription.finish(threads.saturating_sub(diar_threads));
+        on_transcribed();
+        let turns = diar.join().unwrap_or_else(|_| Err("diarization panicked".into()));
+        Ok((segments, turns?))
+    })
 }
 
 // --------------------------------------------------------------------------
@@ -739,6 +886,13 @@ fn llama_backend() -> Result<&'static LlamaBackend, String> {
         .map_err(|e| e.clone())
 }
 
+struct ChatTiming {
+    prompt_tokens: usize,
+    prefill_secs: f64,
+    generated_tokens: usize,
+    generate_secs: f64,
+}
+
 struct Llm {
     model: LlamaModel,
     n_ctx: u32,
@@ -793,6 +947,17 @@ impl Llm {
     /// think-block (the C-API template matcher doesn't disable Qwen thinking),
     /// decode greedily at temp 0.2.
     fn chat(&self, system: &str, user: &str, max_tokens: usize) -> Result<String, String> {
+        self.chat_timed(system, user, max_tokens).map(|(text, _)| text)
+    }
+
+    /// `chat`, also reporting how long the prompt (prefill) and the answer
+    /// (generation) took.
+    fn chat_timed(
+        &self,
+        system: &str,
+        user: &str,
+        max_tokens: usize,
+    ) -> Result<(String, ChatTiming), String> {
         let backend = llama_backend()?;
         let template = self.model.chat_template(None).map_err(|e| format!("chat template: {e}"))?;
         let mut prompt = self
@@ -830,7 +995,10 @@ impl Llm {
         for (i, token) in (0i32..).zip(&tokens) {
             batch.add(*token, i, &[0], i == last_idx).map_err(|e| e.to_string())?;
         }
+        let started = std::time::Instant::now();
         ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+        let prefill_secs = started.elapsed().as_secs_f64();
+        let started = std::time::Instant::now();
 
         let mut sampler =
             LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::dist(42)]);
@@ -853,7 +1021,13 @@ impl Llm {
             n_gen += 1;
             ctx.decode(&mut batch).map_err(|e| e.to_string())?;
         }
-        Ok(String::from_utf8_lossy(&out).into_owned())
+        let timing = ChatTiming {
+            prompt_tokens: tokens.len(),
+            prefill_secs,
+            generated_tokens: n_gen,
+            generate_secs: started.elapsed().as_secs_f64(),
+        };
+        Ok((String::from_utf8_lossy(&out).into_owned(), timing))
     }
 }
 
@@ -1007,19 +1181,30 @@ pub fn bench_onnx(
     let mut rows = Vec::new();
     let sr = SAMPLE_RATE as usize;
 
-    // ASR: default model, up to 120 s through the recognizer (no VAD — the
-    // recognizer cost is what differs between providers).
+    // ASR: default model, up to 300 s in 10 s pieces (no VAD — the
+    // recognizer cost is what differs between providers), decoded the way a
+    // meeting is: `threads` one-thread workers sharing one recognizer.
     let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
-    let inner = OfflineRecognizer::create(&recognizer_config(&spec, "", provider, threads))
+    let inner = OfflineRecognizer::create(&recognizer_config(&spec, "", provider, 1))
         .ok_or_else(|| format!("ASR load ({provider}) failed"))?;
-    let mut recognizer = Recognizer { inner, language: None };
-    let asr = &samples[..samples.len().min(120 * sr)];
+    let recognizer = Recognizer { inner, language: None };
+    let asr = &samples[..samples.len().min(300 * sr)];
     // One warmup pass (first call pays one-time graph setup), then measure.
     let _ = recognizer.transcribe(&asr[..sr.min(asr.len())]);
+    let pieces: Vec<&[f32]> = asr.chunks(10 * sr).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
     let t = Instant::now();
-    for chunk in asr.chunks(10 * sr) {
-        let _ = recognizer.transcribe(chunk);
-    }
+    std::thread::scope(|s| {
+        for _ in 0..threads.max(1) {
+            s.spawn(|| {
+                while let Some(piece) =
+                    pieces.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
+                    let _ = recognizer.transcribe(piece);
+                }
+            });
+        }
+    });
     rows.push((
         "Transcription".to_string(),
         t.elapsed().as_secs_f64(),
@@ -1061,13 +1246,28 @@ pub fn bench_onnx(
     Ok(rows)
 }
 
-/// Time the summarizer LLM: (model load seconds, generated tokens/second).
+/// One summarizer benchmark run (see `bench_llm`).
+pub struct LlmBench {
+    pub load_secs: f64,
+    pub prompt_tokens: usize,
+    pub prefill_secs: f64,
+    pub generated_tokens: usize,
+    pub generate_secs: f64,
+}
+
+/// Time the summarizer LLM on a summary-shaped workload: the real summary
+/// instructions over a fixed `prompt_tokens`-token transcript, answering with
+/// up to `answer_tokens` tokens. Reading the transcript (prefill) dominates a
+/// real summary and is where GPU and CPU differ most — on an M3 Pro a
+/// 28-minute meeting's summary takes 26 s on Metal and 105 s on the CPU,
+/// while generation alone is only ~1.5x apart — so both halves are measured.
 pub fn bench_llm(
     models_dir: &Path,
     threads: i32,
     gpu: bool,
-    n_tokens: usize,
-) -> Result<(f64, f64), String> {
+    prompt_tokens: usize,
+    answer_tokens: usize,
+) -> Result<LlmBench, String> {
     use std::time::Instant;
     let backend = llama_backend()?;
     let path = crate::models::resolve_llm_at(models_dir, false, crate::models::LLM_DEFAULT);
@@ -1079,19 +1279,38 @@ pub fn bench_llm(
     let t = Instant::now();
     let model = LlamaModel::load_from_file(backend, &path, &params)
         .map_err(|e| format!("llm load: {e}"))?;
-    let load_s = t.elapsed().as_secs_f64();
+    let load_secs = t.elapsed().as_secs_f64();
 
-    let llm = Llm { model, n_ctx: 2048, threads };
-    let t = Instant::now();
-    let out = llm.chat(
-        "You are a meeting assistant.",
-        "Write a long, detailed paragraph about effective meeting notes.",
-        n_tokens,
+    let n_ctx = (prompt_tokens + answer_tokens + 512) as u32;
+    let llm = Llm { model, n_ctx, threads };
+    let lines = [
+        "Alice: We agreed to move the rollout to Thursday so QA can sign off first.",
+        "Bob: The migration script still needs a dry run against the staging database.",
+        "Carol: I can own the dry run, but I need read access to the replica by Monday.",
+        "Alice: Fine. Bob, can you also update the runbook with the rollback steps?",
+        "Bob: Will do. Should we invite support to the go/no-go call on Wednesday?",
+        "Carol: Yes, and let's send customers the maintenance notice two days ahead.",
+    ];
+    let mut transcript = String::new();
+    while llm.count_tokens(&transcript) < prompt_tokens {
+        for line in lines {
+            transcript.push_str(line);
+            transcript.push('\n');
+        }
+    }
+    let transcript = llm.truncate_to_tokens(&transcript, prompt_tokens);
+    let (_, timing) = llm.chat_timed(
+        &format!("{} {FORMAT}", config::DEFAULT_SUMMARY_PROMPT),
+        &format!("Transcript:\n{transcript}"),
+        answer_tokens,
     )?;
-    let gen_s = t.elapsed().as_secs_f64();
-    // chat() stops at EOG or the cap; count what actually came out.
-    let produced = llm.count_tokens(&out).max(1);
-    Ok((load_s, produced as f64 / gen_s))
+    Ok(LlmBench {
+        load_secs,
+        prompt_tokens: timing.prompt_tokens,
+        prefill_secs: timing.prefill_secs,
+        generated_tokens: timing.generated_tokens.max(1),
+        generate_secs: timing.generate_secs,
+    })
 }
 
 /// Long meetings are chunked to fit the context window (map-reduce: summarize

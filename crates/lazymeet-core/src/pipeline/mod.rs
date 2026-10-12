@@ -235,12 +235,12 @@ pub fn diar_engine(ctx: &PipelineCtx, num_speakers: i64) -> &'static str {
 }
 
 /// Transcription and diarization read the same WAV with disjoint models, so
-/// the native pipeline runs them concurrently. `on_transcribed` fires on the
-/// calling thread the moment transcription finishes, letting the caller
-/// advance the visible status to "diarizing" — the stage order the UI sees
-/// is unchanged, the diarizing phase just shrinks to whatever remains after
-/// transcription. A transcription failure wins over a diarization one,
-/// matching the old sequential order.
+/// the native pipeline runs them concurrently, sharing the thread budget.
+/// `on_transcribed` fires on the calling thread the moment transcription
+/// finishes, letting the caller advance the visible status to "diarizing" —
+/// the stage order the UI sees is unchanged, the diarizing phase just shrinks
+/// to whatever remains after transcription. A transcription failure wins
+/// over a diarization one, matching the old sequential order.
 pub fn transcribe_and_diarize(
     ctx: &PipelineCtx,
     wav: &Path,
@@ -254,20 +254,7 @@ pub fn transcribe_and_diarize(
         return Ok((segments, fake::diarize(ranges)));
     }
     native_only(ctx, |_| {
-        // Each stage gets half the thread budget, rounded up: they contend
-        // for the same cores, and two half-budget stages side by side finish
-        // well ahead of two full-budget ones fighting over the machine
-        // (190 s vs 260 s for a 28.5-minute recording on an 8P+2E M1 Pro).
-        let half = (ctx.config.num_threads() as i32 + 1) / 2;
-        std::thread::scope(|s| {
-            let diar = s.spawn(|| native_impl::diarize(ctx, wav, num_speakers, ranges, half));
-            let segments = native_impl::transcribe(ctx, wav, ranges, half);
-            if segments.is_ok() {
-                on_transcribed();
-            }
-            let turns = diar.join().unwrap_or_else(|_| Err("diarization panicked".into()));
-            Ok((segments?, turns?))
-        })
+        native_impl::transcribe_and_diarize(ctx, wav, num_speakers, ranges, on_transcribed)
     })
 }
 
@@ -342,6 +329,15 @@ mod native_impl {
         _: Option<&[TimeRange]>,
         _: i32,
     ) -> Result<Vec<Turn>, String> {
+        unreachable!()
+    }
+    pub fn transcribe_and_diarize(
+        _: &PipelineCtx,
+        _: &Path,
+        _: i64,
+        _: Option<&[TimeRange]>,
+        _: impl FnOnce(),
+    ) -> Result<(Vec<Segment>, Vec<Turn>), String> {
         unreachable!()
     }
     pub fn probe_media(_: &PipelineCtx, _: &Path) -> Result<MediaProbe, String> {

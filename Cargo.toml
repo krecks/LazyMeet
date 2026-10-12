@@ -5,8 +5,11 @@
 resolver = "2"
 members = ["crates/lazymeet-core", "src-tauri"]
 
+[profile.dev]
+opt-level = 1
+
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 strip = true
 
