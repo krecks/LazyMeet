@@ -3,7 +3,9 @@
   "private": true,
   "description": "Dev tooling for the vanilla-JS frontend: type checking only, no runtime dependencies.",
   "scripts": {
-    "typecheck": "tsc"
+    "build": "tsc",
+    "watch": "tsc --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "5.9.3"
