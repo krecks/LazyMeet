@@ -116,6 +116,7 @@ function fmtRelative(iso) {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
   const sec = Math.round((then - Date.now()) / 1000);
+  /** @type {[Intl.RelativeTimeFormatUnit, number][]} */
   const units = [
     ["year", 31536000],
     ["month", 2592000],

@@ -1,0 +1,11 @@
+{
+  "name": "lazymeet",
+  "private": true,
+  "description": "Dev tooling for the vanilla-JS frontend: type checking only, no runtime dependencies.",
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

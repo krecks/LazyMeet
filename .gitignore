@@ -5,6 +5,9 @@ src-tauri/binaries/ffmpeg-*
 /target/
 src-tauri/gen/
 
+# Frontend dev tooling (typescript only; nothing here ships)
+node_modules/
+
 # App data & downloaded models (never committed)
 data/
 models/
