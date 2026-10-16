@@ -35,6 +35,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Core test suite (FAKE pipeline)
         run: cargo test -p lazymeet-core --no-default-features --locked
+      - name: Frontend smoke test (headless Chrome)
+        env:
+          SMOKE_REQUIRE_BROWSER: "1"
+        run: ./scripts/smoke_frontend.sh
 
   build:
     # Installers only for version tags (and manual runs) — plain pushes to

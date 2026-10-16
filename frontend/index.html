@@ -518,6 +518,19 @@
 
   <div id="toasts" aria-live="polite"></div>
 
-  <script src="app.js"></script>
+  <!-- One classic script per screen/concern, loaded in order: top-level
+       declarations share the page scope. core.js owns the Tauri bridge and app
+       state, boot.js starts the app; the rest are self-contained sections. -->
+  <script src="js/core.js"></script>
+  <script src="js/setup.js"></script>
+  <script src="js/meetings.js"></script>
+  <script src="js/prepare.js"></script>
+  <script src="js/meeting.js"></script>
+  <script src="js/transcript.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/helpers.js"></script>
+  <script src="js/boot.js"></script>
 </body>
 </html>

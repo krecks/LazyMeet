@@ -2,6 +2,10 @@
 //! FAKE pipeline, event collector) — the Rust equivalent of conftest.py's
 //! TestClient fixture, minus the process-global env vars.
 
+// Each integration-test binary compiles this module separately, so every helper
+// is unused in some binaries; dead-code warnings here would only be noise.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -47,7 +51,6 @@ impl TestApp {
     }
 
     /// Like `upload`, but restricted to the given time ranges.
-    #[allow(dead_code)] // each test binary compiles common/ separately
     pub fn upload_ranges(&self, name: &str, bytes: &[u8], ranges: &[(f64, f64)]) -> String {
         let src = self.tmp.path().join("incoming");
         std::fs::create_dir_all(&src).unwrap();
