@@ -5,14 +5,17 @@
 // queue until the models are on disk. Progress arrives as `setup-progress`
 // events (the old 1 s polling loop is gone).
 // --------------------------------------------------------------------------
-let modelsReady = false;
 
-function applySetupStatus(status) {
+import { $, call } from "./core";
+import { el, escapeHtml, showToast } from "./helpers";
+import { state } from "./state";
+
+export function applySetupStatus(status) {
   if (status.ready) {
-    modelsReady = true;
+    state.modelsReady = true;
     return;
   }
-  if (appInitialized) {
+  if (state.appInitialized) {
     renderDownloadPill(status);
   } else {
     $("setup").classList.remove("hidden");
@@ -24,16 +27,15 @@ function applySetupStatus(status) {
 }
 
 /// Resolves once all first-run models are on disk.
-async function watchSetup() {
+export async function watchSetup() {
   const status = await call("get_setup");
   applySetupStatus(status);
   if (status.ready) return;
-  await new Promise((resolve) => {
-    setupReadyResolve = resolve;
+  await new Promise<void>((resolve) => {
+    state.setupReadyResolve = () => resolve();
   });
 }
 
-let setupReadyResolve = null;
 
 let lastSetupStatus = null;
 
@@ -89,7 +91,7 @@ function renderDownloadPopover(status) {
   }
 }
 
-function toggleDownloadPopover(open?: boolean) {
+export function toggleDownloadPopover(open?: boolean) {
   const pop = $("dl-popover");
   const show = open !== undefined ? open : pop.classList.contains("hidden");
   pop.classList.toggle("hidden", !show);
@@ -97,7 +99,7 @@ function toggleDownloadPopover(open?: boolean) {
   if (show && lastSetupStatus) renderDownloadPopover(lastSetupStatus);
 }
 
-async function retrySetup() {
+export async function retrySetup() {
   $("setup-error").classList.add("hidden");
   $("setup-retry").classList.add("hidden");
   try {

@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Headless smoke test for the vanilla frontend.
+# Headless smoke test for the frontend bundle.
 #
-# Boots frontend/index.html in a Chromium-based browser with a stubbed Tauri
-# bridge (no Rust backend, no models) and fails if the app throws, never shows
-# the main screen, or renders the wrong first-run state. Catches the class of
-# regressions cargo tests cannot see: broken script order, missing globals,
-# boot-flow changes, and a broken prepare screen.
+# Builds the real Vite bundle in smoke mode (the @tauri-apps/api modules are
+# aliased to a stub — see vite.config.ts), serves it over HTTP (ES modules
+# don't load from file://), and boots it in a headless Chromium-based browser.
+# Fails if the app throws, never shows the main screen, or renders the wrong
+# first-run state. Catches the class of regressions cargo tests cannot see: a
+# broken bundle, boot-flow changes, and a broken prepare screen.
 #
 # Usage: ./scripts/smoke_frontend.sh
 #   BROWSER=/path/to/chrome    override browser detection
 #   SMOKE_REQUIRE_BROWSER=1    fail instead of skipping when no browser exists
 #                              (used by CI, where a silent skip would hide rot)
+#
+# Needs the npm dependencies installed (npm ci) and python3 (throwaway server).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
 
 find_browser() {
   if [[ -n "${BROWSER:-}" ]]; then
@@ -46,93 +50,35 @@ if ! browser="$(find_browser)"; then
   exit 0
 fi
 
+npm run build:smoke
+
+# Pick a free port and serve the smoke bundle. Module scripts are subject to
+# CORS, so file:// cannot be used.
+port="$(python3 - <<'PY'
+import socket
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+)"
+python3 -m http.server "$port" --bind 127.0.0.1 --directory frontend/dist-smoke >/dev/null 2>&1 &
+server=$!
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-cp -R "$root/frontend/." "$tmp/"
+trap 'kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 
-# Stub of the Tauri bridge. Covers everything boot and the prepare screen call;
-# unknown commands resolve to null, so a new command at boot shows up as a
-# smoke failure rather than a crash in the real app.
-cat > "$tmp/__smoke_mock.js" <<'EOF'
-window.__TAURI__ = {
-  core: {
-    invoke: async (cmd) => {
-      if (cmd === "get_setup") return { ready: true, items: [] };
-      if (cmd === "list_meetings") return [];
-      if (cmd === "get_speakers") return [];
-      if (cmd === "get_config") return { values: {} };
-      if (cmd === "probe_media") {
-        return { duration: 3, peaks: Array.from({ length: 64 }, (_, i) => Math.abs(Math.sin(i))) };
-      }
-      return null;
-    },
-    convertFileSrc: (path) => "asset://localhost/" + path,
-  },
-  event: { listen: async () => () => {} },
-  webview: { getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }) },
-};
-EOF
-
-# Runs after the last app script, so all globals exist and boot's microtasks
-# have drained. Writes one <pre> the shell greps for.
-cat > "$tmp/__smoke_check.js" <<'EOF'
-(function () {
-  const problems = [];
-  const result = document.createElement("pre");
-  const finish = () => {
-    if (document.getElementById("smoke-result")) return;
-    result.id = "smoke-result";
-    result.textContent = problems.length ? "SMOKE_FAIL: " + problems.join("; ") : "SMOKE_OK";
-    document.body.appendChild(result);
-  };
-
-  window.addEventListener("error", (e) => problems.push("uncaught error: " + e.message));
-  window.addEventListener("unhandledrejection", (e) => {
-    problems.push("unhandled rejection: " + ((e.reason && e.reason.message) || e.reason));
-  });
-
-  setTimeout(async () => {
-    // Boot state first — opening the prepare screen hides #app again.
-    const hidden = (id) => document.getElementById(id).classList.contains("hidden");
-    if (!hidden("boot")) problems.push("boot screen still visible");
-    if (!hidden("setup")) problems.push("setup screen visible despite ready models");
-    if (!hidden("fatal")) {
-      problems.push("fatal screen: " + document.getElementById("fatal-msg").textContent.trim());
-    }
-    if (hidden("app")) problems.push("main screen not visible");
-    if (!document.getElementById("meeting-list").textContent.includes("No meetings yet")) {
-      problems.push("meeting-list empty state missing");
-    }
-    if (!document.getElementById("speaker-list").textContent.includes("No saved voices")) {
-      problems.push("speaker-list empty state missing");
-    }
-
-    try {
-      await openPrepare("/tmp/smoke.wav");
-      if (hidden("prepare")) problems.push("prepare screen did not open");
-      if (document.getElementById("prep-transcribe").disabled) {
-        problems.push("transcribe button stayed disabled after a successful probe");
-      }
-      if (!document.querySelector("#prep-range-list .range-row")) {
-        problems.push("preselected range row missing");
-      }
-    } catch (e) {
-      problems.push("openPrepare threw: " + e.message);
-    }
-    finish();
-  }, 0);
-})();
-EOF
-
-# Inject the mock before the first app script and the checker after the last.
-awk '
-  /<script src="js\/core\.js"><\/script>/ && !mock { print "<script src=\"__smoke_mock.js\"></script>"; mock = 1 }
-  { print }
-  /<script src="js\/boot\.js"><\/script>/ { print "<script src=\"__smoke_check.js\"></script>"; check = 1 }
-  END { exit !(mock && check) }
-' "$tmp/index.html" > "$tmp/index.injected.html" ||
-  { echo "smoke_frontend: FAIL — could not find the core.js/boot.js script tags in index.html" >&2; exit 1; }
-mv "$tmp/index.injected.html" "$tmp/index.html"
+# Wait for the server to accept connections (python3 rather than curl, so the
+# script has no dependencies beyond what it already uses).
+python3 - "$port" <<'PY'
+import socket, sys, time
+port = int(sys.argv[1])
+for _ in range(100):
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+        sys.exit(0)
+    except OSError:
+        time.sleep(0.05)
+sys.exit("smoke_frontend: server did not start")
+PY
 
 flags=(
   --headless --disable-gpu --no-first-run --no-default-browser-check
@@ -143,7 +89,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
   flags+=(--no-sandbox) # CI containers run as root; the sandbox needs a non-root user
 fi
 
-"$browser" "${flags[@]}" "file://$tmp/index.html" > "$tmp/dom.html" 2> "$tmp/browser.log" || true
+"$browser" "${flags[@]}" "http://127.0.0.1:$port/" > "$tmp/dom.html" 2> "$tmp/browser.log" || true
 
 if grep -q 'SMOKE_OK' "$tmp/dom.html"; then
   echo "smoke_frontend: PASS ($(basename "$browser"))"

@@ -5,7 +5,14 @@
 // literal and case-insensitive — "Paket" finds "Arbeitspaket" — using the same
 // matcher as the transcript find bar, so highlights agree.
 // --------------------------------------------------------------------------
-const gsearch = {
+import { $, call } from "./core";
+import { el, escapeHtml, fmtRelative, fmtTs, plural, showToast } from "./helpers";
+import { selectMeeting, showActiveMeeting } from "./meeting";
+import { badgeFor, renderMeetingList } from "./meetings";
+import { state } from "./state";
+import { find, gotoMatch, literalRegex, markHits, openFind } from "./transcript";
+
+export const gsearch = {
   query: "", // the query the rendered results belong to
   results: [],
   token: 0, // stale-response guard, same idea as activeId in showActiveMeeting
@@ -27,7 +34,7 @@ const HIT_KINDS = {
 
 /// Debounced entry point from the sidebar input. The sidebar's own title
 /// filter stays instant; only the disk scan waits for a pause in typing.
-function queueGlobalSearch(query) {
+export function queueGlobalSearch(query) {
   clearTimeout(gsearch.timer);
   if (query.trim().length < MIN_QUERY) {
     // Backspacing out of a search puts the previous view back.
@@ -152,18 +159,18 @@ function openHit(group, hit) {
   selectMeeting(group.id);
 }
 
-const searchOpen = () => !$("search-results").classList.contains("hidden");
+export const searchOpen = () => !$("search-results").classList.contains("hidden");
 
 /// Step aside for a meeting view. The rendered groups stay in the DOM so
 /// returning to them (Enter in the search box) costs nothing.
-function hideSearchResults() {
+export function hideSearchResults() {
   $("search-results").classList.add("hidden");
 }
 
 /// Set by openHit, consumed by the next renderTranscript for that meeting.
 let pendingScrollSeg = null;
 
-function consumePendingScroll(m) {
+export function consumePendingScroll(m) {
   if (!pendingScrollSeg || pendingScrollSeg.id !== m.id) return;
   const { index, query } = pendingScrollSeg;
   pendingScrollSeg = null;
@@ -182,7 +189,7 @@ function consumePendingScroll(m) {
   seg.classList.add("flash");
 }
 
-function setupGlobalSearch() {
+export function setupGlobalSearch() {
   $("search-clear").addEventListener("click", clearSearchBox);
   $("meeting-search").addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -201,7 +208,7 @@ function setupGlobalSearch() {
 
 function clearSearchBox() {
   $("meeting-search").value = "";
-  searchQuery = "";
+  state.searchQuery = "";
   renderMeetingList();
   clearGlobalSearch();
 }
@@ -216,7 +223,7 @@ function clearGlobalSearch() {
   hideSearchResults();
   $("search-groups").innerHTML = "";
   renderMeetingList();
-  if (activeId) showActiveMeeting();
+  if (state.activeId) showActiveMeeting();
   else $("empty").classList.remove("hidden");
 }
 

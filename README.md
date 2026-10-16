@@ -152,15 +152,17 @@ processing finishes instead.
 ## Development / building from source
 
 Requirements: Rust (stable) + Tauri CLI (`cargo install tauri-cli --version
-"^2"`), cmake (llama.cpp builds from source), and the platform webview libs
+"^2"`), Node.js (the frontend is bundled by Vite — run `npm ci` once),
+cmake (llama.cpp builds from source), and the platform webview libs
 (Linux: `libwebkit2gtk-4.1-dev`). sherpa-onnx links the prebuilt static
 libraries of its GitHub release, which its build script downloads on the
 first build; to build offline, put that archive in a directory and point
 `SHERPA_ONNX_ARCHIVE_DIR` at it.
 
 ```bash
-# 1. Fetch the bundled ffmpeg for your platform (once)
+# 1. Fetch the bundled ffmpeg for your platform and install the frontend deps
 ./scripts/fetch_ffmpeg.sh
+npm ci
 
 # 2. Run the desktop app (dev) — LAZYMEET_FAKE=1 skips the heavy models
 cd src-tauri && cargo tauri dev
@@ -201,12 +203,14 @@ models or cmake:
 cargo test -p lazymeet-core --no-default-features
 ```
 
-The frontend source is TypeScript in `frontend/ts/`, compiled to the classic
-scripts in `frontend/js/` (`npm run build`, or `npm run watch` while
-developing). The compiled JS is committed so `cargo tauri build` and the smoke
-test need no node; CI re-runs the build and fails if it drifts. Checks:
-`npm run typecheck` and `./scripts/smoke_frontend.sh` (headless boot +
-prepare-screen smoke test with a stubbed Tauri bridge).
+The frontend is TypeScript ES modules in `frontend/ts/`, bundled by Vite into
+`frontend/dist/` (`npm run build`; `npm run dev` serves it with HMR while
+developing). The bundle is not committed — `cargo tauri build` runs
+`npm run build` itself, so `npm ci` must have run once. Checks:
+`npm run typecheck` (tsc, no emit), `npm run build` (typecheck + bundle), and
+`./scripts/smoke_frontend.sh`, which builds the bundle in smoke mode with the
+Tauri API stubbed out and boots it headlessly to assert the first-run state
+and the prepare screen.
 
 ### Cross-platform builds
 
@@ -235,7 +239,8 @@ Environment variables (all optional):
 LazyMeet is young and still has rough edges — bug reports, feature ideas, and
 pull requests are all welcome. Open an issue to discuss bigger changes first.
 For code changes, `cargo test -p lazymeet-core --no-default-features` must
-pass; the frontend is plain HTML/CSS/JS with no build step.
+pass; the frontend is TypeScript bundled by Vite (`npm run build`), with
+`npm run typecheck` and `./scripts/smoke_frontend.sh` as the frontend checks.
 
 ## License
 

@@ -1,17 +1,19 @@
 {
-  // The frontend ships as classic scripts: no imports/exports, one shared page
-  // scope, loaded by frontend/index.html. tsc compiles frontend/ts/*.ts to
-  // frontend/js/*.js, which is committed so `cargo tauri build` and the smoke
-  // test run without node; CI re-runs the build and fails on drift.
+  // The frontend is TypeScript ES modules under frontend/ts/, bundled by Vite
+  // (vite.config.ts) into frontend/dist, which is not committed. tsc only
+  // type-checks (noEmit); `npm run build` runs this before bundling, so a type
+  // error fails the build before Vite emits anything.
   "compilerOptions": {
     "target": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
-    "module": "none",
-    "rootDir": "frontend/ts",
-    "outDir": "frontend/js",
-    "noEmitOnError": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["frontend/ts/**/*.ts"]
+  "include": ["frontend/ts/**/*.ts", "frontend/smoke/**/*.ts"]
 }

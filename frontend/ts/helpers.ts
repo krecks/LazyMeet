@@ -1,13 +1,15 @@
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLElementTagNameMap[K] {
+import { $ } from "./core";
+
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
   return node;
 }
 
-function iconBtn(icon, title, onClick, cls = "icon-btn subtle") {
+export function iconBtn(icon, title, onClick, cls = "icon-btn subtle") {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = cls;
@@ -18,7 +20,7 @@ function iconBtn(icon, title, onClick, cls = "icon-btn subtle") {
   return btn;
 }
 
-function editorActions(onSave, onCancel) {
+export function editorActions(onSave, onCancel) {
   const wrap = el("div", "editor-actions");
   const save = el("button", "btn");
   save.type = "button";
@@ -34,21 +36,21 @@ function editorActions(onSave, onCancel) {
   return wrap;
 }
 
-function wireEditorKeys(textarea, onSave, onCancel) {
+export function wireEditorKeys(textarea, onSave, onCancel) {
   textarea.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSave();
     if (e.key === "Escape") onCancel();
   });
 }
 
-function showToast(msg, ttl = 5000, ok = false) {
+export function showToast(msg, ttl = 5000, ok = false) {
   const div = el("div", "toast" + (ok ? " ok" : ""));
   div.textContent = msg;
   $("toasts").appendChild(div);
   setTimeout(() => div.remove(), ttl);
 }
 
-function showFatal(err) {
+export function showFatal(err) {
   $("boot").classList.add("hidden");
   $("setup").classList.add("hidden");
   $("app").classList.add("hidden");
@@ -63,7 +65,7 @@ function showFatal(err) {
 // 3 s, the second runs the action. (Native confirm() is unreliable in webviews.)
 // Buttons with a <span> label show the armed text there; icon-only buttons just
 // turn red and change their tooltip.
-function confirmThen(btn, armedText, action) {
+export function confirmThen(btn, armedText, action) {
   if (btn.dataset.armed) {
     clearTimeout(+btn.dataset.timer);
     disarm(btn);
@@ -83,7 +85,7 @@ function confirmThen(btn, armedText, action) {
   btn.dataset.timer = setTimeout(() => disarm(btn), 3000);
 }
 
-function disarm(btn) {
+export function disarm(btn) {
   if (!btn.dataset.armed) return;
   const label = btn.querySelector("span:not(.icon)");
   if (label && btn.dataset.orig !== undefined) label.textContent = btn.dataset.orig;
@@ -95,23 +97,23 @@ function disarm(btn) {
   btn.classList.remove("armed");
 }
 
-function fmtTs(seconds) {
+export function fmtTs(seconds) {
   const s = Math.floor(seconds % 60).toString().padStart(2, "0");
   const m = Math.floor(seconds / 60) % 60;
   const h = Math.floor(seconds / 3600);
   return h ? `${h}:${m.toString().padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+export const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function fmtDate(iso) {
+export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
 }
 
-function fmtRelative(iso) {
+export function fmtRelative(iso) {
   if (!iso) return "";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
@@ -131,7 +133,7 @@ function fmtRelative(iso) {
   return "just now";
 }
 
-function fmtBytes(n) {
+export function fmtBytes(n) {
   if (!n) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -142,10 +144,8 @@ function fmtBytes(n) {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
 }
 
-function escapeHtml(str) {
+export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

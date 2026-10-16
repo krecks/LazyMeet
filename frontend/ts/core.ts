@@ -1,14 +1,21 @@
-// LazyMeet frontend — vanilla JS over Tauri commands + events (the backend
-// runs in-process in Rust; there is no HTTP sidecar anymore).
+// LazyMeet frontend — Tauri commands + events (the backend runs in-process in
+// Rust; there is no HTTP sidecar anymore). This module is the Tauri seam:
+// everything else imports `call`, `listen`, `convertFileSrc`,
+// `getCurrentWebview`, and `$` from here.
+import { invoke, convertFileSrc as tauriConvertFileSrc } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import { getCurrentWebview as tauriGetCurrentWebview } from "@tauri-apps/api/webview";
 
-const tauri = window.__TAURI__;
+// Backend failures arrive as a structured { code, kind, message } object;
+// `call` re-throws them as an Error carrying the backend's status code, so
+// the existing 404/409/422 checks keep working.
+interface ApiError extends Error {
+  status?: number;
+}
 
-// Invoke a backend command. Command errors arrive as a structured
-// { code, kind, message } object; surface it as an Error with `.status` so
-// existing 404/409/422 checks keep working.
-async function call(cmd: string, args?: Record<string, unknown>): Promise<any> {
+export async function call(cmd: string, args?: Record<string, unknown>): Promise<any> {
   try {
-    return await tauri.core.invoke(cmd, args);
+    return await invoke(cmd, args);
   } catch (e) {
     const err: ApiError = new Error(e && e.message ? e.message : String(e));
     err.status = e && e.code;
@@ -16,11 +23,12 @@ async function call(cmd: string, args?: Record<string, unknown>): Promise<any> {
   }
 }
 
-const listen = (event: string, handler: (event: TauriEvent) => void) =>
-  tauri.event.listen(event, handler);
-const convertFileSrc = (path: string) => tauri.core.convertFileSrc(path);
+export const listen = (event: string, handler: (event: { payload: any }) => void) =>
+  tauriListen(event, handler);
+export const convertFileSrc = (path: string) => tauriConvertFileSrc(path);
+export const getCurrentWebview = () => tauriGetCurrentWebview();
 
-const STAGES = [
+export const STAGES = [
   ["extracting", "Extracting audio"],
   ["transcribing", "Transcribing (Parakeet)"],
   ["diarizing", "Separating speakers"],
@@ -30,19 +38,4 @@ const STAGES = [
 
 // Ids are static and known-good; the return type stays `any` so the 200-odd
 // call sites don't need per-element casts. Cross-file calls are still checked.
-const $ = (id: string): any => document.getElementById(id);
-
-// ---------------------------------------------------------------------------
-// State. Renders are imperative; `editing` is the anti-clobber guard: while an
-// inline edit is open, fresh meeting data is stashed in `pendingMeeting`
-// instead of re-rendering (which would destroy the user's half-typed edit).
-// ---------------------------------------------------------------------------
-let activeId = null;
-let uploading = false;
-let meetings = []; // cached list — search re-filters without refetching
-let searchQuery = "";
-let currentMeeting = null;
-let editing = null; // "title" | "summary" | "seg:3" | "takeaways:1" | … | null
-let pendingMeeting = null;
-let viewingVersion = null; // history version number rendered read-only, or null for current
-
+export const $ = (id: string): any => document.getElementById(id);

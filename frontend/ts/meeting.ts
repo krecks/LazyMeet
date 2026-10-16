@@ -2,11 +2,28 @@
 // Meeting view. Progress arrives as `meeting-updated` events (no polling);
 // selecting a meeting does one fetch for the current state.
 // --------------------------------------------------------------------------
-function selectMeeting(id) {
-  activeId = id;
-  editing = null; // abandon any open edit — it belonged to the previous meeting
-  pendingMeeting = null;
-  viewingVersion = null;
+import { $, STAGES, call } from "./core";
+import {
+  confirmThen,
+  disarm,
+  editorActions,
+  el,
+  fmtDate,
+  iconBtn,
+  showToast,
+  wireEditorKeys,
+} from "./helpers";
+import { refreshMeetings, renderMeetingList } from "./meetings";
+import { copyText, notesAsText, releasePlayer, transcriptAsText } from "./player";
+import { hideSearchResults, searchOpen } from "./search";
+import { state } from "./state";
+import { buildColorMap, renderLegend, renderTranscript } from "./transcript";
+
+export function selectMeeting(id) {
+  state.activeId = id;
+  state.editing = null; // abandon any open edit — it belonged to the previous meeting
+  state.pendingMeeting = null;
+  state.viewingVersion = null;
   releasePlayer(); // the playing audio belonged to the previous meeting
   $("empty").classList.add("hidden");
   hideSearchResults(); // the meeting takes the pane back from the result list
@@ -15,11 +32,11 @@ function selectMeeting(id) {
 }
 
 function showEmpty() {
-  activeId = null;
-  currentMeeting = null;
-  editing = null;
-  pendingMeeting = null;
-  viewingVersion = null;
+  state.activeId = null;
+  state.currentMeeting = null;
+  state.editing = null;
+  state.pendingMeeting = null;
+  state.viewingVersion = null;
   releasePlayer();
   hideSearchResults();
   $("processing").classList.add("hidden");
@@ -28,14 +45,14 @@ function showEmpty() {
 }
 
 /// Fetch the active meeting and render whichever view its status calls for.
-async function showActiveMeeting() {
-  const id = activeId;
+export async function showActiveMeeting() {
+  const id = state.activeId;
   if (!id) return;
   let m;
   try {
     m = await call("get_meeting", { meeting_id: id });
   } catch (e) {
-    if (id !== activeId) return; // stale response for a deselected meeting
+    if (id !== state.activeId) return; // stale response for a deselected meeting
     if (e.status === 404) {
       showEmpty();
       showToast("Meeting no longer exists");
@@ -45,7 +62,7 @@ async function showActiveMeeting() {
     }
     return;
   }
-  if (id !== activeId) return; // user selected another meeting mid-request
+  if (id !== state.activeId) return; // user selected another meeting mid-request
   if (m.status === "done" || m.status === "error") {
     renderResult(m);
   } else {
@@ -55,9 +72,9 @@ async function showActiveMeeting() {
 
 /// `meeting-updated` event: {id, status} on every stage transition, plus the
 /// full public meeting on done/error.
-function onMeetingUpdated({ id, status, meeting }) {
+export function onMeetingUpdated({ id, status, meeting }) {
   refreshMeetings();
-  if (id !== activeId) return;
+  if (id !== state.activeId) return;
   if (meeting) {
     renderResult(meeting);
   } else {
@@ -71,7 +88,7 @@ function renderProcessing(m) {
   const title = m.title || m.filename;
   $("proc-title").textContent =
     m.status === "queued"
-      ? modelsReady
+      ? state.modelsReady
         ? `Queued — “${title}” starts when the current recording finishes`
         : `Queued — “${title}” starts once the models finish downloading`
       : `Processing “${title}”`;
@@ -85,14 +102,14 @@ function renderProcessing(m) {
   });
 }
 
-function renderResult(m) {
-  if (editing) {
+export function renderResult(m) {
+  if (state.editing) {
     // An inline edit is open — re-rendering now would destroy it. Apply once
     // the edit commits or cancels (finishEdit).
-    pendingMeeting = m;
+    state.pendingMeeting = m;
     return;
   }
-  currentMeeting = m;
+  state.currentMeeting = m;
   $("processing").classList.add("hidden");
   // A background update must not push the meeting back over the search
   // results; the render still happens, it just stays behind them.
@@ -104,10 +121,10 @@ function renderResult(m) {
   const versions = m.versions || [];
   const latestV = versions.length ? versions[versions.length - 1].v : null;
   let viewed = null;
-  if (viewingVersion != null && viewingVersion !== latestV) {
-    viewed = versions.find((v) => v.v === viewingVersion && v.snapshot) || null;
+  if (state.viewingVersion != null && state.viewingVersion !== latestV) {
+    viewed = versions.find((v) => v.v === state.viewingVersion && v.snapshot) || null;
   }
-  if (!viewed) viewingVersion = null;
+  if (!viewed) state.viewingVersion = null;
   const shown = viewed ? { ...m, ...viewed.snapshot } : m;
 
   const banner = $("version-banner");
@@ -117,8 +134,8 @@ function renderResult(m) {
       `Viewing v${viewed.v} · ${HISTORY_ACTIONS[viewed.action] || "Processed"} · ${fmtDate(viewed.created_at)} — read-only. The current version is v${latestV}.`;
   }
   $("version-back").onclick = () => {
-    viewingVersion = null;
-    renderResult(currentMeeting);
+    state.viewingVersion = null;
+    renderResult(state.currentMeeting);
   };
 
   $("result-title").textContent = m.title || m.filename;
@@ -243,14 +260,14 @@ function renderHistory(m, latestV) {
 
     if (v.v === latestV) {
       const chip = el("span", "history-current");
-      chip.textContent = viewingVersion == null ? "current" : "back to current";
-      if (viewingVersion != null) {
+      chip.textContent = state.viewingVersion == null ? "current" : "back to current";
+      if (state.viewingVersion != null) {
         const btn = el("button", "btn ghost history-view");
         btn.type = "button";
         btn.textContent = "Back to current";
         btn.onclick = () => {
-          viewingVersion = null;
-          renderResult(currentMeeting);
+          state.viewingVersion = null;
+          renderResult(state.currentMeeting);
         };
         li.appendChild(btn);
       } else {
@@ -259,11 +276,11 @@ function renderHistory(m, latestV) {
     } else if (v.snapshot) {
       const btn = el("button", "btn ghost history-view");
       btn.type = "button";
-      btn.textContent = v.v === viewingVersion ? "Viewing" : "View";
-      btn.disabled = v.v === viewingVersion;
+      btn.textContent = v.v === state.viewingVersion ? "Viewing" : "View";
+      btn.disabled = v.v === state.viewingVersion;
       btn.onclick = () => {
-        viewingVersion = v.v;
-        renderResult(currentMeeting);
+        state.viewingVersion = v.v;
+        renderResult(state.currentMeeting);
       };
       li.appendChild(btn);
     } else {
@@ -278,14 +295,14 @@ function renderHistory(m, latestV) {
 
 // Called when an inline edit ends. `fresh` is the PATCH response (or null on
 // cancel); any update that arrived mid-edit was stashed in pendingMeeting.
-function finishEdit(fresh) {
-  editing = null;
-  const m = fresh || pendingMeeting || currentMeeting;
-  pendingMeeting = null;
-  if (m && m.id === activeId) renderResult(m);
+export function finishEdit(fresh) {
+  state.editing = null;
+  const m = fresh || state.pendingMeeting || state.currentMeeting;
+  state.pendingMeeting = null;
+  if (m && m.id === state.activeId) renderResult(m);
 }
 
-function editError(e) {
+export function editError(e) {
   return e.status === 409
     ? "Still processing — try again when it's done."
     : `Couldn't save: ${e.message}`;
@@ -295,8 +312,8 @@ function editError(e) {
 // Inline editing: title, summary, takeaway/action lists, segments
 // --------------------------------------------------------------------------
 function startTitleEdit() {
-  if (editing || !currentMeeting) return;
-  editing = "title";
+  if (state.editing || !state.currentMeeting) return;
+  state.editing = "title";
   const h2 = $("result-title");
   const btn = $("title-edit-btn");
   h2.classList.add("hidden");
@@ -304,7 +321,7 @@ function startTitleEdit() {
   const input = document.createElement("input");
   input.className = "title-input";
   input.maxLength = 200;
-  input.value = currentMeeting.title || currentMeeting.filename;
+  input.value = state.currentMeeting.title || state.currentMeeting.filename;
   input.setAttribute("aria-label", "Meeting title");
   h2.parentNode.insertBefore(input, h2);
   input.focus();
@@ -321,13 +338,13 @@ function startTitleEdit() {
   };
   const commit = async () => {
     const value = input.value.trim();
-    if (!value || value === (currentMeeting.title || currentMeeting.filename)) {
+    if (!value || value === (state.currentMeeting.title || state.currentMeeting.filename)) {
       settle(() => finishEdit(null));
       return;
     }
     try {
       const m = await call("patch_meeting", {
-        meeting_id: currentMeeting.id,
+        meeting_id: state.currentMeeting.id,
         fields: { title: value },
       });
       settle(() => finishEdit(m));
@@ -345,15 +362,15 @@ function startTitleEdit() {
 }
 
 function startSummaryEdit() {
-  if (editing || !currentMeeting) return;
-  editing = "summary";
+  if (state.editing || !state.currentMeeting) return;
+  state.editing = "summary";
   const p = $("summary-text");
   p.classList.add("hidden");
   $("summary-edit-btn").classList.add("hidden");
   const editor = el("div", "editor");
   const ta = document.createElement("textarea");
   ta.rows = 6;
-  ta.value = currentMeeting.summary || "";
+  ta.value = state.currentMeeting.summary || "";
   ta.setAttribute("aria-label", "Summary");
   editor.appendChild(ta);
   const cleanup = () => {
@@ -363,7 +380,7 @@ function startSummaryEdit() {
   const commit = async () => {
     try {
       const m = await call("patch_meeting", {
-        meeting_id: currentMeeting.id,
+        meeting_id: state.currentMeeting.id,
         fields: { summary: ta.value },
       });
       cleanup();
@@ -436,15 +453,15 @@ function renderNoteList(m, elId, field, editable) {
 }
 
 function startItemEdit(field, index, li, span) {
-  if (editing || !currentMeeting) return;
-  editing = `${field}:${index}`;
+  if (state.editing || !state.currentMeeting) return;
+  state.editing = `${field}:${index}`;
   span.classList.add("hidden");
   const actions = li.querySelector(".item-actions");
   if (actions) actions.classList.add("hidden");
   const input = document.createElement("input");
   input.type = "text";
   input.className = "item-text";
-  input.value = currentMeeting[field][index];
+  input.value = state.currentMeeting[field][index];
   li.insertBefore(input, span);
   input.focus();
 
@@ -456,11 +473,11 @@ function startItemEdit(field, index, li, span) {
   };
   const commit = () => {
     const value = input.value.trim();
-    if (!value || value === currentMeeting[field][index]) {
+    if (!value || value === state.currentMeeting[field][index]) {
       settle(() => finishEdit(null));
       return;
     }
-    const items = [...currentMeeting[field]];
+    const items = [...state.currentMeeting[field]];
     items[index] = value;
     settle(() => saveList(field, items, true));
   };
@@ -474,7 +491,7 @@ function startItemEdit(field, index, li, span) {
 async function saveList(field, items, viaFinishEdit = false) {
   try {
     const m = await call("patch_meeting", {
-      meeting_id: currentMeeting.id,
+      meeting_id: state.currentMeeting.id,
       fields: { [field]: items },
     });
     if (viaFinishEdit) finishEdit(m);

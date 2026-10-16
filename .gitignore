@@ -5,8 +5,10 @@ src-tauri/binaries/ffmpeg-*
 /target/
 src-tauri/gen/
 
-# Frontend dev tooling (typescript only; nothing here ships)
+# Frontend dev tooling (bundled by Vite; nothing here ships)
 node_modules/
+frontend/dist/
+frontend/dist-smoke/
 
 # App data & downloaded models (never committed)
 data/

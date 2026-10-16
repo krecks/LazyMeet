@@ -4,13 +4,19 @@
 // (Range/seek support); play seeks to the segment start and pauses at its
 // end. Clicking the playing segment stops it.
 // --------------------------------------------------------------------------
+import { call, convertFileSrc } from "./core";
+import { editorActions, el, fmtTs, showToast, wireEditorKeys } from "./helpers";
+import { editError, finishEdit, renderResult } from "./meeting";
+import { refreshSpeakers } from "./settings";
+import { state } from "./state";
+
 let player = null;
 let playerSrc = "";
 let playingIndex = null;
 let playingBtn = null;
 let playingSeg = null; // the .seg element, for the highlight class
 
-function stopSegmentPlayback() {
+export function stopSegmentPlayback() {
   if (player) {
     player.pause();
     player.ontimeupdate = null;
@@ -29,7 +35,7 @@ function stopSegmentPlayback() {
 
 // Also drop the audio source so the OS file handle is released (deleting a
 // meeting on Windows fails while the webview holds its recording open).
-function releasePlayer() {
+export function releasePlayer() {
   stopSegmentPlayback();
   if (player) {
     player.removeAttribute("src");
@@ -38,7 +44,7 @@ function releasePlayer() {
   playerSrc = "";
 }
 
-async function playSegment(meetingId, seg, index, btn, segEl) {
+export async function playSegment(meetingId, seg, index, btn, segEl) {
   if (playingIndex === index) {
     stopSegmentPlayback();
     return;
@@ -95,10 +101,10 @@ async function playSegment(meetingId, seg, index, btn, segEl) {
   }
 }
 
-function startSegmentEdit(index, segEl) {
-  if (editing || !currentMeeting) return;
-  editing = `seg:${index}`;
-  const seg = currentMeeting.segments[index];
+export function startSegmentEdit(index, segEl) {
+  if (state.editing || !state.currentMeeting) return;
+  state.editing = `seg:${index}`;
+  const seg = state.currentMeeting.segments[index];
   segEl.classList.add("editing");
   segEl.querySelector(".seg-text").classList.add("hidden");
   const segActions = segEl.querySelector(".seg-actions");
@@ -113,7 +119,7 @@ function startSegmentEdit(index, segEl) {
 
   const select = document.createElement("select");
   select.setAttribute("aria-label", "Speaker");
-  for (const [id, name] of Object.entries(currentMeeting.speakers as Record<string, string>)) {
+  for (const [id, name] of Object.entries(state.currentMeeting.speakers as Record<string, string>)) {
     const opt = document.createElement("option");
     opt.value = id;
     opt.textContent = name || id;
@@ -139,7 +145,7 @@ function startSegmentEdit(index, segEl) {
     }
     try {
       const m = await call("patch_segment", {
-        meeting_id: currentMeeting.id,
+        meeting_id: state.currentMeeting.id,
         index,
         fields: body,
       });
@@ -161,7 +167,7 @@ function startSegmentEdit(index, segEl) {
   ta.focus();
 }
 
-async function renameSpeaker(meetingId, diarizedId, newName) {
+export async function renameSpeaker(meetingId, diarizedId, newName) {
   try {
     const m = await call("rename_speakers", {
       meeting_id: meetingId,
@@ -177,7 +183,7 @@ async function renameSpeaker(meetingId, diarizedId, newName) {
 // --------------------------------------------------------------------------
 // Copy to clipboard
 // --------------------------------------------------------------------------
-function notesAsText(m) {
+export function notesAsText(m) {
   const lines = [`# ${m.title || m.filename}`, ""];
   if (m.summary) lines.push(m.summary, "");
   if (m.takeaways && m.takeaways.length) {
@@ -192,13 +198,13 @@ function notesAsText(m) {
   return lines.join("\n").trim();
 }
 
-function transcriptAsText(m) {
+export function transcriptAsText(m) {
   return (m.segments || [])
     .map((seg) => `${m.speakers[seg.speaker] || seg.speaker} [${fmtTs(seg.start)}]: ${seg.text}`)
     .join("\n");
 }
 
-async function copyText(text, okMsg) {
+export async function copyText(text, okMsg) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);

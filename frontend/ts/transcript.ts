@@ -1,14 +1,22 @@
 // --------------------------------------------------------------------------
 // Transcript
 // --------------------------------------------------------------------------
-function buildColorMap(segments: { speaker: string }[]): Record<string, string> {
+import { $, call } from "./core";
+import { confirmThen, disarm, el, escapeHtml, fmtTs, iconBtn, showToast } from "./helpers";
+import { editError, renderResult } from "./meeting";
+import { playSegment, renameSpeaker, startSegmentEdit, stopSegmentPlayback } from "./player";
+import { consumePendingScroll } from "./search";
+import { refreshSpeakers } from "./settings";
+import { state } from "./state";
+
+export function buildColorMap(segments: { speaker: string }[]): Record<string, string> {
   const ids = [...new Set(segments.map((s) => s.speaker))].sort();
   const map: Record<string, string> = {};
   ids.forEach((id, i) => (map[id] = `var(--speaker-${(i % 6) + 1})`));
   return map;
 }
 
-function renderLegend(m, colorOf, readOnly) {
+export function renderLegend(m, colorOf, readOnly) {
   const legend = $("speaker-legend");
   legend.innerHTML = "";
   for (const id of Object.keys(colorOf)) {
@@ -81,7 +89,7 @@ async function verifySpeaker(meetingId, diarizedId, correct) {
   }
 }
 
-function renderTranscript(m, colorOf, editable) {
+export function renderTranscript(m, colorOf, editable) {
   stopSegmentPlayback(); // the buttons owning the playing state are re-created
   const t = $("transcript");
   t.innerHTML = "";
@@ -118,7 +126,7 @@ function renderTranscript(m, colorOf, editable) {
 // the resulting segment texts via the bulk patch_segments command, so a
 // replace-all is one locked write instead of one per segment.
 // --------------------------------------------------------------------------
-const find = {
+export const find = {
   open: false,
   matchCase: false,
   matches: [], // { seg, start, end } in transcript order
@@ -133,7 +141,7 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Literal search as a regex: the 'i' flag gives Unicode-aware case folding
 // without the index drift of comparing toLowerCase()d strings. Shared with
 // global search so highlights can never disagree between the two surfaces.
-function literalRegex(query, matchCase) {
+export function literalRegex(query, matchCase) {
   if (!query) return null;
   return new RegExp(escapeRegExp(query), matchCase ? "g" : "gi");
 }
@@ -145,7 +153,7 @@ function findRegex() {
 /// `text` as HTML with every match wrapped in a <mark>. `currentAt` marks one
 /// hit as the active one (by its ordinal within this text); global search
 /// passes nothing and gets all hits styled the same.
-function markHits(text, re, offset = 0, currentAt = -1) {
+export function markHits(text, re, offset = 0, currentAt = -1) {
   let html = "";
   let pos = 0;
   let k = offset;
@@ -159,7 +167,7 @@ function markHits(text, re, offset = 0, currentAt = -1) {
   return html + escapeHtml(text.slice(pos));
 }
 
-function openFind() {
+export function openFind() {
   find.open = true;
   $("find-bar").classList.remove("hidden");
   $("find-toggle-btn").setAttribute("aria-expanded", "true");
@@ -236,7 +244,7 @@ function updateFindControls() {
   allBtn.disabled = !n;
 }
 
-function gotoMatch(k) {
+export function gotoMatch(k) {
   const n = find.matches.length;
   if (!n) return;
   find.current = ((k % n) + n) % n;
@@ -250,7 +258,7 @@ function gotoMatch(k) {
 /// Only reachable when `find.editable`, i.e. the live version of a "done"
 /// meeting is on screen — so `find.meeting === currentMeeting`.
 async function replaceMatches(all) {
-  if (!find.editable || !find.matches.length || !currentMeeting) return;
+  if (!find.editable || !find.matches.length || !state.currentMeeting) return;
   const replacement = $("find-replace-input").value;
   const targets = all ? find.matches : [find.matches[find.current]];
   const bySeg = new Map();
@@ -261,7 +269,7 @@ async function replaceMatches(all) {
   // Within a segment, splice from the end so earlier offsets stay valid.
   const edits = [];
   for (const [i, hits] of bySeg) {
-    let text = currentMeeting.segments[i].text;
+    let text = state.currentMeeting.segments[i].text;
     for (const h of [...hits].sort((a, b) => b.start - a.start)) {
       text = text.slice(0, h.start) + replacement + text.slice(h.end);
     }
@@ -269,7 +277,7 @@ async function replaceMatches(all) {
   }
   const keep = all ? 0 : find.current;
   try {
-    const m = await call("patch_segments", { meeting_id: currentMeeting.id, edits });
+    const m = await call("patch_segments", { meeting_id: state.currentMeeting.id, edits });
     find.current = keep; // refreshFind (via renderResult) clamps this onto the next match
     renderResult(m);
     if (all) showToast(`Replaced ${targets.length} match${targets.length === 1 ? "" : "es"}`, 2500, true);
@@ -280,7 +288,7 @@ async function replaceMatches(all) {
 }
 
 // One-time wiring for the find bar (called from initApp).
-function setupFind() {
+export function setupFind() {
   $("find-toggle-btn").addEventListener("click", () => (find.open ? closeFind() : openFind()));
   $("find-close").addEventListener("click", closeFind);
   $("find-prev").addEventListener("click", () => gotoMatch(find.current - 1));
