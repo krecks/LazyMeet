@@ -79,14 +79,12 @@ fn main() {
     // Short generation pass as the bandwidth-bound reference point.
     let mut sampler = LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::dist(42)]);
     let gen_n = 64usize;
-    let mut n_cur = batch.n_tokens();
     let t1 = Instant::now();
-    for _ in 0..gen_n {
+    for n_cur in (batch.n_tokens()..).take(gen_n) {
         let token = sampler.sample(&lctx, batch.n_tokens() - 1);
         sampler.accept(token);
         batch.clear();
         batch.add(token, n_cur, &[0], true).expect("batch add");
-        n_cur += 1;
         lctx.decode(&mut batch).expect("decode");
     }
     let gen = t1.elapsed().as_secs_f64();

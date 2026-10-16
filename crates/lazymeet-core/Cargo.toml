@@ -23,7 +23,7 @@ native-pipeline = [
 # Build llama.cpp's CPU kernels as runtime-dispatched loadable modules
 # (GGML_CPU_ALL_VARIANTS): one binary serves SSE2-only through AVX512 CPUs at
 # full speed. Turns libllama into shared libs — the backend modules must ship
-# next to the executable (see llama_backend() in pipeline/native.rs).
+# next to the executable (see llama_backend() in pipeline/native/llm.rs).
 llama-dynamic-backends = ["native-pipeline", "llama-cpp-2/dynamic-backends"]
 # GPU summarization via Vulkan, as a loadable module: on machines without a
 # usable driver the module simply fails to load and the CPU variants serve.
