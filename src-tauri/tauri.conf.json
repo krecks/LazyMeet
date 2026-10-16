@@ -4,6 +4,7 @@
   "version": "0.1.7",
   "identifier": "ai.lazymeet.app",
   "build": {
+    "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../frontend/dist"

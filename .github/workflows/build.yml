@@ -26,6 +26,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 7 needs >= 20.19; pin it rather than rely on the runner image.
+          node-version: 22
+          cache: npm
       - name: Formatting (rustfmt.toml)
         run: cargo fmt --all --check
       - name: Frontend typecheck (tsc)
@@ -114,6 +119,11 @@ jobs:
       - uses: cargo-bins/cargo-binstall@main
       - name: Install Tauri CLI
         run: cargo binstall tauri-cli --locked --no-confirm
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 7 needs >= 20.19; pin it rather than rely on the runner image.
+          node-version: 22
+          cache: npm
       - name: Install frontend deps
         # beforeBuildCommand runs `npm run build` (tsc + vite).
         run: npm ci
