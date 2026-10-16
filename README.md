@@ -205,8 +205,12 @@ cargo test -p lazymeet-core --no-default-features
 
 The frontend is TypeScript ES modules in `frontend/ts/`, bundled by Vite into
 `frontend/dist/` (`npm run build`; `npm run dev` serves it with HMR while
-developing). The bundle is not committed — `cargo tauri build` runs
-`npm run build` itself, so `npm ci` must have run once. Checks:
+developing). The bundle is not committed — `cargo tauri dev`/`build` run
+`npm run dev`/`npm run build` themselves, so `npm ci` must have run once. A
+plain `cargo build`/`clippy` of `src-tauri` embeds `frontend/dist` at compile
+time, so run `npm run build` first. Keep `@tauri-apps/api` (package.json) on
+the same major.minor as the `tauri` crate — tauri-cli refuses to build when
+they differ. Checks:
 `npm run typecheck` (tsc, no emit), `npm run build` (typecheck + bundle), and
 `./scripts/smoke_frontend.sh`, which builds the bundle in smoke mode with the
 Tauri API stubbed out and boots it headlessly to assert the first-run state

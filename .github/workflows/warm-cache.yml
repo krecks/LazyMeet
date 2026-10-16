@@ -67,6 +67,16 @@ jobs:
         shell: bash
         run: ./scripts/fetch_ffmpeg.sh
 
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 7 needs >= 20.19; pin it rather than rely on the runner image.
+          node-version: 22
+          cache: npm
+      # tauri::generate_context!() embeds frontendDist (frontend/dist, not
+      # committed) at compile time, so the bundle must exist first.
+      - name: Build frontend bundle
+        run: npm ci && npm run build
+
       - name: Build release workspace (fills the cache)
         # macOS mirrors the release build's explicit --target (see build.yml):
         # cargo puts artifacts under target/<triple>/ when a target is passed,
