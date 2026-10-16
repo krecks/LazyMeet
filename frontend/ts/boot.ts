@@ -1,11 +1,37 @@
 // --------------------------------------------------------------------------
 // Boot
 // --------------------------------------------------------------------------
-let appInitialized = false;
+
+import { $, listen } from "./core";
+import { showFatal, showToast } from "./helpers";
+import { onMeetingUpdated } from "./meeting";
+import { refreshMeetings, renderMeetingList, setupDropzone } from "./meetings";
+import { setupPrepare } from "./prepare";
+import { queueGlobalSearch, setupGlobalSearch } from "./search";
+import {
+  applyBenchRecommendation,
+  closeBench,
+  closeSettings,
+  closeSpeakers,
+  onBenchProgress,
+  onModelsProgress,
+  openBench,
+  openSettings,
+  openSpeakers,
+  pickBenchmarkFile,
+  refreshSpeakers,
+  resetConfig,
+  revealDataDir,
+  saveConfig,
+  startBenchmark,
+} from "./settings";
+import { applySetupStatus, retrySetup, toggleDownloadPopover, watchSetup } from "./setup";
+import { state } from "./state";
+import { setupFind } from "./transcript";
 
 function initApp() {
-  if (appInitialized) return;
-  appInitialized = true;
+  if (state.appInitialized) return;
+  state.appInitialized = true;
   $("setup").classList.add("hidden");
   $("app").classList.remove("hidden");
   setupDropzone();
@@ -25,9 +51,9 @@ function initApp() {
   $("config-reset").addEventListener("click", resetConfig);
   $("reveal-btn").addEventListener("click", revealDataDir);
   $("meeting-search").addEventListener("input", (e) => {
-    searchQuery = e.target.value;
+    state.searchQuery = e.target.value;
     renderMeetingList(); // the sidebar title filter stays instant
-    queueGlobalSearch(searchQuery); // the disk scan waits for a pause
+    queueGlobalSearch(state.searchQuery); // the disk scan waits for a pause
   });
   refreshMeetings();
   refreshSpeakers();
@@ -41,9 +67,9 @@ async function main() {
   await listen("benchmark-progress", (e) => onBenchProgress(e.payload));
   await listen("setup-progress", (e) => {
     applySetupStatus(e.payload);
-    if (e.payload.ready && setupReadyResolve) {
-      setupReadyResolve();
-      setupReadyResolve = null;
+    if (e.payload.ready && state.setupReadyResolve) {
+      state.setupReadyResolve();
+      state.setupReadyResolve = null;
     }
   });
 
@@ -56,7 +82,7 @@ async function main() {
     if (outside) toggleDownloadPopover(false);
   });
   await watchSetup();
-  const backgrounded = appInitialized;
+  const backgrounded = state.appInitialized;
   initApp();
   $("dl-pill").classList.add("hidden");
   toggleDownloadPopover(false);

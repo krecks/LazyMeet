@@ -1,7 +1,10 @@
 // --------------------------------------------------------------------------
 // Settings
 // --------------------------------------------------------------------------
-const LANGUAGES = [
+import { $, call } from "./core";
+import { confirmThen, el, fmtBytes, iconBtn, showToast } from "./helpers";
+
+export const LANGUAGES = [
   ["en", "English"], ["de", "German"], ["fr", "French"], ["es", "Spanish"],
   ["it", "Italian"], ["pt", "Portuguese"], ["nl", "Dutch"], ["pl", "Polish"],
   ["ru", "Russian"], ["uk", "Ukrainian"], ["tr", "Turkish"],
@@ -119,7 +122,7 @@ const CONFIG_META: Record<string, ConfigMeta> = {
 
 let lastModels = null;
 
-async function openSettings() {
+export async function openSettings() {
   $("app").classList.add("hidden");
   $("settings").classList.remove("hidden");
   try {
@@ -135,32 +138,30 @@ async function openSettings() {
   }
 }
 
-function closeSettings() {
+export function closeSettings() {
   $("settings").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
 
-let benchRunning = false;
 let benchRec = null; // recommendation from the last completed run
 
-function openBench() {
+export function openBench() {
   $("app").classList.add("hidden");
   $("bench").classList.remove("hidden");
 }
 
-function closeBench() {
+export function closeBench() {
   $("bench").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
 
-async function startBenchmark(path) {
+export async function startBenchmark(path) {
   try {
     $("bench-results").classList.add("hidden");
     $("bench-results").querySelector("tbody").innerHTML = "";
     $("bench-rec").classList.add("hidden");
     $("bench-apply").classList.add("hidden");
     await call("run_benchmark", { path: path || null });
-    benchRunning = true;
     $("bench-run").disabled = true;
     $("bench-run-file").disabled = true;
     $("bench-status").textContent = "Starting…";
@@ -169,7 +170,7 @@ async function startBenchmark(path) {
   }
 }
 
-async function pickBenchmarkFile() {
+export async function pickBenchmarkFile() {
   try {
     const path = await call("pick_recording");
     if (path) startBenchmark(path);
@@ -179,7 +180,7 @@ async function pickBenchmarkFile() {
 }
 
 // `benchmark-progress` events: rows accumulate as each measurement lands.
-function onBenchProgress(p) {
+export function onBenchProgress(p) {
   if (p.threads) {
     const env = $("bench-env");
     const cores = p.cores
@@ -218,13 +219,11 @@ function onBenchProgress(p) {
   if (p.status === "running") {
     $("bench-status").textContent = p.step || "Measuring…";
   } else if (p.status === "done") {
-    benchRunning = false;
     $("bench-run").disabled = false;
     $("bench-run-file").disabled = false;
     $("bench-status").textContent = "Done.";
     renderBenchRecommendation(p.recommendation, p.current);
   } else if (p.status === "error") {
-    benchRunning = false;
     $("bench-run").disabled = false;
     $("bench-run-file").disabled = false;
     $("bench-status").textContent = `Benchmark failed: ${p.message}`;
@@ -262,7 +261,7 @@ function renderBenchRecommendation(rec, current) {
   $("bench-apply").classList.toggle("hidden", matches);
 }
 
-async function applyBenchRecommendation() {
+export async function applyBenchRecommendation() {
   if (!benchRec) return;
   try {
     await call("put_config", { fields: benchRec });
@@ -275,18 +274,18 @@ async function applyBenchRecommendation() {
   }
 }
 
-function openSpeakers() {
+export function openSpeakers() {
   $("app").classList.add("hidden");
   $("speakers").classList.remove("hidden");
   refreshSpeakers();
 }
 
-function closeSpeakers() {
+export function closeSpeakers() {
   $("speakers").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
 
-async function refreshSpeakers() {
+export async function refreshSpeakers() {
   let names;
   try {
     names = await call("get_speakers");
@@ -618,7 +617,7 @@ function refreshModelStatuses() {
 
 // `models-progress` events keep the settings progress bars moving while any
 // on-demand download runs (replaces the old 1.2 s polling loop).
-function onModelsProgress(models) {
+export function onModelsProgress(models) {
   const before = lastModels
     ? new Set(
         ["asr", "diar", "summary"].flatMap((s) =>
@@ -654,7 +653,7 @@ function collectConfigValues() {
   return body;
 }
 
-async function saveConfig() {
+export async function saveConfig() {
   try {
     const cfg = await call("put_config", { fields: collectConfigValues() });
     const models = await call("get_models");
@@ -665,7 +664,7 @@ async function saveConfig() {
   }
 }
 
-async function resetConfig() {
+export async function resetConfig() {
   const body = {};
   for (const name of Object.keys(CONFIG_META)) body[name] = null;
   try {
@@ -690,7 +689,7 @@ function renderDataSection(data) {
   $("data-usage").textContent = parts.join(" · ");
 }
 
-async function revealDataDir() {
+export async function revealDataDir() {
   try {
     await call("reveal_data_dir");
   } catch (e) {

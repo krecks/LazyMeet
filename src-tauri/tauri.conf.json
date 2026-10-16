@@ -4,12 +4,11 @@
   "version": "0.1.7",
   "identifier": "ai.lazymeet.app",
   "build": {
-    "beforeDevCommand": "npm run watch",
+    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../frontend"
+    "frontendDist": "../frontend/dist"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",

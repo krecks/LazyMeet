@@ -4,6 +4,13 @@
 // the fast path stays one click ("Transcribe"). A selection that isn't the
 // whole file goes to create_meeting as ranges = [[start, end], ...] seconds.
 // --------------------------------------------------------------------------
+import { $, call, convertFileSrc } from "./core";
+import { el, fmtTs, iconBtn, showToast } from "./helpers";
+import { selectMeeting } from "./meeting";
+import { refreshMeetings } from "./meetings";
+import { LANGUAGES } from "./settings";
+import { state } from "./state";
+
 let prep = null; // { path, filename, duration, peaks, ranges, probeFailed,
 //                    hoverIndex, view: {start, end} | null (zoom window),
 //                    fallbackTried, fallbackPending (audio-preview fallback) }
@@ -22,7 +29,7 @@ function basename(path) {
   return String(path).split(/[\\/]/).pop();
 }
 
-async function openPrepare(path) {
+export async function openPrepare(path) {
   releasePrepMedia();
   prep = {
     path,
@@ -147,7 +154,7 @@ function closePrepare() {
 }
 
 async function startTranscription() {
-  if (uploading || !prep) return;
+  if (state.uploading || !prep) return;
   if (!prep.probeFailed && prep.ranges.length === 0) return;
   // A whole-file selection (and a failed probe) goes as null — the backend
   // then behaves exactly as before this screen existed.
@@ -158,7 +165,7 @@ async function startTranscription() {
       prep.ranges[0].end >= prep.duration - 0.05);
   const ranges = whole ? null : prep.ranges.map((r) => [r.start, r.end]);
   const numSpeakers = parseInt($("num-speakers")?.value ?? "-1", 10);
-  uploading = true;
+  state.uploading = true;
   $("prep-transcribe").disabled = true;
   try {
     const { id } = await call("create_meeting", {
@@ -174,7 +181,7 @@ async function startTranscription() {
     showToast(`Couldn't start transcription: ${e.message}`);
     $("prep-transcribe").disabled = false;
   } finally {
-    uploading = false;
+    state.uploading = false;
   }
 }
 
@@ -205,7 +212,7 @@ function renderPrep() {
   drawWave();
   renderRangeList();
   const canTranscribe = prep.probeFailed || prep.ranges.length > 0;
-  $("prep-transcribe").disabled = !canTranscribe || uploading;
+  $("prep-transcribe").disabled = !canTranscribe || state.uploading;
   $("prep-hint").classList.toggle("hidden", canTranscribe);
 }
 
@@ -398,7 +405,7 @@ function setupWaveInteractions() {
   };
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (!prep || !prep.peaks || uploading) return;
+    if (!prep || !prep.peaks || state.uploading) return;
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     const { x, y, w } = relPos(e);
@@ -649,7 +656,7 @@ function addRangeInGap() {
 }
 
 // One-time wiring for the prep screen (called from initApp).
-function setupPrepare() {
+export function setupPrepare() {
   // Spoken-language hint, per recording. Starts on the saved ASR_LANGUAGE
   // setting, then keeps whatever was chosen last (like the Speakers select).
   const langSelect = $("prep-language");
