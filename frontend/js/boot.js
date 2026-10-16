@@ -52,7 +52,8 @@ async function main() {
   $("setup-continue").addEventListener("click", initApp);
   $("dl-pill").addEventListener("click", () => toggleDownloadPopover());
   document.addEventListener("click", (e) => {
-    if (!e.target.closest(".dl-wrap")) toggleDownloadPopover(false);
+    const outside = !(e.target instanceof Element) || !e.target.closest(".dl-wrap");
+    if (outside) toggleDownloadPopover(false);
   });
   await watchSetup();
   const backgrounded = appInitialized;

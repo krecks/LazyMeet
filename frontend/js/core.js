@@ -10,6 +10,7 @@ async function call(cmd, args) {
   try {
     return await tauri.core.invoke(cmd, args);
   } catch (e) {
+    /** @type {ApiError} */
     const err = new Error(e && e.message ? e.message : String(e));
     err.status = e && e.code;
     throw err;
@@ -27,6 +28,9 @@ const STAGES = [
   ["summarizing", "Summarizing"],
 ];
 
+// Ids are static and known-good; the return type stays `any` so the 200-odd
+// call sites don't need per-element casts. Cross-file calls are still checked.
+/** @type {(id: string) => any} */
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------------------

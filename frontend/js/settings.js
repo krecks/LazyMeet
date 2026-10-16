@@ -481,7 +481,7 @@ function renderConfigForm(cfg, models) {
       input.type = "number";
       input.min = limits.min;
       input.max = limits.max;
-      input.step = 1;
+      input.step = "1";
       input.value = cfg.values[name];
       input.disabled = locked;
       input.dataset.config = name;
@@ -626,12 +626,14 @@ function onModelsProgress(models) {
 
 function collectConfigValues() {
   const body = {};
-  for (const input of document.querySelectorAll("#settings [data-config]")) {
+  /** @type {NodeListOf<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>} */
+  const controls = document.querySelectorAll("#settings [data-config]");
+  for (const input of controls) {
     if (input.disabled) continue;
     const name = input.dataset.config;
     if (input.tagName === "SELECT") body[name] = input.value;
     else if (input.tagName === "TEXTAREA") body[name] = input.value.trim() || null; // empty resets to default
-    else if (input.type === "checkbox") body[name] = input.checked;
+    else if (input.type === "checkbox") body[name] = /** @type {HTMLInputElement} */ (input).checked;
     else if (input.type === "number") body[name] = parseInt(input.value, 10);
     else body[name] = parseFloat(input.value);
   }

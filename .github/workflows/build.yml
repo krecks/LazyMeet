@@ -28,6 +28,8 @@ jobs:
           components: rustfmt
       - name: Formatting (rustfmt.toml)
         run: cargo fmt --all --check
+      - name: Frontend typecheck (tsc)
+        run: npm ci && npm run typecheck
       - uses: Swatinem/rust-cache@v2
         with:
           # Save from main only: caches written under a tag ref are invisible
