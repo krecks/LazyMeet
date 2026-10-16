@@ -201,10 +201,12 @@ models or cmake:
 cargo test -p lazymeet-core --no-default-features
 ```
 
-The frontend is plain JavaScript and needs no build step. It is checked two
-ways, both in CI: `npm ci && npm run typecheck` (tsc with `checkJs`, no emit)
-and `./scripts/smoke_frontend.sh` (headless boot + prepare-screen smoke test
-with a stubbed Tauri bridge).
+The frontend source is TypeScript in `frontend/ts/`, compiled to the classic
+scripts in `frontend/js/` (`npm run build`, or `npm run watch` while
+developing). The compiled JS is committed so `cargo tauri build` and the smoke
+test need no node; CI re-runs the build and fails if it drifts. Checks:
+`npm run typecheck` and `./scripts/smoke_frontend.sh` (headless boot +
+prepare-screen smoke test with a stubbed Tauri bridge).
 
 ### Cross-platform builds
 

@@ -1,15 +1,17 @@
 {
-  // Type checking only: the frontend ships as classic scripts loaded by
-  // frontend/index.html, so tsc never emits. `checkJs` checks the existing
-  // .js files as-is — no bundler, no imports, no build step in the app path.
+  // The frontend ships as classic scripts: no imports/exports, one shared page
+  // scope, loaded by frontend/index.html. tsc compiles frontend/ts/*.ts to
+  // frontend/js/*.js, which is committed so `cargo tauri build` and the smoke
+  // test run without node; CI re-runs the build and fails on drift.
   "compilerOptions": {
     "target": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
-    "allowJs": true,
-    "checkJs": true,
-    "noEmit": true,
+    "module": "none",
+    "rootDir": "frontend/ts",
+    "outDir": "frontend/js",
+    "noEmitOnError": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["frontend/js/**/*.js", "frontend/types/**/*.d.ts"]
+  "include": ["frontend/ts/**/*.ts"]
 }
