@@ -156,6 +156,12 @@ pub struct CatalogEntry {
     /// "cohere_transcribe");
     /// diarization: engine ("nemotron" | "pyannote"); empty for LLMs.
     pub kind: &'static str,
+    /// ASR: the spoken-language codes the model accepts as a setting
+    /// (empty = every app language).
+    pub languages: &'static [&'static str],
+    /// ASR: true when the model cannot detect the language itself, so
+    /// "auto" is not a valid setting for it.
+    pub needs_language: bool,
     /// ASR: model dir under models_dir; diarization: the model file; LLM:
     /// the GGUF filename.
     pub path: PathBuf,
@@ -164,9 +170,26 @@ pub struct CatalogEntry {
     pub spec: ModelSpec,
 }
 
+impl CatalogEntry {
+    /// The label up to its " — " description ("Cohere Transcribe 2B").
+    pub fn short_name(&self) -> &str {
+        self.label.split(" — ").next().unwrap_or(self.id)
+    }
+}
+
 pub const ASR_DEFAULT: &str = "parakeet-tdt-0.6b-v3";
 pub const DIAR_DEFAULT: &str = "nemotron-3-diarization";
 pub const LLM_DEFAULT: &str = "qwen3.5-4b";
+
+/// The spoken languages Cohere Transcribe decodes; it cannot detect one.
+pub const COHERE_LANGUAGES: &[&str] =
+    &["ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"];
+
+/// Qwen3-ASR's hints among the app languages: Ukrainian is not one of its
+/// languages (it still transcribes it with its own detection).
+const QWEN3_ASR_LANGUAGES: &[&str] = &[
+    "en", "de", "fr", "es", "it", "pt", "nl", "pl", "ru", "tr", "zh", "ja", "ko", "ar", "el", "vi",
+];
 
 pub fn asr_catalog() -> Vec<CatalogEntry> {
     let specs = model_specs();
@@ -176,6 +199,8 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
             label: "Parakeet TDT 0.6B v3 — 25 European languages (default)".into(),
             size: "≈700 MB".into(),
             kind: "nemo_transducer",
+            languages: &[],
+            needs_language: false,
             path: PathBuf::from("parakeet"),
             pros: vec![
                 "Best accuracy for European languages, incl. German and English",
@@ -193,6 +218,8 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
             label: "Whisper Small — 90+ languages".into(),
             size: "≈600 MB download".into(),
             kind: "whisper",
+            languages: &[],
+            needs_language: false,
             path: PathBuf::from("whisper-small"),
             pros: vec![
                 "Widest coverage — 90+ languages incl. Chinese, Japanese, Korean",
@@ -222,6 +249,8 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
             label: "Whisper Base — smallest, less accurate".into(),
             size: "≈150 MB download".into(),
             kind: "whisper",
+            languages: &[],
+            needs_language: false,
             path: PathBuf::from("whisper-base"),
             pros: vec![
                 "Smallest download and lowest memory use",
@@ -251,6 +280,8 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
             label: "Qwen3-ASR 0.6B — 30 languages incl. Chinese, Japanese, Korean".into(),
             size: "≈880 MB download".into(),
             kind: "qwen3_asr",
+            languages: QWEN3_ASR_LANGUAGES,
+            needs_language: false,
             path: PathBuf::from("qwen3-asr-0.6b"),
             pros: vec![
                 "Wide coverage — 30 languages plus 22 Chinese dialects",
@@ -283,6 +314,8 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
             label: "Cohere Transcribe 2B — 14 languages, most accurate".into(),
             size: "≈1.7 GB download".into(),
             kind: "cohere_transcribe",
+            languages: COHERE_LANGUAGES,
+            needs_language: true,
             path: PathBuf::from("cohere-transcribe"),
             pros: vec![
                 "Most accurate open model for English and the major European languages",
@@ -323,6 +356,8 @@ pub fn diar_catalog() -> Vec<CatalogEntry> {
             label: "Nemotron 3 Diarization — up to 8 speakers (default)".into(),
             size: "≈120 MB".into(),
             kind: "nemotron",
+            languages: &[],
+            needs_language: false,
             path: PathBuf::from("nemotron-3-diarization/model_quantized.onnx"),
             pros: vec![
                 "Fewer mixed-up or invented speakers",
@@ -340,6 +375,8 @@ pub fn diar_catalog() -> Vec<CatalogEntry> {
             label: "Classic (pyannote 3.0) — any number of speakers".into(),
             size: "≈6 MB download".into(),
             kind: "pyannote",
+            languages: &[],
+            needs_language: false,
             path: PathBuf::from("diarization_segmentation.onnx"),
             pros: vec![
                 "No limit on the number of speakers",
@@ -368,6 +405,8 @@ fn qwen35(
         label: format!("Qwen 3.5 {size} — {note}{}", if default { " (default)" } else { "" }),
         size: if default { gb.to_string() } else { format!("{gb} download") },
         kind: "",
+        languages: &[],
+        needs_language: false,
         path: PathBuf::from(&fname),
         pros,
         cons,
@@ -621,6 +660,10 @@ fn entry_ready(ctx: &Ctx, entry: &CatalogEntry) -> bool {
 
 pub struct AsrPaths {
     pub kind: &'static str,
+    /// Short display name ("Cohere Transcribe 2B"), for messages.
+    pub name: String,
+    pub languages: &'static [&'static str],
+    pub needs_language: bool,
     pub encoder: PathBuf,
     pub decoder: PathBuf,
     pub joiner: PathBuf,
@@ -637,16 +680,13 @@ pub fn resolve_asr(ctx: &Ctx, model_id: &str) -> AsrPaths {
 
 /// Ctx-free variant for the pipeline (which only carries models_dir + fake).
 pub fn resolve_asr_at(models_dir: &std::path::Path, fake: bool, model_id: &str) -> AsrPaths {
-    let catalog = asr_catalog();
-    let entry = catalog
-        .iter()
-        .find(|e| e.id == model_id)
-        .filter(|e| fake || models_dir.join(&e.spec.marker).exists())
-        .or_else(|| catalog.iter().find(|e| e.id == ASR_DEFAULT))
-        .unwrap();
+    let entry = effective_asr_entry(models_dir, fake, model_id);
     let d = models_dir.join(&entry.path);
     AsrPaths {
         kind: entry.kind,
+        name: entry.short_name().to_string(),
+        languages: entry.languages,
+        needs_language: entry.needs_language,
         encoder: d.join("encoder.onnx"),
         decoder: d.join("decoder.onnx"),
         joiner: d.join("joiner.onnx"),
@@ -654,6 +694,46 @@ pub fn resolve_asr_at(models_dir: &std::path::Path, fake: bool, model_id: &str) 
         conv_frontend: d.join("conv_frontend.onnx"),
         tokenizer: d.join("tokenizer"),
     }
+}
+
+/// The ASR catalog entry a job would run: the selection once it is on disk,
+/// else the default the first run installs.
+pub fn effective_asr_entry(
+    models_dir: &std::path::Path,
+    fake: bool,
+    model_id: &str,
+) -> CatalogEntry {
+    let catalog = asr_catalog();
+    let pick = catalog
+        .iter()
+        .position(|e| e.id == model_id && (fake || models_dir.join(&e.spec.marker).exists()))
+        .or_else(|| catalog.iter().position(|e| e.id == ASR_DEFAULT))
+        .unwrap();
+    catalog.into_iter().nth(pick).unwrap()
+}
+
+/// Why the spoken-language setting `code` ("auto" or a language code) can't
+/// be used with the ASR model `entry`, or None when it can.
+pub fn asr_language_problem(entry: &CatalogEntry, code: &str) -> Option<String> {
+    language_problem(entry.short_name(), entry.languages, entry.needs_language, code)
+}
+
+pub(crate) fn language_problem(
+    model: &str,
+    languages: &[&str],
+    needs_language: bool,
+    code: &str,
+) -> Option<String> {
+    let auto = code.is_empty() || code == "auto";
+    if auto && needs_language {
+        return Some(format!(
+            "{model} can't detect the spoken language — choose the language of the recording"
+        ));
+    }
+    if !auto && needs_language && !languages.contains(&code) {
+        return Some(format!("{model} doesn't transcribe this language — choose another model"));
+    }
+    None
 }
 
 /// The diarization engine to run and its model file. A meeting set to more
@@ -706,6 +786,8 @@ fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry]) -> Vec<Value> {
                 "id": entry.id,
                 "label": entry.label,
                 "size": entry.size,
+                "languages": entry.languages,
+                "needs_language": entry.needs_language,
                 "pros": entry.pros,
                 "cons": entry.cons,
                 "ready": entry_ready(ctx, entry),

@@ -203,3 +203,33 @@ fn atomic_writes_leave_no_temp_files() {
         .collect();
     assert!(leftovers.is_empty());
 }
+
+#[test]
+fn legacy_use_gpu_carries_over_to_summary_provider() {
+    let app = TestApp::fake();
+    std::fs::write(app.ctx.paths.config_file(), r#"{"USE_GPU": false, "NUM_THREADS": 1}"#).unwrap();
+    let overrides = config::load_overrides(&app.ctx.paths);
+    assert_eq!(overrides.get("SUMMARY_PROVIDER"), Some(&json!("cpu")));
+    assert!(overrides.get("USE_GPU").is_none());
+    // An explicit SUMMARY_PROVIDER wins over the legacy key.
+    let options = config::summary_provider_options();
+    let explicit = options.last().unwrap();
+    std::fs::write(
+        app.ctx.paths.config_file(),
+        format!(r#"{{"USE_GPU": false, "SUMMARY_PROVIDER": "{explicit}"}}"#),
+    )
+    .unwrap();
+    let overrides = config::load_overrides(&app.ctx.paths);
+    assert_eq!(overrides.get("SUMMARY_PROVIDER"), Some(&json!(explicit)));
+}
+
+#[test]
+fn config_payload_lists_the_languages() {
+    let app = TestApp::fake();
+    let data = api::config_payload(&app.ctx);
+    let codes: Vec<&str> =
+        data["languages"].as_array().unwrap().iter().map(|l| l[0].as_str().unwrap()).collect();
+    for code in ["en", "de", "ar", "el", "vi"] {
+        assert!(codes.contains(&code), "missing {code}");
+    }
+}

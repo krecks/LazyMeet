@@ -240,3 +240,19 @@ fn deleted_queued_meeting_is_skipped() {
     // The deleted meeting produced no processing events at all.
     assert!(status_events(&app.events, &b).is_empty());
 }
+
+#[test]
+fn meetings_wait_for_a_running_benchmark() {
+    // A benchmark holds the machine: an upload made meanwhile stays queued
+    // and starts once the benchmark gives the machine back.
+    let app = TestApp::fake();
+    assert_eq!(jobs::claim_for_benchmark(&app.ctx), None);
+    assert!(jobs::claim_for_benchmark(&app.ctx).is_some(), "second claim must fail");
+    let mid = app.upload("during-bench.mp4", b"fake video bytes");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(api::get_meeting(&app.ctx, &mid).unwrap()["status"], "queued");
+
+    jobs::release_from_benchmark(&app.ctx);
+    let meeting = app.wait_terminal(&mid);
+    assert_eq!(meeting["status"], "done");
+}

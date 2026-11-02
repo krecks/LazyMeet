@@ -389,11 +389,20 @@ pub fn load_overrides(paths: &Paths) -> Map<String, Value> {
     let Value::Object(data) = data else { return Map::new() };
     let specs: BTreeMap<&str, TunableSpec> = tunables().into_iter().map(|s| (s.name, s)).collect();
     let mut out = Map::new();
+    // Configs from before v0.1.1 carry USE_GPU, which SUMMARY_PROVIDER replaced:
+    // carry the choice over (dropped from the file on the next save).
+    let legacy_gpu = data.get("USE_GPU").and_then(Value::as_bool);
     for (name, raw) in data {
         if let Some(spec) = specs.get(name.as_str()) {
             if let Some(value) = coerce(spec, &raw) {
                 out.insert(name, value);
             }
+        }
+    }
+    if let Some(gpu) = legacy_gpu {
+        let provider = if gpu { "gpu" } else { "cpu" };
+        if !out.contains_key("SUMMARY_PROVIDER") && summary_provider_options().contains(&provider) {
+            out.insert("SUMMARY_PROVIDER".into(), json!(provider));
         }
     }
     out

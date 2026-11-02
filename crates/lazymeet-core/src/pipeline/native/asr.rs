@@ -86,38 +86,27 @@ pub(super) fn recognizer_config(
     config
 }
 
-/// The languages Cohere Transcribe decodes. It cannot detect one itself.
-const COHERE_LANGUAGES: &[&str] =
-    &["ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"];
-
-/// How one ASR kind takes the configured language `code` ("" = auto):
-/// returns (code for the model config, per-stream hint).
-fn asr_language(kind: &str, code: &str) -> Result<(String, Option<&'static str>), String> {
-    match kind {
+/// How the ASR model `spec` takes the configured language `code` ("" =
+/// auto): returns (code for the model config, per-stream hint), or why the
+/// pair can't run.
+fn asr_language(spec: &AsrPaths, code: &str) -> Result<(String, Option<&'static str>), String> {
+    if let Some(problem) =
+        crate::models::language_problem(&spec.name, spec.languages, spec.needs_language, code)
+    {
+        return Err(problem);
+    }
+    match spec.kind {
         // Qwen3-ASR takes the hint as a language name ("German") on each
-        // stream. Ukrainian is not among its languages, so that hint is left
-        // to its own detection rather than forced.
+        // stream; codes outside its languages are left to its own detection.
         "qwen3_asr" => {
             let name = super::super::LANGUAGE_NAMES
                 .iter()
-                .find(|(c, _)| *c == code && code != "uk")
+                .find(|(c, _)| *c == code && spec.languages.contains(c))
                 .map(|(_, name)| *name);
             Ok((String::new(), name))
         }
-        "cohere_transcribe" if COHERE_LANGUAGES.contains(&code) => Ok((code.to_string(), None)),
-        "cohere_transcribe" => Err(format!(
-            "Cohere Transcribe can't detect the spoken language — set one of {} \
-             (current: {})",
-            // Only the codes the language setting accepts.
-            super::super::LANGUAGE_NAMES
-                .iter()
-                .map(|(c, _)| *c)
-                .filter(|c| COHERE_LANGUAGES.contains(c))
-                .collect::<Vec<_>>()
-                .join(", "),
-            if code.is_empty() { "auto" } else { code }
-        )),
-        // Whisper: "" lets it detect; Parakeet always detects.
+        // Whisper and Cohere take the code in the model config ("" lets
+        // Whisper detect); Parakeet always detects.
         _ => Ok((code.to_string(), None)),
     }
 }
@@ -126,7 +115,7 @@ pub(super) fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recogni
     let spec = resolve_asr_at(ctx.models_dir, ctx.fake, &ctx.config.asr_model());
     let code = ctx.config.asr_language();
     let code = if code == "auto" { "" } else { code.as_str() };
-    let (config_code, language) = asr_language(spec.kind, code)?;
+    let (config_code, language) = asr_language(&spec, code)?;
     let config = recognizer_config(&spec, &config_code, &ctx.config.asr_provider(), threads);
     let inner = OfflineRecognizer::create(&config)
         .ok_or_else(|| format!("could not load the {} transcription model", spec.kind))?;

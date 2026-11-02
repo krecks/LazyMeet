@@ -151,6 +151,9 @@ pub const LANGUAGE_NAMES: &[(&str, &str)] = &[
     ("zh", "Chinese"),
     ("ja", "Japanese"),
     ("ko", "Korean"),
+    ("ar", "Arabic"),
+    ("el", "Greek"),
+    ("vi", "Vietnamese"),
 ];
 
 pub struct PipelineCtx<'a> {
