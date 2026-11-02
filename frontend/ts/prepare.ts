@@ -8,7 +8,7 @@ import { $, call, convertFileSrc } from "./core";
 import { el, fmtTs, iconBtn, showToast } from "./helpers";
 import { selectMeeting } from "./meeting";
 import { refreshMeetings } from "./meetings";
-import { LANGUAGES } from "./settings";
+import { fillLanguageSelect, modelName } from "./settings";
 import { state } from "./state";
 
 let prep = null; // { path, filename, duration, peaks, ranges, probeFailed,
@@ -29,6 +29,26 @@ function basename(path) {
   return String(path).split(/[\\/]/).pop();
 }
 
+/** The spoken-language select, rebuilt on every open: it starts on the
+ *  saved default and offers only what the transcription model that will run
+ *  takes (Cohere Transcribe: no auto-detect, its 14 languages). */
+async function syncPrepLanguage() {
+  const select = $("prep-language") as HTMLSelectElement;
+  const note = $("prep-language-note");
+  try {
+    const [cfg, models] = await Promise.all([call("get_config"), call("get_models")]);
+    // The selection runs once it's downloaded; until then the default does.
+    const model = models.asr.options.find((o) => o.id === cfg.values.ASR_MODEL && o.ready) || null;
+    fillLanguageSelect(select, cfg.languages, cfg.values.ASR_LANGUAGE, model);
+    note.textContent = model?.needs_language
+      ? `${modelName(model)} needs the spoken language.`
+      : "";
+    note.classList.toggle("hidden", !model?.needs_language);
+  } catch {
+    if (!select.options.length) select.appendChild(new Option("Auto-detect", "auto"));
+  }
+}
+
 export async function openPrepare(path) {
   releasePrepMedia();
   prep = {
@@ -47,6 +67,7 @@ export async function openPrepare(path) {
     $(screen).classList.add("hidden");
   }
   $("prepare").classList.remove("hidden");
+  syncPrepLanguage();
   $("prep-file").textContent = prep.filename;
   $("prep-nopreview").classList.add("hidden");
   $("prep-video").classList.remove("audio-only", "hidden");
@@ -146,7 +167,7 @@ function releasePrepMedia() {
   prepPlayingIndex = null;
 }
 
-function closePrepare() {
+export function closePrepare() {
   releasePrepMedia();
   prep = null;
   $("prepare").classList.add("hidden");
@@ -657,24 +678,6 @@ function addRangeInGap() {
 
 // One-time wiring for the prep screen (called from initApp).
 export function setupPrepare() {
-  // Spoken-language hint, per recording. Starts on the saved ASR_LANGUAGE
-  // setting, then keeps whatever was chosen last (like the Speakers select).
-  const langSelect = $("prep-language");
-  for (const [code, name] of [["auto", "Auto-detect"], ...LANGUAGES]) {
-    const opt = document.createElement("option");
-    opt.value = code;
-    opt.textContent = name;
-    langSelect.appendChild(opt);
-  }
-  call("get_config")
-    .then((cfg) => {
-      const saved = cfg?.values?.ASR_LANGUAGE;
-      if (saved && [...langSelect.options].some((o) => o.value === saved)) {
-        langSelect.value = saved;
-      }
-    })
-    .catch(() => {});
-
   $("prep-back").addEventListener("click", closePrepare);
   $("prep-cancel").addEventListener("click", closePrepare);
   $("prep-transcribe").addEventListener("click", startTranscription);

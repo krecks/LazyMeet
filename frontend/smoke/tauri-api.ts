@@ -5,11 +5,27 @@
 // against a fake backend instead of the Rust one. Unknown commands resolve to
 // null, so a new command at boot shows up as a smoke failure rather than a
 // crash in the real app.
-export async function invoke(cmd: string, _args?: Record<string, unknown>): Promise<any> {
+import { config, models } from "./fixtures";
+
+export const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
+
+export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<any> {
+  calls.push({ cmd, args });
   if (cmd === "get_setup") return { ready: true, items: [] };
   if (cmd === "list_meetings") return [];
   if (cmd === "get_speakers") return [];
-  if (cmd === "get_config") return { values: {} };
+  if (cmd === "get_config" || cmd === "put_config") return config();
+  if (cmd === "get_models" || cmd === "remove_model") return models();
+  if (cmd === "get_data_info") {
+    return {
+      data_dir: "/Users/you/Library/Application Support/LazyMeet",
+      total_bytes: 9.1e9,
+      models_bytes: 8.6e9,
+      meetings_bytes: 2.1e6,
+      uploads_bytes: 4.9e8,
+      meeting_count: 5,
+    };
+  }
   if (cmd === "probe_media") {
     return { duration: 3, peaks: Array.from({ length: 64 }, (_, i) => Math.abs(Math.sin(i))) };
   }

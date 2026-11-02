@@ -13,6 +13,7 @@ import {
   closeBench,
   closeSettings,
   closeSpeakers,
+  discardConfig,
   onBenchProgress,
   onModelsProgress,
   openBench,
@@ -42,13 +43,22 @@ function initApp() {
   $("settings-back").addEventListener("click", closeSettings);
   $("speakers-btn").addEventListener("click", openSpeakers);
   $("speakers-back").addEventListener("click", closeSpeakers);
-  $("bench-btn").addEventListener("click", openBench);
+  $("bench-btn").addEventListener("click", () => openBench("app"));
   $("bench-back").addEventListener("click", closeBench);
   $("bench-run").addEventListener("click", () => startBenchmark(null));
   $("bench-run-file").addEventListener("click", pickBenchmarkFile);
   $("bench-apply").addEventListener("click", applyBenchRecommendation);
   $("config-save").addEventListener("click", saveConfig);
+  $("config-discard").addEventListener("click", discardConfig);
   $("config-reset").addEventListener("click", resetConfig);
+  // Esc leaves the full-screen pages, like the prep screen.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if ((e.target as HTMLElement)?.closest?.("input, textarea, select")) return;
+    if (!$("settings").classList.contains("hidden")) closeSettings();
+    else if (!$("speakers").classList.contains("hidden")) closeSpeakers();
+    else if (!$("bench").classList.contains("hidden")) closeBench();
+  });
   $("reveal-btn").addEventListener("click", revealDataDir);
   $("meeting-search").addEventListener("input", (e) => {
     state.searchQuery = e.target.value;
