@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use common::TestApp;
-use lazymeet_core::models;
+use lazymeet_core::{config, models};
 
 /// Serializes the tests: they set process-wide env vars.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -244,5 +244,42 @@ fn cohere_archive_lands_where_the_recognizer_looks() {
     assert_eq!(std::fs::read(&paths.tokens).unwrap(), b"tokens");
     // The graph loads its weights by this exact name, next to itself.
     let weights = paths.encoder.with_file_name("encoder.int8.onnx.data");
-    assert_eq!(std::fs::read(weights).unwrap(), b"cohere-weights");
+    assert_eq!(std::fs::read(&weights).unwrap(), b"cohere-weights");
+
+    // Removal: refused while it is the active model, then deletes every
+    // file and the directory it leaves empty.
+    let option = |id: &str| {
+        models::models_status(&app.ctx)["asr"]["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(option("cohere-transcribe")["removable"], true);
+    assert!(option("cohere-transcribe")["disk_bytes"].as_u64().unwrap() > 0);
+    // The first-run default can never be removed.
+    assert_eq!(option("parakeet-tdt-0.6b-v3")["removable"], false);
+    assert_eq!(
+        models::remove_model(&app.ctx, "asr", "parakeet-tdt-0.6b-v3").unwrap_err().code,
+        409
+    );
+    assert_eq!(models::remove_model(&app.ctx, "asr", "nope").unwrap_err().code, 404);
+
+    // Selected directly (put_config would also fetch the missing defaults).
+    let select = |fields: &[(&str, serde_json::Value)]| {
+        config::save_overrides(&app.ctx.paths, &common::obj(fields)).unwrap();
+        app.ctx.refresh_config();
+    };
+    select(&[("ASR_MODEL", "cohere-transcribe".into()), ("ASR_LANGUAGE", "de".into())]);
+    assert_eq!(option("cohere-transcribe")["removable"], false);
+    assert_eq!(models::remove_model(&app.ctx, "asr", "cohere-transcribe").unwrap_err().code, 409);
+
+    select(&[]);
+    models::remove_model(&app.ctx, "asr", "cohere-transcribe").unwrap();
+    assert!(!paths.encoder.exists() && !weights.exists() && !paths.tokens.exists());
+    assert!(!paths.encoder.parent().unwrap().exists(), "empty model dir left behind");
+    assert!(app.ctx.paths.models_dir.exists());
+    assert_eq!(option("cohere-transcribe")["ready"], false);
 }

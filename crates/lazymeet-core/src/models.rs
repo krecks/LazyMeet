@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::error::{ApiError, ApiResult};
 use crate::Ctx;
 
 fn env_or(name: &str, default: String) -> String {
@@ -775,13 +776,39 @@ pub fn resolve_llm_at(models_dir: &std::path::Path, fake: bool, model_id: &str) 
     models_dir.join(&entry.path)
 }
 
-fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry]) -> Vec<Value> {
+/// Every file a model puts under models_dir (relative paths).
+fn model_files(spec: &ModelSpec) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = spec.parts.iter().map(|(_, dest)| dest.clone()).collect();
+    files.extend(spec.extract_map.iter().map(|(_, dest)| dest.clone()));
+    files.push(spec.marker.clone());
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// A first-run model (or one sharing its files): the app needs it to run.
+fn is_first_run(entry: &CatalogEntry) -> bool {
+    model_specs().iter().any(|s| s.marker == entry.spec.marker)
+}
+
+fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry], active: &str) -> Vec<Value> {
     let prog = ctx.models.progress.lock().unwrap();
     let inflight = ctx.models.inflight.lock().unwrap();
     catalog
         .iter()
         .map(|entry| {
             let p = prog.items.get(&entry.spec.name).cloned().unwrap_or_default();
+            let ready = entry_ready(ctx, entry);
+            let downloading = inflight.contains(&entry.spec.name);
+            let disk_bytes: u64 = if ready && !ctx.fake {
+                model_files(&entry.spec)
+                    .iter()
+                    .filter_map(|f| std::fs::metadata(ctx.paths.models_dir.join(f)).ok())
+                    .map(|m| m.len())
+                    .sum()
+            } else {
+                0
+            };
             json!({
                 "id": entry.id,
                 "label": entry.label,
@@ -790,11 +817,14 @@ fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry]) -> Vec<Value> {
                 "needs_language": entry.needs_language,
                 "pros": entry.pros,
                 "cons": entry.cons,
-                "ready": entry_ready(ctx, entry),
-                "downloading": inflight.contains(&entry.spec.name),
+                "ready": ready,
+                "downloading": downloading,
                 "downloaded": p.downloaded,
                 "total": p.total,
                 "error": p.error,
+                "disk_bytes": disk_bytes,
+                // On disk, not in use and not needed by the app itself.
+                "removable": ready && !downloading && entry.id != active && !is_first_run(entry),
             })
         })
         .collect()
@@ -802,23 +832,83 @@ fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry]) -> Vec<Value> {
 
 /// The `GET /api/models` payload (also the `models-progress` event payload).
 pub fn models_status(ctx: &Ctx) -> Value {
-    let config = ctx.config.read().unwrap();
+    let (asr, diar, summary) = {
+        let config = ctx.config.read().unwrap();
+        (config.asr_model(), config.diar_model(), config.summary_model())
+    };
     json!({
-        "asr": {"active": config.asr_model(), "options": catalog_options(ctx, &asr_catalog())},
-        "diar": {"active": config.diar_model(), "options": catalog_options(ctx, &diar_catalog())},
-        "summary": {"active": config.summary_model(), "options": catalog_options(ctx, &llm_catalog())},
+        "asr": {"active": asr, "options": catalog_options(ctx, &asr_catalog(), &asr)},
+        "diar": {"active": diar, "options": catalog_options(ctx, &diar_catalog(), &diar)},
+        "summary": {"active": summary, "options": catalog_options(ctx, &llm_catalog(), &summary)},
     })
+}
+
+fn catalog_for(step: &str) -> Option<Vec<CatalogEntry>> {
+    match step {
+        "asr" => Some(asr_catalog()),
+        "diar" => Some(diar_catalog()),
+        "summary" => Some(llm_catalog()),
+        _ => None,
+    }
+}
+
+/// Delete one downloaded selectable model to free disk space. Refused for
+/// the model in use, the first-run models the app needs, a download in
+/// progress, and while a meeting or the benchmark may be reading it.
+pub fn remove_model(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> ApiResult<()> {
+    let entry = catalog_for(step)
+        .and_then(|c| c.into_iter().find(|e| e.id == model_id))
+        .ok_or_else(|| ApiError::not_found("unknown model"))?;
+    let active = {
+        let config = ctx.config.read().unwrap();
+        match step {
+            "asr" => config.asr_model(),
+            "diar" => config.diar_model(),
+            _ => config.summary_model(),
+        }
+    };
+    if entry.id == active {
+        return Err(ApiError::conflict("this model is in use — select another one first"));
+    }
+    if is_first_run(&entry) {
+        return Err(ApiError::conflict("the app needs this model to run"));
+    }
+    if ctx.models.inflight.lock().unwrap().contains(&entry.spec.name) {
+        return Err(ApiError::conflict("this model is still downloading"));
+    }
+    if crate::jobs::is_busy(ctx) || ctx.bench_running.load(Ordering::SeqCst) {
+        return Err(ApiError::conflict("wait until the recording or benchmark has finished"));
+    }
+    let root = &ctx.paths.models_dir;
+    for file in model_files(&entry.spec) {
+        let path = root.join(&file);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(ApiError::internal(format!("could not delete {}: {e}", file.display())))
+            }
+        }
+        // Drop directories the model leaves empty (never models_dir itself).
+        let mut dir = path.parent();
+        while let Some(d) = dir.filter(|d| *d != root.as_path() && d.starts_with(root)) {
+            if std::fs::remove_dir(d).is_err() {
+                break; // not empty (or gone)
+            }
+            dir = d.parent();
+        }
+    }
+    ctx.models.progress.lock().unwrap().items.remove(&entry.spec.name);
+    emit_throttled(ctx, "models-progress", models_status(ctx), true);
+    Ok(())
 }
 
 /// Start a background download of one selectable model (idempotent).
 /// Returns false for an unknown step/id; already-ready and already-running
 /// downloads return true without doing anything.
 pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
-    let catalog = match step {
-        "asr" => asr_catalog(),
-        "diar" => diar_catalog(),
-        "summary" => llm_catalog(),
-        _ => return false,
+    let Some(catalog) = catalog_for(step) else {
+        return false;
     };
     let Some(entry) = catalog.into_iter().find(|e| e.id == model_id) else {
         return false;
