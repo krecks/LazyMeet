@@ -176,6 +176,32 @@ impl CatalogEntry {
     pub fn short_name(&self) -> &str {
         self.label.split(" — ").next().unwrap_or(self.id)
     }
+
+    /// The label's description after " — " ("" when it has none).
+    fn tagline(&self) -> &str {
+        self.label.split_once(" — ").map_or("", |(_, t)| t)
+    }
+
+    /// ASR: why the spoken-language setting `code` ("auto", "" or a language
+    /// code) can't be used with this model, or None when it can.
+    pub fn language_problem(&self, code: &str) -> Option<String> {
+        let model = self.short_name();
+        let auto = code.is_empty() || code == "auto";
+        if !self.needs_language {
+            return None;
+        }
+        if auto {
+            return Some(format!(
+                "{model} can't detect the spoken language — choose the language of the recording"
+            ));
+        }
+        if !self.languages.contains(&code) {
+            return Some(format!(
+                "{model} doesn't transcribe this language — choose another model"
+            ));
+        }
+        None
+    }
 }
 
 pub const ASR_DEFAULT: &str = "parakeet-tdt-0.6b-v3";
@@ -183,7 +209,7 @@ pub const DIAR_DEFAULT: &str = "nemotron-3-diarization";
 pub const LLM_DEFAULT: &str = "qwen3.5-4b";
 
 /// The spoken languages Cohere Transcribe decodes; it cannot detect one.
-pub const COHERE_LANGUAGES: &[&str] =
+const COHERE_LANGUAGES: &[&str] =
     &["ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"];
 
 /// Qwen3-ASR's hints among the app languages: Ukrainian is not one of its
@@ -531,8 +557,9 @@ impl Default for ModelsState {
 
 const EMIT_EVERY: Duration = Duration::from_millis(250);
 
-/// Emit `event` with `payload`, rate-limited unless `force`.
-fn emit_throttled(ctx: &Ctx, event: &str, payload: Value, force: bool) {
+/// Emit `event` with the payload `build` makes, rate-limited unless `force`
+/// (a dropped emission never builds its payload).
+fn emit_throttled(ctx: &Ctx, event: &str, build: impl FnOnce() -> Value, force: bool) {
     if !force {
         let mut last = ctx.models.last_emit.lock().unwrap();
         let now = Instant::now();
@@ -543,7 +570,7 @@ fn emit_throttled(ctx: &Ctx, event: &str, payload: Value, force: bool) {
         }
         last.insert(event.to_string(), now);
     }
-    ctx.events.emit(event, payload);
+    ctx.events.emit(event, build());
 }
 
 fn marker_path(ctx: &Ctx, spec: &ModelSpec) -> PathBuf {
@@ -595,7 +622,7 @@ pub fn ensure_models_async(ctx: &Arc<Ctx>) {
         prog.state = "downloading".into();
         prog.error = None;
     }
-    emit_throttled(ctx, "setup-progress", status(ctx), true);
+    emit_throttled(ctx, "setup-progress", || status(ctx), true);
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         download_all(&ctx);
@@ -634,7 +661,7 @@ fn download_all(ctx: &Arc<Ctx>) {
     match result {
         Ok(()) => {
             ctx.models.progress.lock().unwrap().state = "ready".into();
-            emit_throttled(ctx, "setup-progress", status(ctx), true);
+            emit_throttled(ctx, "setup-progress", || status(ctx), true);
             // Uploads made during the download sat in the queue as "queued".
             crate::jobs::pump_queue(ctx);
         }
@@ -643,7 +670,7 @@ fn download_all(ctx: &Arc<Ctx>) {
             prog.state = "error".into();
             prog.error = Some(e);
             drop(prog);
-            emit_throttled(ctx, "setup-progress", status(ctx), true);
+            emit_throttled(ctx, "setup-progress", || status(ctx), true);
         }
     }
 }
@@ -657,11 +684,8 @@ fn entry_ready(ctx: &Ctx, entry: &CatalogEntry) -> bool {
 }
 
 pub struct AsrPaths {
-    pub kind: &'static str,
-    /// Short display name ("Cohere Transcribe 2B"), for messages.
-    pub name: String,
-    pub languages: &'static [&'static str],
-    pub needs_language: bool,
+    /// The catalog entry that runs (its kind, name and languages).
+    pub entry: CatalogEntry,
     pub encoder: PathBuf,
     pub decoder: PathBuf,
     pub joiner: PathBuf,
@@ -681,10 +705,7 @@ pub fn resolve_asr_at(models_dir: &std::path::Path, fake: bool, model_id: &str) 
     let entry = effective_asr_entry(models_dir, fake, model_id);
     let d = models_dir.join(&entry.path);
     AsrPaths {
-        kind: entry.kind,
-        name: entry.short_name().to_string(),
-        languages: entry.languages,
-        needs_language: entry.needs_language,
+        entry,
         encoder: d.join("encoder.onnx"),
         decoder: d.join("decoder.onnx"),
         joiner: d.join("joiner.onnx"),
@@ -694,44 +715,40 @@ pub fn resolve_asr_at(models_dir: &std::path::Path, fake: bool, model_id: &str) 
     }
 }
 
-/// The ASR catalog entry a job would run: the selection once it is on disk,
-/// else the default the first run installs.
+/// The entry of `catalog` a job would run: `model_id` once it is on disk,
+/// else `default`, which the first run installs.
+fn effective_entry(
+    catalog: Vec<CatalogEntry>,
+    models_dir: &std::path::Path,
+    fake: bool,
+    model_id: &str,
+    default: &str,
+) -> CatalogEntry {
+    let ready = |e: &CatalogEntry| fake || models_dir.join(&e.spec.marker).exists();
+    let pick = catalog
+        .iter()
+        .position(|e| e.id == model_id && ready(e))
+        .or_else(|| catalog.iter().position(|e| e.id == default))
+        .unwrap();
+    catalog.into_iter().nth(pick).unwrap()
+}
+
+/// The ASR catalog entry a job would run.
 pub fn effective_asr_entry(
     models_dir: &std::path::Path,
     fake: bool,
     model_id: &str,
 ) -> CatalogEntry {
-    let catalog = asr_catalog();
-    let pick = catalog
-        .iter()
-        .position(|e| e.id == model_id && (fake || models_dir.join(&e.spec.marker).exists()))
-        .or_else(|| catalog.iter().position(|e| e.id == ASR_DEFAULT))
-        .unwrap();
-    catalog.into_iter().nth(pick).unwrap()
+    effective_entry(asr_catalog(), models_dir, fake, model_id, ASR_DEFAULT)
 }
 
-/// Why the spoken-language setting `code` ("auto" or a language code) can't
-/// be used with the ASR model `entry`, or None when it can.
-pub fn asr_language_problem(entry: &CatalogEntry, code: &str) -> Option<String> {
-    language_problem(entry.short_name(), entry.languages, entry.needs_language, code)
-}
-
-pub(crate) fn language_problem(
-    model: &str,
-    languages: &[&str],
-    needs_language: bool,
-    code: &str,
-) -> Option<String> {
-    let auto = code.is_empty() || code == "auto";
-    if auto && needs_language {
-        return Some(format!(
-            "{model} can't detect the spoken language — choose the language of the recording"
-        ));
-    }
-    if !auto && needs_language && !languages.contains(&code) {
-        return Some(format!("{model} doesn't transcribe this language — choose another model"));
-    }
-    None
+/// The summarizer catalog entry a job would run.
+pub fn effective_llm_entry(
+    models_dir: &std::path::Path,
+    fake: bool,
+    model_id: &str,
+) -> CatalogEntry {
+    effective_entry(llm_catalog(), models_dir, fake, model_id, LLM_DEFAULT)
 }
 
 /// The diarization engine to run and its model file. A meeting set to more
@@ -744,17 +761,30 @@ pub fn resolve_diar_at(
     model_id: &str,
     num_speakers: i64,
 ) -> (&'static str, PathBuf) {
-    let catalog = diar_catalog();
-    let ready = |e: &&CatalogEntry| fake || models_dir.join(&e.spec.marker).exists();
-    let wanted = if num_speakers > NEMOTRON_MAX_SPEAKERS { "pyannote-3.0" } else { model_id };
-    let entry = catalog
-        .iter()
-        .find(|e| e.id == wanted)
-        .filter(ready)
-        .or_else(|| catalog.iter().find(|e| e.id == model_id).filter(ready))
-        .or_else(|| catalog.iter().find(|e| e.id == DIAR_DEFAULT))
-        .unwrap();
+    let entry = effective_diar_entry(models_dir, fake, model_id, num_speakers);
     (entry.kind, models_dir.join(&entry.path))
+}
+
+/// The diarization catalog entry `resolve_diar_at` picks.
+pub fn effective_diar_entry(
+    models_dir: &std::path::Path,
+    fake: bool,
+    model_id: &str,
+    num_speakers: i64,
+) -> CatalogEntry {
+    let catalog = diar_catalog();
+    let ready = |id: &str| {
+        catalog
+            .iter()
+            .position(|e| e.id == id && (fake || models_dir.join(&e.spec.marker).exists()))
+    };
+    let pick = (num_speakers > NEMOTRON_MAX_SPEAKERS)
+        .then(|| ready("pyannote-3.0"))
+        .flatten()
+        .or_else(|| ready(model_id))
+        .or_else(|| catalog.iter().position(|e| e.id == DIAR_DEFAULT))
+        .unwrap();
+    catalog.into_iter().nth(pick).unwrap()
 }
 
 /// GGUF path for the active summarizer, defaulting when missing.
@@ -763,14 +793,7 @@ pub fn resolve_llm(ctx: &Ctx, model_id: &str) -> PathBuf {
 }
 
 pub fn resolve_llm_at(models_dir: &std::path::Path, fake: bool, model_id: &str) -> PathBuf {
-    let catalog = llm_catalog();
-    let entry = catalog
-        .iter()
-        .find(|e| e.id == model_id)
-        .filter(|e| fake || models_dir.join(&e.spec.marker).exists())
-        .or_else(|| catalog.iter().find(|e| e.id == LLM_DEFAULT))
-        .unwrap();
-    models_dir.join(&entry.path)
+    models_dir.join(effective_llm_entry(models_dir, fake, model_id).path)
 }
 
 /// Every file a model puts under models_dir (relative paths).
@@ -783,12 +806,47 @@ fn model_files(spec: &ModelSpec) -> Vec<PathBuf> {
     files
 }
 
-/// A first-run model (or one sharing its files): the app needs it to run.
-fn is_first_run(entry: &CatalogEntry) -> bool {
-    model_specs().iter().any(|s| s.marker == entry.spec.marker)
+/// The markers of the first-run models: the app needs these to run.
+fn first_run_markers() -> HashSet<PathBuf> {
+    model_specs().into_iter().map(|s| s.marker).collect()
 }
 
-fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry], active: &str) -> Vec<Value> {
+/// Why a downloaded model can't be removed right now (shown as is), or None.
+fn removal_blocker(
+    entry: &CatalogEntry,
+    active: &str,
+    downloading: bool,
+    first_run: &HashSet<PathBuf>,
+) -> Option<&'static str> {
+    if entry.id == active {
+        Some("In use — select another model first")
+    } else if first_run.contains(&entry.spec.marker) {
+        Some("Needed by the app to run")
+    } else if downloading {
+        Some("Still downloading — wait until it finishes")
+    } else {
+        None
+    }
+}
+
+/// The model `step` ("asr" | "diar" | "summary") has selected.
+fn active_model(config: &crate::config::Config, step: &str) -> Option<String> {
+    match step {
+        "asr" => Some(config.asr_model()),
+        "diar" => Some(config.diar_model()),
+        "summary" => Some(config.summary_model()),
+        _ => None,
+    }
+}
+
+const STEPS: [&str; 3] = ["asr", "diar", "summary"];
+
+fn catalog_options(
+    ctx: &Ctx,
+    catalog: &[CatalogEntry],
+    active: &str,
+    first_run: &HashSet<PathBuf>,
+) -> Vec<Value> {
     let prog = ctx.models.progress.lock().unwrap();
     let inflight = ctx.models.inflight.lock().unwrap();
     catalog
@@ -808,7 +866,8 @@ fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry], active: &str) -> Vec<Val
             };
             json!({
                 "id": entry.id,
-                "label": entry.label,
+                "name": entry.short_name(),
+                "tagline": entry.tagline(),
                 "size": entry.size,
                 "languages": entry.languages,
                 "needs_language": entry.needs_language,
@@ -820,24 +879,46 @@ fn catalog_options(ctx: &Ctx, catalog: &[CatalogEntry], active: &str) -> Vec<Val
                 "total": p.total,
                 "error": p.error,
                 "disk_bytes": disk_bytes,
-                // On disk, not in use and not needed by the app itself.
-                "removable": ready && !downloading && entry.id != active && !is_first_run(entry),
+                // Null when this downloaded model may be removed.
+                "remove_blocked": if ready {
+                    removal_blocker(entry, active, downloading, first_run)
+                } else {
+                    None
+                },
             })
         })
         .collect()
 }
 
 /// The `GET /api/models` payload (also the `models-progress` event payload).
+/// `active` is the selection, `effective` the model a job started now runs
+/// (the default until the selection is on disk).
 pub fn models_status(ctx: &Ctx) -> Value {
-    let (asr, diar, summary) = {
-        let config = ctx.config.read().unwrap();
-        (config.asr_model(), config.diar_model(), config.summary_model())
-    };
-    json!({
-        "asr": {"active": asr, "options": catalog_options(ctx, &asr_catalog(), &asr)},
-        "diar": {"active": diar, "options": catalog_options(ctx, &diar_catalog(), &diar)},
-        "summary": {"active": summary, "options": catalog_options(ctx, &llm_catalog(), &summary)},
-    })
+    let config = ctx.config.read().unwrap().clone();
+    let (dir, fake) = (&ctx.paths.models_dir, ctx.fake);
+    let first_run = first_run_markers();
+    let mut out = serde_json::Map::new();
+    for step in STEPS {
+        let active = active_model(&config, step).unwrap_or_default();
+        let effective = match step {
+            "asr" => effective_asr_entry(dir, fake, &active).id,
+            "diar" => {
+                let n = crate::config::env_num_speakers();
+                effective_diar_entry(dir, fake, &active, n).id
+            }
+            _ => effective_llm_entry(dir, fake, &active).id,
+        };
+        let catalog = catalog_for(step).unwrap_or_default();
+        out.insert(
+            step.to_string(),
+            json!({
+                "active": active,
+                "effective": effective,
+                "options": catalog_options(ctx, &catalog, &active, &first_run),
+            }),
+        );
+    }
+    Value::Object(out)
 }
 
 fn catalog_for(step: &str) -> Option<Vec<CatalogEntry>> {
@@ -856,22 +937,10 @@ pub fn remove_model(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> ApiResult<()>
     let entry = catalog_for(step)
         .and_then(|c| c.into_iter().find(|e| e.id == model_id))
         .ok_or_else(|| ApiError::not_found("unknown model"))?;
-    let active = {
-        let config = ctx.config.read().unwrap();
-        match step {
-            "asr" => config.asr_model(),
-            "diar" => config.diar_model(),
-            _ => config.summary_model(),
-        }
-    };
-    if entry.id == active {
-        return Err(ApiError::conflict("this model is in use — select another one first"));
-    }
-    if is_first_run(&entry) {
-        return Err(ApiError::conflict("the app needs this model to run"));
-    }
-    if ctx.models.inflight.lock().unwrap().contains(&entry.spec.name) {
-        return Err(ApiError::conflict("this model is still downloading"));
+    let active = active_model(&ctx.config.read().unwrap(), step).unwrap_or_default();
+    let downloading = ctx.models.inflight.lock().unwrap().contains(&entry.spec.name);
+    if let Some(reason) = removal_blocker(&entry, &active, downloading, &first_run_markers()) {
+        return Err(ApiError::conflict(reason));
     }
     if crate::jobs::is_busy(ctx) || ctx.bench_running.load(Ordering::SeqCst) {
         return Err(ApiError::conflict("wait until the recording or benchmark has finished"));
@@ -896,7 +965,7 @@ pub fn remove_model(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> ApiResult<()>
         }
     }
     ctx.models.progress.lock().unwrap().items.remove(&entry.spec.name);
-    emit_throttled(ctx, "models-progress", models_status(ctx), true);
+    emit_throttled(ctx, "models-progress", || models_status(ctx), true);
     Ok(())
 }
 
@@ -927,7 +996,7 @@ pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
             .items
             .insert(spec.name.clone(), ItemProgress::default());
     }
-    emit_throttled(ctx, "models-progress", models_status(ctx), true);
+    emit_throttled(ctx, "models-progress", || models_status(ctx), true);
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         let result = ctx
@@ -940,20 +1009,17 @@ pub fn request_download(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> bool {
             prog.items.entry(spec.name.clone()).or_default().error = Some(e);
         }
         ctx.models.inflight.lock().unwrap().remove(&spec.name);
-        emit_throttled(&ctx, "models-progress", models_status(&ctx), true);
+        emit_throttled(&ctx, "models-progress", || models_status(&ctx), true);
     });
     true
 }
 
 /// Kick off downloads for the currently selected models, if missing.
 pub fn ensure_selected_async(ctx: &Arc<Ctx>) {
-    let (asr, diar, summary) = {
-        let config = ctx.config.read().unwrap();
-        (config.asr_model(), config.diar_model(), config.summary_model())
-    };
-    request_download(ctx, "asr", &asr);
-    request_download(ctx, "diar", &diar);
-    request_download(ctx, "summary", &summary);
+    let config = ctx.config.read().unwrap().clone();
+    for step in STEPS {
+        request_download(ctx, step, &active_model(&config, step).unwrap_or_default());
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -1015,7 +1081,7 @@ fn fetch(
         std::io::Write::write_all(&mut file, &buf[..n]).map_err(|e| e.to_string())?;
         downloaded += n as u64;
         set_item_progress(ctx, &spec.name, offset + downloaded, offset + total);
-        let payload = if event == "setup-progress" { status(ctx) } else { models_status(ctx) };
+        let payload = || if event == "setup-progress" { status(ctx) } else { models_status(ctx) };
         emit_throttled(ctx, event, payload, false);
     }
     Ok(downloaded)

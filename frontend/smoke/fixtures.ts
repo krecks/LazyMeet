@@ -49,18 +49,26 @@ export function config() {
   };
 }
 
-const option = (id, extra = {}) => ({
-  id,
-  ...catalog[id],
-  ready: false,
-  downloading: false,
-  downloaded: 0,
-  total: 0,
-  error: null,
-  disk_bytes: 0,
-  removable: false,
-  ...extra,
-});
+// name/tagline: the label split at " — ", as CatalogEntry::short_name does.
+const option = (id, extra = {}) => {
+  const { label, ...rest } = catalog[id];
+  const [name, tagline = ""] = label.split(" — ");
+  return {
+    id,
+    name,
+    tagline,
+    ...rest,
+    ready: false,
+    downloading: false,
+    downloaded: 0,
+    total: 0,
+    error: null,
+    disk_bytes: 0,
+    remove_blocked: null,
+    ...extra,
+  };
+};
+const inUse = { ready: true, remove_blocked: "In use — select another model first" };
 
 const docs = () => location.hash === "#docs";
 
@@ -68,28 +76,31 @@ export function models() {
   return {
     asr: {
       active: "parakeet-tdt-0.6b-v3",
+      effective: "parakeet-tdt-0.6b-v3",
       options: [
-        option("parakeet-tdt-0.6b-v3", { ready: true, disk_bytes: 6.7e8 }),
+        option("parakeet-tdt-0.6b-v3", { ...inUse, disk_bytes: 6.7e8 }),
         option("whisper-small", docs() ? {} : { downloading: true, downloaded: 3e8, total: 6e8 }),
-        option("whisper-base", { ready: true, disk_bytes: 1.6e8, removable: true }),
+        option("whisper-base", { ready: true, disk_bytes: 1.6e8 }),
         option("qwen3-asr-0.6b", docs() ? {} : { error: "connection reset" }),
-        option("cohere-transcribe", { ready: true, disk_bytes: 2.9e9, removable: true }),
+        option("cohere-transcribe", { ready: true, disk_bytes: 2.9e9 }),
       ],
     },
     diar: {
       active: "nemotron-3-diarization",
+      effective: "nemotron-3-diarization",
       options: [
-        option("nemotron-3-diarization", { ready: true, disk_bytes: 1.2e8 }),
-        option("pyannote-3.0", { ready: true, disk_bytes: 6e6, removable: true }),
+        option("nemotron-3-diarization", { ...inUse, disk_bytes: 1.2e8 }),
+        option("pyannote-3.0", { ready: true, disk_bytes: 6e6 }),
       ],
     },
     summary: {
       active: "qwen3.5-4b",
+      effective: "qwen3.5-4b",
       options: [
         option("qwen3.5-0.8b"),
         option("qwen3.5-2b"),
-        option("qwen3.5-4b", { ready: true, disk_bytes: 2.7e9 }),
-        option("qwen3.5-9b", { ready: true, disk_bytes: 5.7e9, removable: true }),
+        option("qwen3.5-4b", { ...inUse, disk_bytes: 2.7e9 }),
+        option("qwen3.5-9b", { ready: true, disk_bytes: 5.7e9 }),
       ],
     },
   };

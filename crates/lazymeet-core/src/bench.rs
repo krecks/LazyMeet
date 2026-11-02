@@ -71,21 +71,24 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
     let threads = config.num_threads() as i32;
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     let models_dir = ctx.paths.models_dir.clone();
-    let pctx = PipelineCtx { fake: false, config: &config, models_dir: &models_dir, ffmpeg: None };
+    let pctx = PipelineCtx {
+        fake: false,
+        config: &config,
+        models_dir: &models_dir,
+        ffmpeg: ctx.ffmpeg.clone(),
+    };
 
     let asr = models::effective_asr_entry(&models_dir, false, &config.asr_model());
-    let diar_kind = crate::pipeline::diar_engine(&pctx, -1);
-    let diar_name = models::diar_catalog()
-        .iter()
-        .find(|e| e.kind == diar_kind)
-        .map(|e| e.short_name().to_string())
-        .unwrap_or_default();
-    let llm_path = models::resolve_llm_at(&models_dir, false, &config.summary_model());
-    let llm_name = models::llm_catalog()
-        .iter()
-        .find(|e| models_dir.join(&e.path) == llm_path)
-        .map(|e| e.short_name().to_string())
-        .unwrap_or_default();
+    // As diarize() resolves it: no meeting count, so the env default.
+    let diar = models::effective_diar_entry(
+        &models_dir,
+        false,
+        &config.diar_model(),
+        config::env_num_speakers(),
+    );
+    let llm = models::effective_llm_entry(&models_dir, false, &config.summary_model());
+    let llm_path = models_dir.join(&llm.path);
+    let (diar_name, llm_name) = (diar.short_name(), llm.short_name());
     let used = json!({"asr": asr.short_name(), "diar": diar_name, "summary": llm_name});
 
     let source_label = source
@@ -114,11 +117,10 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
     let round1 = |secs: f64| (secs * 10.0).round() / 10.0;
 
     emit(&rows, "Preparing audio…");
-    let (wav, audio_secs) =
-        match native::bench_wav(ctx.ffmpeg.as_deref(), source.as_deref(), &ctx.paths.data_dir) {
-            Ok(v) => v,
-            Err(e) => return fail(e),
-        };
+    let (wav, audio_secs) = match native::bench_wav(&pctx, source.as_deref(), &ctx.paths.data_dir) {
+        Ok(v) => v,
+        Err(e) => return fail(e),
+    };
     let realtime = |secs: f64| format!("{:.1}x realtime", audio_secs / secs);
 
     // Transcription and speaker separation, exactly as a meeting runs them:

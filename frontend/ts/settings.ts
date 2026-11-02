@@ -10,7 +10,10 @@ interface ConfigMeta {
   label: string;
   help: string;
   model?: string;
+  /** A language list: its "auto" label. */
   languages?: string;
+  /** Restrict the list to the languages of this step's selected model. */
+  languagesOf?: string;
   providers?: boolean;
   textarea?: boolean;
   toggle?: boolean;
@@ -34,6 +37,7 @@ const CONFIG_META: Record<string, ConfigMeta> = {
     label: "Spoken language",
     help: "The default for new recordings — the prep screen can change it per recording. Parakeet and Whisper detect the language themselves, Qwen3-ASR takes it as a hint, Cohere Transcribe needs it.",
     languages: "Auto-detect",
+    languagesOf: "asr",
   },
   DIAR_MODEL: {
     section: "config-speakers",
@@ -110,7 +114,10 @@ const SECTIONS = [
   "config-advanced",
 ];
 
-const PROVIDER_LABELS = { cpu: "CPU", gpu: "GPU" };
+export const PROVIDER_LABELS = { cpu: "CPU", gpu: "GPU" };
+
+const STEP_LABELS = { asr: "Transcription", diar: "Speaker separation", summary: "Summary" };
+const STEPS = Object.keys(STEP_LABELS);
 
 let lastModels = null;
 let lastConfig = null;
@@ -304,6 +311,9 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     input.addEventListener("change", onFormInput);
   };
 
+  // Inline rows: label, control, help; stacked rows put the help first.
+  let parts: HTMLElement[] = [label, control, help];
+
   if (meta.model) {
     row.classList.add("stacked", "model-row");
     // The cards are the control; the hidden input carries the value.
@@ -314,14 +324,9 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     const status = el("p", "model-status");
     status.dataset.modelStep = meta.model;
     status.setAttribute("aria-live", "polite");
-    const cards = modelCards(meta.model, value, label, locked);
-    row.append(label, help, value, cards, status);
-    if (locked) row.appendChild(lockedHint());
+    parts = [label, help, value, modelCards(meta.model, value, label, locked), status];
     updateModelStatus(meta.model, value.value, status);
-    return row;
-  }
-
-  if (meta.providers) {
+  } else if (meta.providers) {
     const select = document.createElement("select");
     describe(select);
     for (const v of cfg.compute_options[name]) {
@@ -339,13 +344,11 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     select.dataset.autoLabel = meta.languages;
     fillLanguages(select, cfg.values[name], null);
     control.appendChild(select);
-    if (name === "ASR_LANGUAGE") {
+    if (meta.languagesOf) {
       const note = el("p", "config-note");
-      note.id = "asr-language-note";
+      note.id = `${id}-note`;
       note.setAttribute("aria-live", "polite");
-      row.append(label, control, help, note);
-      if (locked) row.appendChild(lockedHint());
-      return row;
+      parts.push(note);
     }
   } else if (meta.textarea) {
     row.classList.add("stacked");
@@ -363,9 +366,7 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
       onFormInput();
     });
     control.append(ta, restore);
-    row.append(label, help, control);
-    if (locked) row.appendChild(lockedHint());
-    return row;
+    parts = [label, help, control];
   } else if (meta.toggle) {
     const sw = el("span", "switch");
     const input = document.createElement("input");
@@ -403,7 +404,7 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     control.append(input, value);
   }
 
-  row.append(label, control, help);
+  row.append(...parts);
   if (locked) row.appendChild(lockedHint());
   return row;
 }
@@ -414,10 +415,13 @@ function lockedHint() {
   return hint;
 }
 
-/** The selected ASR model's catalog option (from the form, not the saved value). */
-function selectedAsr() {
-  const id = (document.getElementById("cfg-ASR_MODEL") as HTMLInputElement)?.value;
-  return lastModels?.asr?.options.find((o) => o.id === id) || null;
+/** The catalog option selected for `step` in the form (not the saved value).
+ *  Read from the control itself: formValues() skips env-locked (disabled)
+ *  fields, whose model still decides the language list. */
+function selectedModel(step: string) {
+  const field = Object.keys(CONFIG_META).find((n) => CONFIG_META[n].model === step);
+  const id = (document.getElementById(`cfg-${field}`) as HTMLInputElement | null)?.value;
+  return lastModels?.[step]?.options.find((o) => o.id === id) || null;
 }
 
 /** Language options for `select`: every app language, restricted (and
@@ -454,36 +458,35 @@ function pickLanguage(select: HTMLSelectElement) {
 }
 
 /** Rows that depend on other values: the classic-model sliders and the
- *  spoken-language list of the selected transcription model. */
-function syncDependentRows() {
-  const values = formValues();
+ *  language list of the selected transcription model (rebuilt only when
+ *  that model changes). */
+function syncDependentRows(values = formValues()) {
   for (const [name, meta] of Object.entries(CONFIG_META)) {
-    if (!meta.when) continue;
     const row = document.querySelector<HTMLElement>(`[data-row="${name}"]`);
-    if (row) row.hidden = !meta.when(values);
-  }
-  const lang = document.getElementById("cfg-ASR_LANGUAGE") as HTMLSelectElement;
-  const model = selectedAsr();
-  if (lang) {
-    fillLanguages(lang, lang.value, model);
-    const note = document.getElementById("asr-language-note");
+    if (meta.when && row) row.hidden = !meta.when(values);
+    const select = document.getElementById(`cfg-${name}`) as HTMLSelectElement;
+    if (!meta.languagesOf || !select) continue;
+    const model = selectedModel(meta.languagesOf);
+    if (select.dataset.model === (model?.id ?? "")) continue;
+    select.dataset.model = model?.id ?? "";
+    fillLanguages(select, select.value, model);
+    const note = document.getElementById(`cfg-${name}-note`);
     if (note) {
       note.textContent = model?.needs_language
-        ? `${modelName(model)} can't detect the language — set the one spoken in your recordings.`
+        ? `${model.name} can't detect the language — set the one spoken in your recordings.`
         : "";
     }
   }
 }
 
 function onFormInput() {
-  syncDependentRows();
-  updateSaveBar();
+  const values = formValues();
+  syncDependentRows(values);
+  updateSaveBar(values);
 }
 
-export function modelName(opt) {
-  const dash = opt.label.indexOf(" — ");
-  return dash === -1 ? opt.label : opt.label.slice(0, dash);
-}
+const downloadPct = (opt) => (opt.total ? Math.round((opt.downloaded / opt.total) * 100) : 0);
+const bareSize = (opt) => (opt.size || "").replace(/ download$/, "");
 
 // Model picker: one card per catalog option with its pros and cons, as a
 // radio group (arrow keys move the choice, one tab stop).
@@ -508,16 +511,15 @@ function modelCards(step: string, value: HTMLInputElement, label: HTMLElement, l
     card.dataset.modelId = opt.id;
     card.dataset.step = step;
     card.disabled = locked;
-    const dash = opt.label.indexOf(" — ");
     const head = el("div", "model-card-head");
     const name = el("span", "model-card-name");
-    name.textContent = modelName(opt);
+    name.textContent = opt.name;
     const badge = el("span", "model-card-badge");
     head.append(name, badge);
     card.appendChild(head);
-    if (dash !== -1) {
+    if (opt.tagline) {
       const tagline = el("p", "model-card-tagline");
-      tagline.textContent = opt.label.slice(dash + 3);
+      tagline.textContent = opt.tagline;
       card.appendChild(tagline);
     }
     card.appendChild(prosConsList(opt.pros, "pros"));
@@ -561,13 +563,12 @@ function syncModelCards(group: Element, activeId: string) {
       badge.textContent = "Installed";
       badge.classList.add("ready");
     } else if (opt.downloading) {
-      const pct = opt.total ? Math.round((opt.downloaded / opt.total) * 100) : 0;
-      badge.textContent = `Downloading ${pct} %`;
+      badge.textContent = `Downloading ${downloadPct(opt)} %`;
     } else if (opt.error) {
       badge.textContent = "Download failed";
       badge.classList.add("failed");
     } else {
-      badge.textContent = `${(opt.size || "").replace(/ download$/, "")} download`.trim();
+      badge.textContent = `${bareSize(opt)} download`.trim();
     }
   }
 }
@@ -580,8 +581,8 @@ function updateModelStatus(step: string, id: string, status: Element | null) {
   status.innerHTML = "";
   if (!opt || opt.ready) return;
   if (opt.downloading) {
-    const pct = opt.total ? Math.round((opt.downloaded / opt.total) * 100) : 0;
-    status.textContent = `Downloading ${modelName(opt)}… ${pct} %`;
+    const pct = downloadPct(opt);
+    status.textContent = `Downloading ${opt.name}… ${pct} %`;
     status.appendChild(progressBar(pct));
   } else if (opt.error) {
     status.textContent = `Download failed: ${opt.error} `;
@@ -601,10 +602,10 @@ function updateModelStatus(step: string, id: string, status: Element | null) {
   }
 }
 
-export function progressBar(pct: number, label = "Download progress") {
+function progressBar(pct: number) {
   const bar = el("span", "bar");
   bar.setAttribute("role", "progressbar");
-  bar.setAttribute("aria-label", label);
+  bar.setAttribute("aria-label", "Download progress");
   bar.setAttribute("aria-valuemin", "0");
   bar.setAttribute("aria-valuemax", "100");
   bar.setAttribute("aria-valuenow", String(pct));
@@ -632,66 +633,71 @@ function refreshModelViews() {
 export function onModelsProgress(models) {
   const before = lastModels
     ? new Set(
-        ["asr", "diar", "summary"].flatMap((s) =>
+        STEPS.flatMap((s) =>
           lastModels[s].options.filter((o) => o.downloading).map((o) => `${s}:${o.id}`)
         )
       )
     : new Set();
   lastModels = models;
   refreshModelViews();
-  for (const s of ["asr", "diar", "summary"]) {
+  for (const s of STEPS) {
     for (const o of models[s].options) {
       if (before.has(`${s}:${o.id}`) && o.ready) {
-        showToast(`${modelName(o)} downloaded — it will be used for the next recording.`, 4000, true);
+        showToast(`${o.name} downloaded — it will be used for the next recording.`, 4000, true);
       }
     }
   }
 }
 
-const STEP_LABELS = { asr: "Transcription", diar: "Speaker separation", summary: "Summary" };
+let diskListKey = "";
 
 // Every model on disk with its real size; selectable ones that aren't in use
-// can be removed to free space.
+// can be removed to free space. Rebuilt only when a row changes, so download
+// progress events don't reset a half-confirmed Remove button.
 function renderModelDiskList() {
   const list = $("model-disk-list");
   if (!list || !lastModels) return;
+  const rows = STEPS.flatMap((step) =>
+    lastModels[step].options.filter((o) => o.ready).map((opt) => ({ step, opt }))
+  );
+  const key = JSON.stringify(rows.map(({ step, opt }) => [step, opt.id, opt.disk_bytes, opt.remove_blocked]));
+  if (key === diskListKey && list.childElementCount) return;
+  diskListKey = key;
   list.innerHTML = "";
-  for (const step of ["asr", "diar", "summary"]) {
-    for (const opt of lastModels[step].options.filter((o) => o.ready)) {
-      const li = el("li");
-      const name = el("span", "disk-name");
-      name.textContent = modelName(opt);
-      const meta = el("span", "disk-meta muted");
-      const size = opt.disk_bytes ? fmtBytes(opt.disk_bytes) : opt.size.replace(/ download$/, "");
-      meta.textContent = `${STEP_LABELS[step]} · ${size}`;
-      const info = el("span", "disk-info");
-      info.append(name, meta);
-      li.appendChild(info);
-      if (opt.removable) {
-        const remove = el("button", "btn danger");
-        remove.type = "button";
-        remove.innerHTML = "<span>Remove</span>";
-        remove.setAttribute("aria-label", `Remove ${modelName(opt)}`);
-        remove.addEventListener("click", () =>
-          confirmThen(remove, "Remove?", async () => {
-            try {
-              lastModels = await call("remove_model", { step, id: opt.id });
-              refreshModelViews();
-              renderDataSection(await call("get_data_info"));
-              showToast(`${modelName(opt)} removed.`, 3000, true);
-            } catch (e) {
-              showToast(`Couldn't remove: ${e.message}`);
-            }
-          })
-        );
-        li.appendChild(remove);
-      } else {
-        const why = el("span", "disk-why muted small");
-        why.textContent = opt.id === lastModels[step].active ? "In use" : "Needed by the app";
-        li.appendChild(why);
-      }
-      list.appendChild(li);
+  for (const { step, opt } of rows) {
+    const li = el("li");
+    const name = el("span", "disk-name");
+    name.textContent = opt.name;
+    const meta = el("span", "disk-meta muted");
+    const size = opt.disk_bytes ? fmtBytes(opt.disk_bytes) : bareSize(opt);
+    meta.textContent = `${STEP_LABELS[step]} · ${size}`;
+    const info = el("span", "disk-info");
+    info.append(name, meta);
+    li.appendChild(info);
+    if (!opt.remove_blocked) {
+      const remove = el("button", "btn danger");
+      remove.type = "button";
+      remove.innerHTML = "<span>Remove</span>";
+      remove.setAttribute("aria-label", `Remove ${opt.name}`);
+      remove.addEventListener("click", () =>
+        confirmThen(remove, "Remove?", async () => {
+          try {
+            // The models-progress event refreshes the cards and this list.
+            await call("remove_model", { step, id: opt.id });
+            renderDataSection(await call("get_data_info"));
+            showToast(`${opt.name} removed.`, 3000, true);
+          } catch (e) {
+            showToast(`Couldn't remove: ${e.message}`);
+          }
+        })
+      );
+      li.appendChild(remove);
+    } else {
+      const why = el("span", "disk-why muted small");
+      why.textContent = opt.remove_blocked;
+      li.appendChild(why);
     }
+    list.appendChild(li);
   }
 }
 
@@ -713,13 +719,12 @@ function formValues(): Record<string, unknown> {
   return out;
 }
 
-function isDirty() {
-  const now = formValues();
+function isDirty(now = formValues()) {
   return Object.keys(now).some((k) => now[k] !== loadedValues[k]);
 }
 
-function updateSaveBar() {
-  $("settings-savebar").hidden = !isDirty();
+function updateSaveBar(values = formValues()) {
+  $("settings-savebar").hidden = !isDirty(values);
 }
 
 /** The request body: a value equal to its default clears the override, so

@@ -29,21 +29,14 @@ fn synth_audio(seconds: f64) -> Vec<f32> {
 /// (decoded locally via the bundled ffmpeg), or the synthetic buffer when
 /// `src` is None. Returns the WAV (the caller deletes it) and its seconds.
 pub fn bench_wav(
-    ffmpeg: Option<&Path>,
+    ctx: &PipelineCtx,
     src: Option<&Path>,
     scratch_dir: &Path,
 ) -> Result<(std::path::PathBuf, f64), String> {
     let wav = scratch_dir.join(".bench-audio.wav");
     match src {
         Some(src) => {
-            let ffmpeg = ffmpeg.ok_or("ffmpeg is not available")?;
-            #[allow(unused_mut)]
-            let mut cmd = Command::new(ffmpeg);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-            }
+            let mut cmd = ffmpeg_cmd(ctx)?;
             cmd.arg("-y")
                 .arg("-i")
                 .arg(src)

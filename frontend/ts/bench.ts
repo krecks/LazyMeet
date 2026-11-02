@@ -4,9 +4,7 @@
 // --------------------------------------------------------------------------
 import { $, call } from "./core";
 import { el, showToast } from "./helpers";
-import { openSettings } from "./settings";
-
-const PROVIDER_LABELS = { cpu: "CPU", gpu: "GPU" };
+import { openSettings, PROVIDER_LABELS } from "./settings";
 
 /** Where the back button returns to. */
 let benchFrom: "app" | "settings" = "app";
@@ -26,7 +24,7 @@ export function closeBench() {
 }
 
 /** "CPU threads" link: Settings → Advanced, focused on the threads field. */
-export function openThreadsSetting() {
+function openThreadsSetting() {
   $("bench").classList.add("hidden");
   if (benchFrom === "settings") $("settings").classList.add("hidden");
   benchFrom = "app";
@@ -62,7 +60,7 @@ export async function pickBenchmarkFile() {
 }
 
 /** 316 → "5 min", 4100 → "1 h 8 min", 45 → "45 s". */
-export function fmtDuration(secs: number) {
+function fmtDuration(secs: number) {
   const s = Math.round(secs);
   if (s < 90) return `${s} s`;
   const m = Math.round(s / 60);
@@ -87,7 +85,7 @@ export function onBenchProgress(p) {
     env.append(link);
     env.classList.remove("hidden");
   }
-  if (p.rows && p.rows.length) renderRows(p.rows);
+  if (p.rows && p.rows.length) renderRows(p.rows, p.recommendation?.SUMMARY_PROVIDER);
   if (p.status === "running") {
     $("bench-status").textContent = p.step || "Measuring…";
   } else if (p.status === "done") {
@@ -101,15 +99,13 @@ export function onBenchProgress(p) {
   }
 }
 
-function renderRows(rows) {
+/** `best`: the recommended summary provider (once the run is done). */
+function renderRows(rows, best?: string) {
   const tbody = $("bench-results").querySelector("tbody");
   tbody.innerHTML = "";
-  const summaries = rows.filter((r) => r.stage === "Summary" && !r.error);
-  const best =
-    summaries.length > 1 ? summaries.reduce((a, b) => (b.seconds < a.seconds ? b : a)) : null;
   for (const row of rows) {
     const tr = document.createElement("tr");
-    if (row === best) tr.classList.add("best");
+    if (best && row.stage === "Summary" && row.provider === best) tr.classList.add("best");
     const cell = (text: string, cls?: string) => {
       const td = document.createElement("td");
       td.textContent = text ?? "";

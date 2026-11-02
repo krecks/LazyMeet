@@ -98,26 +98,6 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             }
         }
     }
-    // The model + spoken-language pair as it will be after this change:
-    // Cohere Transcribe, e.g., cannot run on "auto". Checked only when the
-    // change touches the pair, so an unrelated save never trips over it.
-    if fields.contains_key("ASR_MODEL") || fields.contains_key("ASR_LANGUAGE") {
-        let current = ctx.config.read().unwrap();
-        let pick = |key: &str, now: String| match fields.get(key) {
-            Some(Value::Null) => {
-                config::default_value(key).as_str().unwrap_or_default().to_string()
-            }
-            Some(v) => v.as_str().unwrap_or_default().to_string(),
-            None => now,
-        };
-        let model = pick("ASR_MODEL", current.asr_model());
-        let language = pick("ASR_LANGUAGE", current.asr_language());
-        if let Some(entry) = models::asr_catalog().into_iter().find(|e| e.id == model) {
-            if let Some(problem) = models::asr_language_problem(&entry, &language) {
-                return Err(ApiError::invalid(problem));
-            }
-        }
-    }
     for key in ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER"] {
         if let Some(v) = fields.get(key).filter(|v| !v.is_null()) {
             let provider = v.as_str().unwrap_or_default();
@@ -152,6 +132,18 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             overrides.insert(name.clone(), coerced);
         }
     }
+    // The model + spoken-language pair as it will be after this change:
+    // Cohere Transcribe, e.g., cannot run on "auto". Checked only when the
+    // change touches the pair, so an unrelated save never trips over it.
+    if fields.contains_key("ASR_MODEL") || fields.contains_key("ASR_LANGUAGE") {
+        let next = config::Config::from_overrides(&overrides);
+        let model = next.asr_model();
+        if let Some(entry) = models::asr_catalog().into_iter().find(|e| e.id == model) {
+            if let Some(problem) = entry.language_problem(&next.asr_language()) {
+                return Err(ApiError::invalid(problem));
+            }
+        }
+    }
     config::save_overrides(&ctx.paths, &overrides)?;
     ctx.refresh_config();
     // A newly selected model that isn't on disk yet starts downloading now;
@@ -171,10 +163,11 @@ pub fn download_model(ctx: &Arc<Ctx>, step: &str, id: &str) -> ApiResult<Value> 
     Ok(json!({"ok": true}))
 }
 
-/// Delete a downloaded model (not the active or a first-run one).
+/// Delete a downloaded model (not the active or a first-run one); the
+/// `models-progress` event carries the new status.
 pub fn remove_model(ctx: &Arc<Ctx>, step: &str, id: &str) -> ApiResult<Value> {
     models::remove_model(ctx, step, id)?;
-    Ok(models::models_status(ctx))
+    Ok(json!({"ok": true}))
 }
 
 // --------------------------------------------------------------------------
@@ -237,7 +230,7 @@ fn check_asr_language(ctx: &Ctx, language: Option<&str>) -> ApiResult<()> {
     let config = ctx.config.read().unwrap();
     let entry = models::effective_asr_entry(&ctx.paths.models_dir, ctx.fake, &config.asr_model());
     let language = language.map(str::to_string).unwrap_or_else(|| config.asr_language());
-    match models::asr_language_problem(&entry, &language) {
+    match entry.language_problem(&language) {
         Some(problem) => Err(ApiError::invalid(problem)),
         None => Ok(()),
     }

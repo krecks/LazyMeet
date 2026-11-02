@@ -20,11 +20,12 @@ fn models_catalog_shape() {
         ("summary", "qwen3.5-4b"),
     ] {
         assert_eq!(data[step]["active"], default);
+        assert_eq!(data[step]["effective"], default);
         let options = data[step]["options"].as_array().unwrap();
         let ids: Vec<&str> = options.iter().map(|o| o["id"].as_str().unwrap()).collect();
         assert!(ids.contains(&default));
         for opt in options {
-            for key in ["id", "label", "ready", "downloading", "error", "pros", "cons"] {
+            for key in ["id", "name", "tagline", "ready", "downloading", "error", "pros", "cons"] {
                 assert!(opt.get(key).is_some(), "missing {key}");
             }
             // The settings UI renders a pros/cons overview for every model.
@@ -108,14 +109,14 @@ fn resolvers_fall_back_to_defaults() {
     let app = TestApp::fake();
     // Unknown ids resolve to the default model rather than erroring.
     let asr = models::resolve_asr(&app.ctx, "does-not-exist");
-    assert_eq!(asr.kind, "nemo_transducer");
+    assert_eq!(asr.entry.kind, "nemo_transducer");
     assert_eq!(asr.encoder, app.ctx.paths.models_dir.join("parakeet").join("encoder.onnx"));
     assert_eq!(
         models::resolve_llm(&app.ctx, "does-not-exist"),
         app.ctx.paths.models_dir.join("qwen3.5-4b-q4_k_m.gguf")
     );
     let qwen = models::resolve_asr(&app.ctx, "qwen3-asr-0.6b");
-    assert_eq!(qwen.kind, "qwen3_asr");
+    assert_eq!(qwen.entry.kind, "qwen3_asr");
     assert_eq!(qwen.tokenizer, app.ctx.paths.models_dir.join("qwen3-asr-0.6b").join("tokenizer"));
 }
 
