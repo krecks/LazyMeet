@@ -1,8 +1,9 @@
-//! Built-in hardware benchmark: measures the pipeline stages on every
-//! backend available on this machine (CPU vs CoreML for the ONNX models,
-//! GPU vs CPU for the summarizer LLM) so users can verify the defaults on
-//! their own hardware. Results stream to the UI as `benchmark-progress`
-//! events; one run at a time, and never while a meeting is processing.
+//! Built-in benchmark: runs the selected models over five minutes of audio
+//! the way a meeting runs them, and estimates how long an hour of meeting
+//! takes on this machine. The summary is timed on every backend this build
+//! offers (Metal GPU and CPU on macOS), which is the one choice left to
+//! recommend. Results stream to the UI as `benchmark-progress` events; one
+//! run at a time, and meetings wait while it runs.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,8 +16,10 @@ use crate::Ctx;
 /// Kick off a benchmark in a background thread. `source` is an optional
 /// user-picked recording; None benchmarks the deterministic synthetic audio.
 /// Progress arrives as `benchmark-progress` events: `{status: "running",
-/// step, rows}` after each measurement, then `{status: "done", rows,
-/// recommendation, current}` or `{status: "error", message}`.
+/// step, rows, models}` after each measurement, then `{status: "done", rows,
+/// models, estimate, recommendation, current}` or `{status: "error",
+/// message}`. `estimate` (seconds per hour of meeting) is null when a stage
+/// could not be timed.
 pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
     if let Some(path) = &source {
         if !path.is_file() {
@@ -47,22 +50,50 @@ pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
     Ok(json!({"started": true}))
 }
 
+/// Transcript tokens per hour of meeting: 5987 tokens for a 28.5-minute
+/// two-person meeting (Qwen 3.5 tokenizer), scaled to 60 minutes.
+#[cfg(feature = "native-pipeline")]
+const TOKENS_PER_HOUR: f64 = 12_600.0;
+/// A typical summary answer (summary + takeaways + action items), tokens.
+#[cfg(feature = "native-pipeline")]
+const ANSWER_TOKENS: f64 = 600.0;
+
 #[cfg(feature = "native-pipeline")]
 fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
-    let (threads, diar_model) = {
-        let config = ctx.config.read().unwrap();
-        (config.num_threads() as i32, config.diar_model())
-    };
+    use crate::config::{self, Config};
+    use crate::models;
+    use crate::pipeline::{native, PipelineCtx};
+    use std::time::Instant;
+
+    // One settings snapshot for the whole run: the models and threads a
+    // meeting started now would use.
+    let config = Config::resolve(&ctx.paths);
+    let threads = config.num_threads() as i32;
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     let models_dir = ctx.paths.models_dir.clone();
-    let mut rows: Vec<Value> = Vec::new();
+    let pctx = PipelineCtx { fake: false, config: &config, models_dir: &models_dir, ffmpeg: None };
+
+    let asr = models::effective_asr_entry(&models_dir, false, &config.asr_model());
+    let diar_kind = crate::pipeline::diar_engine(&pctx, -1);
+    let diar_name = models::diar_catalog()
+        .iter()
+        .find(|e| e.kind == diar_kind)
+        .map(|e| e.short_name().to_string())
+        .unwrap_or_default();
+    let llm_path = models::resolve_llm_at(&models_dir, false, &config.summary_model());
+    let llm_name = models::llm_catalog()
+        .iter()
+        .find(|e| models_dir.join(&e.path) == llm_path)
+        .map(|e| e.short_name().to_string())
+        .unwrap_or_default();
+    let used = json!({"asr": asr.short_name(), "diar": diar_name, "summary": llm_name});
 
     let source_label = source
         .as_ref()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "synthetic audio".to_string());
-
+    let mut rows: Vec<Value> = Vec::new();
     let emit = |rows: &Vec<Value>, step: &str| {
         ctx.events.emit(
             "benchmark-progress",
@@ -73,141 +104,144 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
                 "threads": threads,
                 "cores": cores,
                 "source": source_label,
+                "models": used,
             }),
         );
     };
+    let fail = |message: String| {
+        ctx.events.emit("benchmark-progress", json!({"status": "error", "message": message}));
+    };
+    let round1 = |secs: f64| (secs * 10.0).round() / 10.0;
 
-    // Benchmark audio: the user's recording (first 300 s, decoded locally)
-    // or the deterministic synthetic buffer.
     emit(&rows, "Preparing audio…");
-    let samples = match &source {
-        Some(path) => {
-            let Some(ffmpeg) = ctx.ffmpeg.as_deref() else {
-                ctx.events.emit(
-                    "benchmark-progress",
-                    json!({"status": "error", "message": "ffmpeg is not available"}),
-                );
-                return;
-            };
-            match crate::pipeline::native::bench_audio_from_file(ffmpeg, path, &ctx.paths.data_dir)
-            {
-                Ok(samples) => samples,
-                Err(e) => {
-                    ctx.events.emit(
-                        "benchmark-progress",
-                        json!({"status": "error", "message": format!("could not decode the recording: {e}")}),
-                    );
-                    return;
-                }
-            }
-        }
-        None => crate::pipeline::native::bench_audio_synth(),
-    };
-
-    // ONNX stages per provider this build offers (currently the CPU only).
-    for provider in crate::config::onnx_provider_options() {
-        let label = match provider {
-            "coreml" => "CoreML (ANE)",
-            _ => "CPU",
+    let (wav, audio_secs) =
+        match native::bench_wav(ctx.ffmpeg.as_deref(), source.as_deref(), &ctx.paths.data_dir) {
+            Ok(v) => v,
+            Err(e) => return fail(e),
         };
-        emit(&rows, &format!("ONNX models on {label}…"));
-        match crate::pipeline::native::bench_onnx(
-            &models_dir,
-            threads,
-            provider,
-            &diar_model,
-            &samples,
-        ) {
-            Ok(stage_rows) => {
-                for (stage, secs, audio_secs) in stage_rows {
-                    rows.push(json!({
-                        "stage": stage,
-                        "backend": label,
-                        "seconds": (secs * 10.0).round() / 10.0,
-                        "speed": format!("{:.1}x realtime", audio_secs / secs),
-                    }));
-                }
+    let realtime = |secs: f64| format!("{:.1}x realtime", audio_secs / secs);
+
+    // Transcription and speaker separation, exactly as a meeting runs them:
+    // concurrently, with the meeting's thread split, VAD included. Models
+    // that write text token by token spend nothing on noise, so they are
+    // timed only on a real recording.
+    let token_by_token = asr.kind != "nemo_transducer";
+    let mut per_audio_sec = None; // transcription + separation wall time per audio second
+    let mut turns = Vec::new();
+    if source.is_none() && token_by_token {
+        rows.push(json!({
+            "stage": "Transcription + speaker separation",
+            "backend": "CPU",
+            "model": asr.short_name(),
+            "error": format!(
+                "{} is timed on one of your recordings only — on synthetic audio its speed means nothing",
+                asr.short_name()
+            ),
+        }));
+    } else {
+        emit(&rows, "Transcribing and separating speakers…");
+        // One row: separation's threads join transcription once it is done,
+        // so both finish together.
+        let t = Instant::now();
+        match native::transcribe_and_diarize(&pctx, &wav, -1, None, || {}) {
+            Ok((_, found)) => {
+                let total = t.elapsed().as_secs_f64();
+                turns = found;
+                per_audio_sec = Some(total / audio_secs);
+                rows.push(json!({
+                    "stage": "Transcription + speaker separation",
+                    "backend": "CPU",
+                    "model": format!("{} + {diar_name}", asr.short_name()),
+                    "seconds": round1(total),
+                    "speed": realtime(total),
+                }));
             }
             Err(e) => rows.push(json!({
-                "stage": "ONNX models",
-                "backend": label,
+                "stage": "Transcription + speaker separation",
+                "backend": "CPU",
+                "model": asr.short_name(),
                 "error": e,
             })),
         }
+    }
+    emit(&rows, "");
+
+    // Voice matching: one voiceprint per separated speaker.
+    let mut voice_secs = 0.0;
+    if !turns.is_empty() {
+        emit(&rows, "Matching voices…");
+        let t = Instant::now();
+        match native::compute_voiceprints(&pctx, &wav, &turns) {
+            Ok(prints) => {
+                voice_secs = t.elapsed().as_secs_f64();
+                rows.push(json!({
+                    "stage": "Voice matching",
+                    "backend": "CPU",
+                    "model": "TitaNet",
+                    "seconds": round1(voice_secs),
+                    "speed": match prints.len() {
+                        1 => "1 speaker".to_string(),
+                        n => format!("{n} speakers"),
+                    },
+                }));
+            }
+            Err(e) => rows.push(json!({"stage": "Voice matching", "backend": "CPU", "error": e})),
+        }
         emit(&rows, "");
     }
+    let _ = std::fs::remove_file(&wav);
 
-    // Summarizer LLM: GPU first (default), then CPU. On builds without a GPU
-    // backend (Windows/Linux) the "GPU" load silently runs on the CPU, so
-    // only offer both variants where Metal exists.
-    let mut llm_variants = vec![(false, "CPU")];
-    if cfg!(target_os = "macos") {
-        llm_variants.insert(0, (true, "Metal GPU"));
-    }
-    for (gpu, label) in llm_variants {
-        emit(&rows, &format!("Summarizer LLM on {label}…"));
-        // A 2048-token transcript (~10 minutes of meeting) and a 384-token
-        // answer: the time column is reading plus answering, which is what a
-        // summary costs; load time is excluded (it mostly measures the disk).
-        match crate::pipeline::native::bench_llm(&models_dir, threads, gpu, 2048, 384) {
-            Ok(b) => rows.push(json!({
-                "stage": "Summarizer LLM",
-                "backend": label,
-                "seconds": ((b.prefill_secs + b.generate_secs) * 10.0).round() / 10.0,
-                "speed": format!(
-                    "reads {:.0} tokens/s, writes {:.1} tokens/s",
-                    b.prompt_tokens as f64 / b.prefill_secs,
-                    b.generated_tokens as f64 / b.generate_secs,
-                ),
-            })),
+    // Summary: the selected model on each backend this build offers (Metal
+    // GPU and CPU on macOS). A 2048-token transcript and a 384-token answer
+    // keep the run short; reading and writing speed scale to a meeting.
+    let current = config.summary_provider();
+    let mut summary: Vec<(String, f64)> = Vec::new(); // (provider, secs per meeting hour)
+                                                      // GPU (the default where it exists) first.
+    let mut providers = config::summary_provider_options();
+    providers.sort_by_key(|p| *p != "gpu");
+    for provider in providers {
+        let label = if provider == "gpu" { "GPU" } else { "CPU" };
+        emit(&rows, &format!("Summarizing on the {label}…"));
+        match native::bench_llm(&llm_path, threads, provider == "gpu", 2048, 384) {
+            Ok(b) => {
+                let read = b.prompt_tokens as f64 / b.prefill_secs;
+                let write = b.generated_tokens as f64 / b.generate_secs;
+                summary
+                    .push((provider.to_string(), TOKENS_PER_HOUR / read + ANSWER_TOKENS / write));
+                rows.push(json!({
+                    "stage": "Summary",
+                    "backend": label,
+                    "provider": provider,
+                    "model": llm_name,
+                    "seconds": round1(b.prefill_secs + b.generate_secs),
+                    "speed": format!("reads {read:.0} tokens/s, writes {write:.1} tokens/s"),
+                }));
+            }
             Err(e) => rows.push(json!({
-                "stage": "Summarizer LLM",
+                "stage": "Summary",
                 "backend": label,
+                "provider": provider,
+                "model": llm_name,
                 "error": e,
             })),
         }
         emit(&rows, "");
     }
 
-    // Fastest backend per stage → a ready-to-apply config recommendation.
-    let fastest_onnx = |stage: &str| -> &'static str {
-        let best = rows.iter().filter(|r| r["stage"] == stage && r.get("error").is_none()).min_by(
-            |a, b| {
-                let a = a["seconds"].as_f64().unwrap_or(f64::MAX);
-                let b = b["seconds"].as_f64().unwrap_or(f64::MAX);
-                a.total_cmp(&b)
-            },
-        );
-        match best.and_then(|r| r["backend"].as_str()) {
-            Some("CoreML (ANE)") => "coreml",
-            _ => "cpu",
+    let recommendation = recommend(&summary);
+    // One hour of meeting with the current settings.
+    let summary_secs = summary.iter().find(|(p, _)| *p == current).map(|(_, s)| *s);
+    let estimate = match (per_audio_sec, summary_secs) {
+        (Some(rate), Some(summary_secs)) => {
+            let transcription = rate * 3600.0;
+            json!({
+                "per_hour_secs": (transcription + voice_secs + summary_secs).round(),
+                "transcription_secs": transcription.round(),
+                "voice_secs": voice_secs.round(),
+                "summary_secs": summary_secs.round(),
+            })
         }
-    };
-    // The LLM winner is the faster summary workload (reading + answering).
-    let fastest_llm_gpu = rows
-        .iter()
-        .filter(|r| r["stage"] == "Summarizer LLM" && r.get("error").is_none())
-        .min_by(|a, b| {
-            let a = a["seconds"].as_f64().unwrap_or(f64::MAX);
-            let b = b["seconds"].as_f64().unwrap_or(f64::MAX);
-            a.total_cmp(&b)
-        })
-        .map(|r| r["backend"] == "Metal GPU")
-        .unwrap_or(true);
-    let recommendation = json!({
-        "ASR_PROVIDER": fastest_onnx("Transcription"),
-        "DIAR_PROVIDER": fastest_onnx("Diarization"),
-        "SPEAKER_PROVIDER": fastest_onnx("Speaker ID"),
-        "SUMMARY_PROVIDER": if fastest_llm_gpu { "gpu" } else { "cpu" },
-    });
-    let current = {
-        let config = ctx.config.read().unwrap();
-        json!({
-            "ASR_PROVIDER": config.asr_provider(),
-            "DIAR_PROVIDER": config.diar_provider(),
-            "SPEAKER_PROVIDER": config.speaker_provider(),
-            "SUMMARY_PROVIDER": config.summary_provider(),
-        })
+        _ => Value::Null,
     };
 
     ctx.events.emit(
@@ -218,10 +252,24 @@ fn run(ctx: &Arc<Ctx>, source: Option<PathBuf>) {
             "threads": threads,
             "cores": cores,
             "source": source_label,
+            "models": used,
+            "estimate": estimate,
             "recommendation": recommendation,
-            "current": current,
+            "current": {"SUMMARY_PROVIDER": current},
         }),
     );
+}
+
+/// The summary backend to recommend from `(provider, seconds)` timings: the
+/// fastest, and only when at least two backends measured — a single or
+/// failed measurement is no choice.
+#[cfg_attr(not(feature = "native-pipeline"), allow(dead_code))]
+fn recommend(summary: &[(String, f64)]) -> Value {
+    if summary.len() < 2 {
+        return json!({});
+    }
+    let fastest = summary.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|(p, _)| p.as_str());
+    json!({"SUMMARY_PROVIDER": fastest})
 }
 
 #[cfg(not(feature = "native-pipeline"))]
@@ -230,4 +278,24 @@ fn run(ctx: &Arc<Ctx>, _source: Option<PathBuf>) {
         "benchmark-progress",
         json!({"status": "error", "message": "this build has no native pipeline"}),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recommends_only_a_measured_choice() {
+        assert_eq!(recommend(&[]), json!({}));
+        // One backend (Windows/Linux, or the other one failed): no choice.
+        assert_eq!(recommend(&[("cpu".into(), 90.0)]), json!({}));
+        assert_eq!(
+            recommend(&[("gpu".into(), 45.0), ("cpu".into(), 160.0)]),
+            json!({"SUMMARY_PROVIDER": "gpu"})
+        );
+        assert_eq!(
+            recommend(&[("gpu".into(), 200.0), ("cpu".into(), 160.0)]),
+            json!({"SUMMARY_PROVIDER": "cpu"})
+        );
+    }
 }

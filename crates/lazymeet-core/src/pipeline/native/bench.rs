@@ -1,13 +1,14 @@
-//! Built-in benchmark primitives (explicit backends, driven by `bench.rs`).
+//! Built-in benchmark primitives (driven by `bench.rs`).
 
-use super::asr::{load_recognizer, load_wav, recognizer_config, Recognizer};
-use super::diarize::{new_extractor, pyannote_diarizer, speaker_embedding};
+use super::asr::{load_recognizer, load_wav};
 use super::llm::{llama_backend, Llm, FORMAT};
 use super::*;
 
 /// Deterministic pseudo-speech: band-limited noise with an amplitude wobble.
-/// Content doesn't matter for timing — the models process every frame either
-/// way — but it must not be pure silence or digital full-scale noise.
+/// Parakeet and the speaker models spend the same compute on it as on
+/// speech; models that write text token by token (Whisper, Qwen3-ASR,
+/// Cohere) don't, so `bench.rs` times those only on a real recording. It
+/// must not be pure silence or digital full-scale noise.
 fn synth_audio(seconds: f64) -> Vec<f32> {
     let n = (seconds * SAMPLE_RATE as f64) as usize;
     let mut state: u32 = 0x1234_5678;
@@ -23,108 +24,53 @@ fn synth_audio(seconds: f64) -> Vec<f32> {
         .collect()
 }
 
-/// 300 s (5 min) of synthetic benchmark audio (the default source).
-pub fn bench_audio_synth() -> Vec<f32> {
-    synth_audio(300.0)
-}
-
-/// Decode (up to) the first 300 s (5 min) of a user-picked recording to
-/// benchmark samples. Decoding happens locally via the bundled ffmpeg; the
-/// scratch WAV is deleted immediately after reading.
-pub fn bench_audio_from_file(
-    ffmpeg: &Path,
-    src: &Path,
+/// Write the benchmark audio to `scratch_dir` as the 16 kHz mono WAV the
+/// pipeline reads: up to the first 300 s (5 min) of a user-picked recording
+/// (decoded locally via the bundled ffmpeg), or the synthetic buffer when
+/// `src` is None. Returns the WAV (the caller deletes it) and its seconds.
+pub fn bench_wav(
+    ffmpeg: Option<&Path>,
+    src: Option<&Path>,
     scratch_dir: &Path,
-) -> Result<Vec<f32>, String> {
+) -> Result<(std::path::PathBuf, f64), String> {
     let wav = scratch_dir.join(".bench-audio.wav");
-    #[allow(unused_mut)]
-    let mut cmd = Command::new(ffmpeg);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    match src {
+        Some(src) => {
+            let ffmpeg = ffmpeg.ok_or("ffmpeg is not available")?;
+            #[allow(unused_mut)]
+            let mut cmd = Command::new(ffmpeg);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            cmd.arg("-y")
+                .arg("-i")
+                .arg(src)
+                .args(["-vn", "-ac", "1", "-ar", "16000", "-t", "300", "-f", "wav"])
+                .arg(&wav);
+            run_ffmpeg(cmd).map_err(|e| format!("could not decode the recording: {e}"))?;
+        }
+        None => {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: SAMPLE_RATE,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut out = hound::WavWriter::create(&wav, spec).map_err(|e| e.to_string())?;
+            for s in synth_audio(300.0) {
+                out.write_sample((s * i16::MAX as f32) as i16).map_err(|e| e.to_string())?;
+            }
+            out.finalize().map_err(|e| e.to_string())?;
+        }
     }
-    cmd.arg("-y")
-        .arg("-i")
-        .arg(src)
-        .args(["-vn", "-ac", "1", "-ar", "16000", "-t", "300", "-f", "wav"])
-        .arg(&wav);
-    run_ffmpeg(cmd)?;
-    let result = load_wav(&wav);
-    let _ = std::fs::remove_file(&wav);
-    let samples = result?;
-    if samples.len() < SAMPLE_RATE as usize {
+    let samples = hound::WavReader::open(&wav).map_err(|e| e.to_string())?.duration();
+    if samples < SAMPLE_RATE {
+        let _ = std::fs::remove_file(&wav);
         return Err("the recording has less than one second of audio".into());
     }
-    Ok(samples)
-}
-
-/// Time the three ONNX stages on the given execution provider over `samples`
-/// (16 kHz mono), diarizing with `diar_model` (the one the settings select).
-/// Returns (stage name, seconds, seconds of audio processed).
-pub fn bench_onnx(
-    models_dir: &Path,
-    threads: i32,
-    provider: &str,
-    diar_model: &str,
-    samples: &[f32],
-) -> Result<Vec<(String, f64, f64)>, String> {
-    use std::time::Instant;
-    let mut rows = Vec::new();
-    let sr = SAMPLE_RATE as usize;
-
-    // ASR: default model, up to 300 s in 10 s pieces (no VAD — the
-    // recognizer cost is what differs between providers), decoded the way a
-    // meeting is: `threads` one-thread workers sharing one recognizer.
-    let spec = crate::models::resolve_asr_at(models_dir, false, crate::models::ASR_DEFAULT);
-    let inner = OfflineRecognizer::create(&recognizer_config(&spec, "", provider, 1))
-        .ok_or_else(|| format!("ASR load ({provider}) failed"))?;
-    let recognizer = Recognizer { inner, language: None };
-    let asr = &samples[..samples.len().min(300 * sr)];
-    // One warmup pass (first call pays one-time graph setup), then measure.
-    let _ = recognizer.transcribe(&asr[..sr.min(asr.len())]);
-    let pieces: Vec<&[f32]> = asr.chunks(10 * sr).collect();
-    let t = Instant::now();
-    par_map(&pieces, threads as usize, |piece| recognizer.transcribe(piece));
-    rows.push((
-        "Transcription".to_string(),
-        t.elapsed().as_secs_f64(),
-        asr.len() as f64 / sr as f64,
-    ));
-    drop(recognizer);
-
-    // Diarization: up to 300 s.
-    let diar = &samples[..samples.len().min(300 * sr)];
-    let diar_secs = diar.len() as f64 / sr as f64;
-    let (engine, model) = resolve_diar_at(models_dir, false, diar_model, -1);
-    let t = Instant::now();
-    if engine == "nemotron" {
-        let mut diarizer =
-            Nemotron::load(&model, threads).map_err(|e| format!("diarizer load: {e}"))?;
-        let _ = diarizer.probabilities(diar);
-    } else {
-        let diarizer = pyannote_diarizer(&model, models_dir, -1, 0.7, provider, threads)
-            .map_err(|e| format!("diarizer load ({provider}): {e}"))?;
-        let _ = diarizer.process(diar);
-    }
-    rows.push(("Diarization".to_string(), t.elapsed().as_secs_f64(), diar_secs));
-
-    // Speaker embeddings: 40 × 5 s windows (matches how voiceprints are made).
-    let extractor = new_extractor(models_dir, provider, threads)
-        .map_err(|e| format!("extractor load ({provider}): {e}"))?;
-    // A 5 s window from the middle of the source (whole clip if shorter).
-    let win_len = (5 * sr).min(samples.len());
-    let start = (samples.len() - win_len) / 2;
-    let window = &samples[start..start + win_len];
-    let _ = speaker_embedding(&extractor, window);
-    let t = Instant::now();
-    for _ in 0..40 {
-        let _ = speaker_embedding(&extractor, window);
-    }
-    let spk_secs = 40.0 * win_len as f64 / sr as f64;
-    rows.push(("Speaker ID".to_string(), t.elapsed().as_secs_f64(), spk_secs));
-
-    Ok(rows)
+    Ok((wav, samples as f64 / SAMPLE_RATE as f64))
 }
 
 /// One summarizer benchmark run (see `bench_llm`).
@@ -143,7 +89,7 @@ pub struct LlmBench {
 /// 28-minute meeting's summary takes 26 s on Metal and 105 s on the CPU,
 /// while generation alone is only ~1.5x apart — so both halves are measured.
 pub fn bench_llm(
-    models_dir: &Path,
+    path: &Path,
     threads: i32,
     gpu: bool,
     prompt_tokens: usize,
@@ -151,15 +97,14 @@ pub fn bench_llm(
 ) -> Result<LlmBench, String> {
     use std::time::Instant;
     let backend = llama_backend()?;
-    let path = crate::models::resolve_llm_at(models_dir, false, crate::models::LLM_DEFAULT);
     let params = if gpu {
         LlamaModelParams::default().with_n_gpu_layers(1_000_000)
     } else {
         LlamaModelParams::default().with_n_gpu_layers(0)
     };
     let t = Instant::now();
-    let model = LlamaModel::load_from_file(backend, &path, &params)
-        .map_err(|e| format!("llm load: {e}"))?;
+    let model =
+        LlamaModel::load_from_file(backend, path, &params).map_err(|e| format!("llm load: {e}"))?;
     let load_secs = t.elapsed().as_secs_f64();
 
     let n_ctx = (prompt_tokens + answer_tokens + 512) as u32;
