@@ -2,6 +2,7 @@
 // `main.ts` runs this right after boot; the result is one <pre id="smoke-result">
 // that the shell greps for.
 import { closePrepare, openPrepare } from "../ts/prepare";
+import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings } from "../ts/settings";
 
 export async function runSmokeChecks(): Promise<void> {
@@ -60,6 +61,13 @@ export async function runSmokeChecks(): Promise<void> {
   } catch (e: any) {
     problems.push("settings check threw: " + e.message);
   }
+  if (location.hash === "#bench") {
+    try {
+      checkBench(problems, hidden);
+    } catch (e: any) {
+      problems.push("bench check threw: " + e.message);
+    }
+  }
   finish();
 }
 
@@ -98,4 +106,35 @@ async function checkSettings(problems: string[], hidden: (id: string) => boolean
     q<HTMLElement>("#config-discard")!.click();
     if (!q("#settings-savebar")!.hidden) problems.push("discard left the save bar");
   }
+}
+
+// A finished run as the backend emits it (M3 Pro numbers).
+export const BENCH_DONE = {
+  status: "done",
+  threads: 7,
+  cores: 12,
+  source: "synthetic audio",
+  models: { asr: "Parakeet TDT 0.6B v3", diar: "Nemotron 3 Diarization", summary: "Qwen 3.5 4B" },
+  rows: [
+    { stage: "Transcription + speaker separation", backend: "CPU", model: "Parakeet TDT 0.6B v3 + Nemotron 3 Diarization", seconds: 22.5, speed: "13.4x realtime" },
+    { stage: "Voice matching", backend: "CPU", model: "TitaNet", seconds: 1.3, speed: "2 speakers" },
+    { stage: "Summary", backend: "GPU", provider: "gpu", model: "Qwen 3.5 4B", seconds: 12.6, speed: "reads 499 tokens/s, writes 30.6 tokens/s" },
+    { stage: "Summary", backend: "CPU", provider: "cpu", model: "Qwen 3.5 4B", seconds: 119.0, speed: "reads 87 tokens/s, writes 2.5 tokens/s" },
+  ],
+  estimate: { per_hour_secs: 316, transcription_secs: 270, voice_secs: 1, summary_secs: 45 },
+  recommendation: { SUMMARY_PROVIDER: "gpu" },
+  current: { SUMMARY_PROVIDER: "cpu" },
+};
+
+function checkBench(problems: string[], hidden: (id: string) => boolean) {
+  document.getElementById("settings")!.classList.add("hidden");
+  document.getElementById("app")!.classList.remove("hidden");
+  openBench("app");
+  onBenchProgress(BENCH_DONE);
+  if (hidden("bench")) problems.push("bench did not open");
+  const head = document.getElementById("bench-estimate-head")!.textContent || "";
+  if (!head.includes("5 min")) problems.push(`estimate headline: ${head}`);
+  if (document.querySelectorAll("#bench-results tbody tr").length !== 4) problems.push("bench rows");
+  if (!document.querySelector("#bench-results tr.best")) problems.push("fastest summary not marked");
+  if (hidden("bench-apply")) problems.push("apply hidden although settings differ");
 }
