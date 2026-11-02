@@ -2,6 +2,7 @@
 // Settings
 // --------------------------------------------------------------------------
 import { $, call } from "./core";
+import { openBench } from "./bench";
 import { confirmThen, disarm, el, fmtBytes, iconBtn, showToast } from "./helpers";
 
 interface ConfigMeta {
@@ -116,7 +117,8 @@ let lastConfig = null;
 /** The values the form was rendered from: the reference for unsaved changes. */
 let loadedValues: Record<string, unknown> = {};
 
-export async function openSettings() {
+/** Open Settings; `field` opens the Advanced card and focuses that control. */
+export async function openSettings(field?: string) {
   $("app").classList.add("hidden");
   $("settings").classList.remove("hidden");
   $("settings").querySelector("h1").focus();
@@ -128,6 +130,12 @@ export async function openSettings() {
     ]);
     renderConfigForm(cfg, models);
     renderDataSection(data);
+    if (field) {
+      const input = document.getElementById(`cfg-${field}`);
+      const details = input?.closest("details");
+      if (details) details.open = true;
+      input?.focus();
+    }
   } catch (e) {
     showToast(`Couldn't load settings: ${e.message}`);
   }
@@ -144,137 +152,6 @@ function leaveSettings() {
   disarm($("settings-back"));
   $("settings").classList.add("hidden");
   $("app").classList.remove("hidden");
-}
-
-let benchRec = null; // recommendation from the last completed run
-
-/** Where the benchmark's back button returns to. */
-let benchFrom: "app" | "settings" = "app";
-
-export function openBench(from: "app" | "settings" = "app") {
-  benchFrom = from;
-  $(from).classList.add("hidden");
-  $("bench").classList.remove("hidden");
-  $("bench").querySelector("h1").focus();
-}
-
-export function closeBench() {
-  $("bench").classList.add("hidden");
-  $(benchFrom).classList.remove("hidden");
-  if (benchFrom === "settings") $("settings").querySelector("h1").focus();
-}
-
-export async function startBenchmark(path) {
-  try {
-    $("bench-results").classList.add("hidden");
-    $("bench-results").querySelector("tbody").innerHTML = "";
-    $("bench-rec").classList.add("hidden");
-    $("bench-apply").classList.add("hidden");
-    await call("run_benchmark", { path: path || null });
-    $("bench-run").disabled = true;
-    $("bench-run-file").disabled = true;
-    $("bench-status").textContent = "Starting…";
-  } catch (e) {
-    showToast(e.message);
-  }
-}
-
-export async function pickBenchmarkFile() {
-  try {
-    const path = await call("pick_recording");
-    if (path) startBenchmark(path);
-  } catch (e) {
-    showToast(`Couldn't open the file picker: ${e.message}`);
-  }
-}
-
-// `benchmark-progress` events: rows accumulate as each measurement lands.
-export function onBenchProgress(p) {
-  if (p.threads) {
-    const env = $("bench-env");
-    const cores = p.cores
-      ? `Using ${p.threads} of ${p.cores} CPU cores`
-      : `Using ${p.threads} CPU threads`;
-    env.textContent = `${cores} (change under Settings → CPU threads) · Source: ${p.source || "synthetic audio"}.`;
-    env.classList.remove("hidden");
-  }
-  if (p.rows && p.rows.length) {
-    const tbody = $("bench-results").querySelector("tbody");
-    tbody.innerHTML = "";
-    for (const row of p.rows) {
-      const tr = document.createElement("tr");
-      const cell = (text: string, cls?: string) => {
-        const td = document.createElement("td");
-        td.textContent = text;
-        if (cls) td.className = cls;
-        tr.appendChild(td);
-      };
-      cell(row.stage);
-      cell(row.backend);
-      if (row.error) {
-        const td = document.createElement("td");
-        td.colSpan = 2;
-        td.className = "bench-error";
-        td.textContent = row.error;
-        tr.appendChild(td);
-      } else {
-        cell(`${row.seconds} s`);
-        cell(row.speed);
-      }
-      tbody.appendChild(tr);
-    }
-    $("bench-results").classList.remove("hidden");
-  }
-  if (p.status === "running") {
-    $("bench-status").textContent = p.step || "Measuring…";
-  } else if (p.status === "done") {
-    $("bench-run").disabled = false;
-    $("bench-run-file").disabled = false;
-    $("bench-status").textContent = "Done.";
-    renderBenchRecommendation(p.recommendation, p.current);
-  } else if (p.status === "error") {
-    $("bench-run").disabled = false;
-    $("bench-run-file").disabled = false;
-    $("bench-status").textContent = `Benchmark failed: ${p.message}`;
-  }
-}
-
-function benchSummaryText(rec) {
-  return (
-    `Fastest on this machine: transcription ${PROVIDER_LABELS[rec.ASR_PROVIDER]}` +
-    ` · speaker separation ${PROVIDER_LABELS[rec.DIAR_PROVIDER]}` +
-    ` · voice matching ${PROVIDER_LABELS[rec.SPEAKER_PROVIDER]}` +
-    ` · summarizer ${PROVIDER_LABELS[rec.SUMMARY_PROVIDER]}.`
-  );
-}
-
-function renderBenchRecommendation(rec, current) {
-  if (!rec) return;
-  benchRec = rec;
-  const matches =
-    current &&
-    ["ASR_PROVIDER", "DIAR_PROVIDER", "SPEAKER_PROVIDER", "SUMMARY_PROVIDER"].every(
-      (k) => current[k] === rec[k]
-    );
-  const line = $("bench-rec");
-  line.textContent =
-    benchSummaryText(rec) +
-    (matches ? " Your settings already match." : " Your settings differ.");
-  line.classList.remove("hidden");
-  $("bench-apply").classList.toggle("hidden", matches);
-}
-
-export async function applyBenchRecommendation() {
-  if (!benchRec) return;
-  try {
-    await call("put_config", { fields: benchRec });
-    $("bench-apply").classList.add("hidden");
-    $("bench-rec").textContent =
-      benchSummaryText(benchRec) + " Applied — used from the next recording on.";
-    showToast("Fastest configuration applied.", 3500, true);
-  } catch (e) {
-    showToast(`Couldn't apply: ${e.message}`);
-  }
 }
 
 export function openSpeakers() {

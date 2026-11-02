@@ -11,20 +11,22 @@ import { queueGlobalSearch, setupGlobalSearch } from "./search";
 import {
   applyBenchRecommendation,
   closeBench,
+  onBenchProgress,
+  openBench,
+  pickBenchmarkFile,
+  startBenchmark,
+} from "./bench";
+import {
   closeSettings,
   closeSpeakers,
   discardConfig,
-  onBenchProgress,
   onModelsProgress,
-  openBench,
   openSettings,
   openSpeakers,
-  pickBenchmarkFile,
   refreshSpeakers,
   resetConfig,
   revealDataDir,
   saveConfig,
-  startBenchmark,
 } from "./settings";
 import { applySetupStatus, retrySetup, toggleDownloadPopover, watchSetup } from "./setup";
 import { state } from "./state";
@@ -39,7 +41,7 @@ function initApp() {
   setupPrepare();
   setupFind();
   setupGlobalSearch();
-  $("settings-btn").addEventListener("click", openSettings);
+  $("settings-btn").addEventListener("click", () => openSettings());
   $("settings-back").addEventListener("click", closeSettings);
   $("speakers-btn").addEventListener("click", openSpeakers);
   $("speakers-back").addEventListener("click", closeSpeakers);

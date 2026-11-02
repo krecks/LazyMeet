@@ -109,7 +109,7 @@
           </button>
           <div id="dl-popover" class="dl-popover hidden" role="dialog" aria-label="Model download progress"></div>
         </div>
-        <button id="bench-btn" class="icon-btn" title="Hardware benchmark" aria-label="Open hardware benchmark">
+        <button id="bench-btn" class="icon-btn" title="Benchmark" aria-label="Open the benchmark">
           <svg class="icon"><use href="#i-gauge" /></svg>
         </button>
         <button id="speakers-btn" class="icon-btn" title="Known speakers" aria-label="Open known speakers">
@@ -455,11 +455,11 @@
     </main>
   </section>
 
-  <!-- Hardware benchmark -->
+  <!-- Benchmark -->
   <section id="bench" class="screen hidden">
     <header class="app-header">
       <div class="brand">
-        <button id="bench-back" class="icon-btn" title="Back" aria-label="Back to meetings">
+        <button id="bench-back" class="icon-btn" title="Back" aria-label="Back">
           <svg class="icon"><use href="#i-back" /></svg>
         </button>
         <h1 class="wordmark" tabindex="-1">Benchmark</h1>
@@ -467,69 +467,65 @@
     </header>
 
     <main class="settings-body">
-      <section class="settings-section">
+      <section class="settings-section" aria-labelledby="bench-title">
         <div class="settings-section-head">
-          <p class="muted">Measures each processing stage on every backend this
-            machine offers: the transcription, speaker-separation, and
-            voice-matching models on the CPU; the summarizer LLM on the GPU and
-            the CPU. Takes a
-            few minutes and needs the models downloaded. LazyMeet ships with the
-            configuration that is fastest on most machines; after a run it can
-            apply the combination that measured fastest on yours.</p>
+          <h2 id="bench-title" class="serif">How long does a meeting take?</h2>
+          <p class="muted">Runs your selected models over five minutes of audio the way
+            a meeting runs them, and estimates how long an hour of meeting takes on
+            this machine. Where the summary can run on the GPU or the CPU, both are
+            timed and you can switch to the faster one. Takes a few minutes;
+            recordings added meanwhile wait until it is done.</p>
         </div>
-        <details class="bench-how">
-          <summary>How the test works</summary>
-          <p class="muted">By default all measurements run on <strong>synthesized
-            audio and a fixed text prompt</strong> generated on the fly — none of
-            your recordings are read, and nothing leaves this machine. The audio
-            is deterministic noise shaped like speech; these models spend the
-            same compute on every second of audio regardless of its content,
-            which is exactly what differs between backends, so the comparison
-            carries over to real recordings — and results stay comparable
-            across machines.</p>
-          <p class="muted"><em>Run with your own recording</em> uses a file you
-            pick instead — capped at the <strong>first 5 minutes</strong>, decoded
-            locally, never uploaded — if you want timings on your typical audio.
-            Backend comparisons don't need more: their cost scales linearly with
-            audio length, so more minutes only add waiting. The summarizer test
-            always uses the fixed prompt.</p>
-          <ul class="muted">
-            <li><strong>Transcription</strong> — up to 5 minutes of audio
-              through the speech-to-text model in 10-second pieces, decoded in
-              parallel the way a meeting is (VAD bypassed, one warm-up pass
-              first).</li>
-            <li><strong>Diarization</strong> — a full who-spoke-when pass over
-              up to 5 minutes of audio with the selected speaker separation
-              model.</li>
-            <li><strong>Speaker ID</strong> — 40 voiceprint extractions from
-              5-second windows, the same way meeting voiceprints are built.</li>
-            <li><strong>Summarizer LLM</strong> — the summary model reads a fixed
-              2048-token transcript (about 10 minutes of meeting) with the real
-              summary instructions and writes up to 384 tokens. The time column
-              is reading plus writing; the speed column shows both rates.
-              Reading dominates real summaries and is where the GPU gains
-              most.</li>
-            <li><strong>CPU threads</strong> — all CPU stages use the thread
-              count from Settings → CPU threads (default: about 75&thinsp;% of
-              the machine's cores); the run shows the exact number used.</li>
-          </ul>
-          <p class="muted">Times are for those fixed workloads, so runs are
-            comparable across machines and backends. They are not a prediction
-            of full-meeting duration — real recordings add audio extraction and
-            silence removal.</p>
-        </details>
-        <button id="bench-run" class="btn">Run benchmark</button>
-        <button id="bench-run-file" class="btn ghost">Run with your own recording…</button>
-        <p id="bench-status" class="muted"></p>
-        <p id="bench-env" class="muted hidden"></p>
-        <p id="bench-rec" class="muted hidden"></p>
-        <button id="bench-apply" class="btn hidden">Apply fastest configuration</button>
+
+        <div class="form-actions bench-actions">
+          <button id="bench-run" class="btn" type="button">Run benchmark</button>
+          <button id="bench-run-file" class="btn ghost" type="button">Run on one of your
+            recordings…</button>
+        </div>
+        <p id="bench-status" class="muted bench-status" aria-live="polite"></p>
+        <p id="bench-env" class="muted small hidden"></p>
+
+        <div id="bench-estimate" class="bench-estimate hidden" aria-live="polite">
+          <p id="bench-estimate-head" class="bench-estimate-head serif"></p>
+          <p id="bench-estimate-parts" class="muted small"></p>
+        </div>
+
         <table id="bench-results" class="bench-table hidden">
           <thead>
-            <tr><th>Stage</th><th>Backend</th><th>Time</th><th>Speed</th></tr>
+            <tr><th>Stage</th><th>Model</th><th>On</th><th class="num">Time</th><th>Speed</th></tr>
           </thead>
           <tbody></tbody>
         </table>
+
+        <div id="bench-rec" class="bench-rec hidden">
+          <p id="bench-rec-text"></p>
+          <button id="bench-apply" class="btn" type="button"></button>
+        </div>
+
+        <details class="bench-how">
+          <summary>How the test works</summary>
+          <ul class="muted">
+            <li><strong>Audio</strong> — <em>Run benchmark</em> uses five minutes of
+              synthetic, speech-like noise: none of your recordings are read.
+              Parakeet and the speaker models spend the same compute on it as on
+              speech. Whisper, Qwen3-ASR and Cohere Transcribe write text token by
+              token and spend almost nothing on noise, so they are timed only with
+              <em>Run on one of your recordings</em> (its first five minutes,
+              decoded on this computer, never uploaded).</li>
+            <li><strong>Transcription and speaker separation</strong> — run
+              together with the same thread split and silence removal as a
+              meeting.</li>
+            <li><strong>Voice matching</strong> — one voiceprint per separated
+              speaker.</li>
+            <li><strong>Summary</strong> — the selected summary model reads a
+              2048-token transcript and writes up to 384 tokens. Its reading and
+              writing speeds are scaled to an hour of meeting (about 12,600
+              transcript tokens and a 600-token answer).</li>
+          </ul>
+          <p class="muted">Not included: decoding the recording file (seconds for
+            most files) and the extra summary passes for meetings longer than about
+            90 minutes.</p>
+        </details>
       </section>
     </main>
   </section>
