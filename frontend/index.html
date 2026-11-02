@@ -341,12 +341,13 @@
           </select>
         </label>
         <label class="speakers-field"
-          title="Language spoken in the recording — a hint for Whisper and Qwen3-ASR; Parakeet always detects it automatically.">
+          title="The language spoken in this recording. Parakeet and Whisper detect it themselves, Qwen3-ASR takes it as a hint, Cohere Transcribe needs it.">
           <span class="field-label">Language</span>
           <select id="prep-language"></select>
         </label>
+        <span id="prep-language-note" class="muted small hidden" aria-live="polite"></span>
         <span class="prep-spacer"></span>
-        <span id="prep-hint" class="muted small hidden">Select at least one segment</span>
+        <span id="prep-hint" class="muted small hidden" aria-live="polite">Select at least one segment</span>
         <button id="prep-cancel" class="btn ghost" type="button">Cancel</button>
         <button id="prep-transcribe" class="btn" type="button">Transcribe</button>
       </div>
@@ -360,46 +361,43 @@
         <button id="settings-back" class="icon-btn" title="Back" aria-label="Back to meetings">
           <svg class="icon"><use href="#i-back" /></svg>
         </button>
-        <h1 class="wordmark">Settings</h1>
+        <h1 class="wordmark" tabindex="-1">Settings</h1>
       </div>
     </header>
 
     <main class="settings-body">
-      <section class="settings-section">
+      <section class="settings-section" aria-labelledby="set-transcription">
         <div class="settings-section-head">
-          <h2 class="serif">Transcription</h2>
-          <p class="muted">Which model listens, and how speakers are separated and
-            recognized. Changes apply to the <em>next</em> recording you process.</p>
+          <h2 id="set-transcription" class="serif">Transcription</h2>
+          <p class="muted">Which model listens, and the language spoken in your
+            recordings. Changes apply to the <em>next</em> recording you process.</p>
         </div>
         <div id="config-transcription"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" aria-labelledby="set-speakers">
         <div class="settings-section-head">
-          <h2 class="serif">Summary</h2>
-          <p class="muted">The on-device model that writes the notes, the language it
-            writes them in, and the instructions it follows.</p>
+          <h2 id="set-speakers" class="serif">Speakers</h2>
+          <p class="muted">Who spoke when, and how voices are matched to the people
+            you've named.</p>
+        </div>
+        <div id="config-speakers"></div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="set-summary">
+        <div class="settings-section-head">
+          <h2 id="set-summary" class="serif">Summary</h2>
+          <p class="muted">The on-device model that writes the notes, and the language
+            it writes them in.</p>
         </div>
         <div id="config-summary"></div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" aria-labelledby="set-data">
         <div class="settings-section-head">
-          <h2 class="serif">Processing</h2>
-          <p class="muted">How much of the computer LazyMeet may use, and what it keeps.</p>
-        </div>
-        <div id="config-processing"></div>
-        <div class="form-actions">
-          <button type="button" id="config-save" class="btn">Save settings</button>
-          <button type="button" id="config-reset" class="btn ghost">Reset to defaults</button>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <div class="settings-section-head">
-          <h2 class="serif">Your data</h2>
-          <p class="muted">Everything LazyMeet knows lives in this folder — transcripts,
-            voices, and the downloaded models. Nothing ever leaves this computer.</p>
+          <h2 id="set-data" class="serif">Your data</h2>
+          <p class="muted">Transcripts, voices and downloaded models stay in this
+            folder — nothing ever leaves this computer.</p>
         </div>
         <div class="data-row">
           <code id="data-dir" class="data-path"></code>
@@ -408,7 +406,27 @@
           </button>
         </div>
         <p id="data-usage" class="muted small"></p>
+        <div id="config-data"></div>
+        <h3 class="subhead">Downloaded models</h3>
+        <ul id="model-disk-list" class="model-disk-list"></ul>
       </section>
+
+      <details class="settings-section settings-advanced">
+        <summary><h2 class="serif">Advanced</h2>
+          <span class="muted">CPU threads, the summary instructions, and resetting
+            everything.</span></summary>
+        <div id="config-advanced"></div>
+        <div class="form-actions">
+          <button type="button" id="config-reset" class="btn danger">
+            <span>Reset all settings to defaults</span></button>
+        </div>
+      </details>
+
+      <div id="settings-savebar" class="savebar" hidden>
+        <span class="savebar-text">Unsaved changes</span>
+        <button type="button" id="config-discard" class="btn ghost">Discard</button>
+        <button type="button" id="config-save" class="btn">Save settings</button>
+      </div>
     </main>
   </section>
 
@@ -419,7 +437,7 @@
         <button id="speakers-back" class="icon-btn" title="Back" aria-label="Back to meetings">
           <svg class="icon"><use href="#i-back" /></svg>
         </button>
-        <h1 class="wordmark">Known speakers</h1>
+        <h1 class="wordmark" tabindex="-1">Known speakers</h1>
       </div>
     </header>
 
@@ -444,7 +462,7 @@
         <button id="bench-back" class="icon-btn" title="Back" aria-label="Back to meetings">
           <svg class="icon"><use href="#i-back" /></svg>
         </button>
-        <h1 class="wordmark">Hardware benchmark</h1>
+        <h1 class="wordmark" tabindex="-1">Benchmark</h1>
       </div>
     </header>
 

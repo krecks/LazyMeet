@@ -365,10 +365,7 @@ pub fn diar_catalog() -> Vec<CatalogEntry> {
                 "More than twice as fast as the classic model",
                 "Follows people talking over each other",
             ],
-            cons: vec![
-                "Tells at most 8 speakers apart",
-                "The separation setting below has no effect on it",
-            ],
+            cons: vec!["Tells at most 8 speakers apart", "No tuning settings"],
             spec: nemotron_diar_spec(), // installed on first run
         },
         CatalogEntry {
@@ -381,7 +378,7 @@ pub fn diar_catalog() -> Vec<CatalogEntry> {
             path: PathBuf::from("diarization_segmentation.onnx"),
             pros: vec![
                 "No limit on the number of speakers",
-                "Tunable with the speaker separation setting",
+                "Tunable: speaker separation and minimum speaking time",
             ],
             cons: vec!["Mixes up or invents speakers more often", "Less than half as fast"],
             spec: pyannote_seg_spec(),

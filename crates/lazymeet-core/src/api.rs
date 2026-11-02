@@ -58,13 +58,10 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         "limits": limits,
         // Spoken/notes languages as (code, name); "auto" is added by the UI.
         "languages": LANGUAGE_NAMES,
-        // Backends available in this build on this platform — the UI builds
-        // the compute selects from these (CPU everywhere; NPU for the
-        // recognition models on Apple Silicon; Metal GPU for the summarizer).
+        // Backends this build offers for the summarizer (Metal GPU and CPU
+        // on macOS, CPU elsewhere); the UI shows the choice only when there
+        // is one. The ONNX stages are CPU-only (CoreML is compiled out).
         "compute_options": {
-            "ASR_PROVIDER": config::onnx_provider_options(),
-            "DIAR_PROVIDER": config::onnx_provider_options(),
-            "SPEAKER_PROVIDER": config::onnx_provider_options(),
             "SUMMARY_PROVIDER": config::summary_provider_options(),
         },
     })

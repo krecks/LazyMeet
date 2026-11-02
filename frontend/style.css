@@ -190,7 +190,11 @@ input[type="text"], input[type="search"], input[type="number"], textarea, select
   padding: 0.35rem 0.55rem;
 }
 input:focus-visible, textarea:focus-visible, select:focus-visible, .btn:focus-visible,
-.icon-btn:focus-visible, .dropzone:focus-visible {
+.icon-btn:focus-visible, .dropzone:focus-visible, .model-card:focus-visible,
+summary:focus-visible, .dl-pill:focus-visible, .link-btn:focus-visible,
+.meeting-list button:focus-visible, .search-hit:focus-visible,
+.search-group-head:focus-visible, .wave-zoom button:focus-visible,
+.wordmark:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -251,13 +255,15 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 #setup-items { margin-top: 1.4rem; text-align: left; }
 .setup-item { margin: 0.7rem 0; font-size: 0.85rem; }
 .setup-item .setup-name { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
-.setup-item .bar {
+/* progress bar (setup, download popover, settings) */
+.bar {
+  display: block;
   height: 5px;
   background: var(--surface-2);
   border-radius: 4px;
   overflow: hidden;
 }
-.setup-item .bar > span {
+.bar > span {
   display: block;
   height: 100%;
   background: var(--accent);
@@ -364,11 +370,6 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .dropzone strong { font-size: 0.92rem; }
 .dropzone-icon { color: var(--accent); width: 22px; height: 22px; margin-bottom: 0.2rem; }
 .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
-.dropzone.uploading {
-  border-color: var(--accent);
-  cursor: progress;
-  animation: pulse 1.2s ease-in-out infinite;
-}
 @keyframes pulse { 50% { opacity: 0.55; } }
 
 .speakers-field {
@@ -947,20 +948,7 @@ mark.find-hit.current {
   color: var(--text-muted);
 }
 .model-status:empty { display: none; }
-.model-status .bar {
-  display: block;
-  height: 5px;
-  background: var(--surface-2);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-top: 0.35rem;
-}
-.model-status .bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.4s ease;
-}
+.model-status .bar { margin-top: 0.35rem; }
 .model-status .btn { margin-left: 0.4rem; padding: 0.1rem 0.5rem; font-size: 0.75rem; }
 
 /* model comparison cards (pros/cons overview under the model selects) */
@@ -997,6 +985,7 @@ mark.find-hit.current {
 .model-card-name { font-weight: 600; font-size: 0.85rem; }
 .model-card-badge { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; }
 .model-card-badge.ready { color: var(--success); }
+.model-card-badge.failed { color: var(--danger); }
 .model-card-tagline { margin: 0.15rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
 .model-pros,
 .model-cons {
@@ -1024,7 +1013,8 @@ mark.find-hit.current {
 .model-pros li::before { content: "+"; color: var(--success); }
 .model-cons li::before { content: "−"; color: var(--danger); }
 
-.config-row.locked { opacity: 0.55; }
+.config-row.locked .config-control,
+.config-row.locked .model-overview { opacity: 0.55; }
 .locked-hint { font-size: 0.72rem; color: var(--warning); grid-column: 1 / -1; margin: 0; }
 
 /* toggle switch */
@@ -1053,7 +1043,94 @@ mark.find-hit.current {
 .switch input:checked + .track::before { transform: translateX(18px); background: var(--on-accent); }
 .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.form-actions { display: flex; gap: 0.6rem; margin-top: 1.1rem; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.1rem; }
+
+.config-row[hidden] { display: none; }
+.config-row.model-row .config-help { margin-top: 0.15rem; }
+.config-note {
+  grid-column: 1 / -1;
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--warning);
+}
+.config-note:empty { display: none; }
+.wordmark:focus { outline: none; }
+
+/* inline text button (links between settings and the benchmark) */
+.link-btn {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-btn:disabled { color: var(--text-muted); cursor: default; }
+.config-row.stacked .link-btn { align-self: flex-start; margin-top: 0.35rem; font-size: 0.8rem; }
+.config-row.stacked .config-control { flex-direction: column; align-items: stretch; }
+
+/* Advanced: a collapsed settings card */
+.settings-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.settings-advanced > summary::-webkit-details-marker { display: none; }
+.settings-advanced > summary h2 { font-size: 1.25rem; margin: 0; }
+.settings-advanced > summary h2::after {
+  content: "›";
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.settings-advanced[open] > summary h2::after { transform: rotate(90deg); }
+.settings-advanced > summary .muted { font-size: 0.87rem; }
+.settings-advanced[open] > summary { margin-bottom: 1rem; }
+
+.subhead {
+  margin: 1.3rem 0 0.4rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.model-disk-list { list-style: none; margin: 0; padding: 0; }
+.model-disk-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+}
+.model-disk-list li:first-child { border-top: none; }
+.model-disk-list .disk-info { display: flex; flex-direction: column; min-width: 0; }
+.model-disk-list .disk-name { font-weight: 600; font-size: 0.88rem; }
+.model-disk-list .disk-meta { font-size: 0.78rem; }
+.model-disk-list .btn { padding: 0.2rem 0.7rem; font-size: 0.8rem; }
+
+/* sticky "unsaved changes" bar at the bottom of the settings page */
+.savebar {
+  position: sticky;
+  bottom: 1rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-2);
+}
+.savebar[hidden] { display: none; }
+.savebar-text { flex: 1; font-size: 0.88rem; font-weight: 600; }
 
 .speaker-list li {
   display: flex;
@@ -1085,19 +1162,6 @@ mark.find-hit.current {
 #data-usage { margin: 0.7rem 0 0; }
 
 /* ------------------------------------------------------- error surfacing */
-.banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 150;
-  background: var(--danger);
-  color: var(--on-accent);
-  text-align: center;
-  padding: 0.4rem 0.8rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
 #toasts {
   position: fixed;
   right: 1rem;

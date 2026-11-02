@@ -57,6 +57,7 @@ export function showFatal(err) {
   $("prepare").classList.add("hidden");
   $("settings").classList.add("hidden");
   $("speakers").classList.add("hidden");
+  $("bench").classList.add("hidden");
   $("fatal").classList.remove("hidden");
   $("fatal-msg").textContent = err && err.message ? err.message : String(err);
 }
