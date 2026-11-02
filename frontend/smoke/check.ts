@@ -55,6 +55,13 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("openPrepare threw: " + e.message);
   }
 
+  // `#docs`: the clean Settings page for the README screenshot.
+  if (location.hash === "#docs") {
+    closePrepare();
+    await openSettings();
+    finish();
+    return;
+  }
   try {
     closePrepare();
     await checkSettings(problems, hidden);

@@ -37,7 +37,7 @@ fully offline:
 
 | Component | Model | Source |
 |---|---|---|
-| Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Qwen3-ASR 0.6B and Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
+| Transcription | NVIDIA parakeet-tdt-0.6b-v3 (25 European languages; Cohere Transcribe 2B, Qwen3-ASR 0.6B and Whisper Small/Base selectable) | sherpa-onnx GitHub releases |
 | Voice activity | Silero VAD | sherpa-onnx GitHub releases |
 | Diarization | NVIDIA Nemotron 3 Diarization, int8 ONNX (up to 8 speakers; classic pyannote-seg 3.0 selectable) | Hugging Face (ungated) / sherpa-onnx GitHub releases |
 | Speaker ID | NeMo TitaNet speaker embedding (ONNX) | sherpa-onnx GitHub releases |
@@ -45,9 +45,14 @@ fully offline:
 | ffmpeg | static binary | bundled with the app |
 
 Models are switched in Settings — each option lists its trade-offs and
-downloads on demand:
+downloads on demand; models you no longer use can be removed there to free
+disk space. Cohere Transcribe is the most accurate option but can't detect
+the spoken language, so it needs one set (in Settings or per recording):
 
-![The Settings screen comparing transcription models side by side, with pros and cons for each](docs/screenshots/settings.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
+  <img alt="The Settings screen comparing transcription models side by side, with pros and cons for each" src="docs/screenshots/settings.png">
+</picture>
 
 ## Install (end users)
 
@@ -101,9 +106,9 @@ default settings** (7 CPU threads: ~75 % of cores). End to end the recording
 processes in **~2.6 minutes — about 11× faster than realtime**:
 
 - **Transcription and diarization run concurrently.** They read the same
-  decoded audio with disjoint models, so each gets half the thread budget
-  and they run side by side — measurably faster than either full-budget
-  ordering.
+  decoded audio with disjoint models and run side by side: Nemotron gets
+  about a third of the thread budget (the classic diarizer half), and its
+  threads join transcription as soon as it finishes.
 - **Nemotron 3 Diarization** separates the speakers 2.5× faster than the
   classic pyannote pipeline (43 s vs 106 s for this recording on 7 threads),
   so diarization now finishes well inside the transcription time and frees
@@ -130,12 +135,14 @@ inside sherpa-onnx ships without CoreML, and CoreML/ANE measured slower than
 the CPU for these models anyway (onnxruntime can only place a fraction of the
 ops on the Neural Engine, and the CPU↔ANE hand-offs cost more than the
 acceleration saves). The summarizer LLM runs on the **GPU** where llama.cpp
-supports it (the *Hardware acceleration* setting toggles this): Metal
-generates ~25 % faster than CPU and loads the model far faster.
+supports it (the *Summary compute* setting, macOS): on an M3 Pro, Metal
+writes the notes for a 28-minute meeting in ~26 s versus ~105 s on the CPU.
 
 Hardware differs, so the app includes a built-in benchmark (gauge icon, top
-right) that measures ASR, diarization, speaker ID, and the summarizer on
-your machine across the available backends.
+right). It runs your selected models over five minutes of audio the way a
+meeting runs them and estimates how long an hour of meeting takes on your
+machine; where the summary can run on the GPU or the CPU it times both and
+can switch to the faster one.
 
 ## Privacy
 
@@ -232,7 +239,7 @@ Environment variables (all optional):
 | `LAZYMEET_SPEAKER_THRESHOLD` | `0.6` | Voice-match strictness (cosine) |
 | `LAZYMEET_DIAR_MODEL` | `nemotron-3-diarization` | Diarizer: `nemotron-3-diarization` (up to 8 speakers) or `pyannote-3.0` (classic) |
 | `LAZYMEET_MERGE_THRESHOLD` | `0.6` | Voiceprint similarity at which over-split diarized labels merge |
-| `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Speakers with less speech fold into the closest main voice |
+| `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Classic diarizer only: speakers with less speech fold into the closest main voice |
 | `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
 | `LAZYMEET_KEEP_AUDIO` | `1` | `1` = keep only the audio track for playback (video files are deleted after processing); `0` = delete recordings entirely (disables segment playback) |
