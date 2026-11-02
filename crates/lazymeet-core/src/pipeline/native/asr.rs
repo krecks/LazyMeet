@@ -60,6 +60,17 @@ pub(super) fn recognizer_config(
             };
             model.tokens = Some(String::new());
         }
+        "cohere_transcribe" => {
+            model.cohere_transcribe = OfflineCohereTranscribeModelConfig {
+                encoder: path_str(&spec.encoder),
+                decoder: path_str(&spec.decoder),
+                // Always set: see asr_language.
+                language: Some(language.to_string()),
+                use_punct: true,
+                use_itn: true,
+            };
+            model.tokens = path_str(&spec.tokens);
+        }
         _ => {
             // Parakeet (nemo_transducer) — multilingual, always auto-detects.
             model.transducer = OfflineTransducerModelConfig {
@@ -75,22 +86,50 @@ pub(super) fn recognizer_config(
     config
 }
 
-fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recognizer, String> {
+/// The languages Cohere Transcribe decodes. It cannot detect one itself.
+const COHERE_LANGUAGES: &[&str] =
+    &["ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"];
+
+/// How one ASR kind takes the configured language `code` ("" = auto):
+/// returns (code for the model config, per-stream hint).
+fn asr_language(kind: &str, code: &str) -> Result<(String, Option<&'static str>), String> {
+    match kind {
+        // Qwen3-ASR takes the hint as a language name ("German") on each
+        // stream. Ukrainian is not among its languages, so that hint is left
+        // to its own detection rather than forced.
+        "qwen3_asr" => {
+            let name = super::super::LANGUAGE_NAMES
+                .iter()
+                .find(|(c, _)| *c == code && code != "uk")
+                .map(|(_, name)| *name);
+            Ok((String::new(), name))
+        }
+        "cohere_transcribe" if COHERE_LANGUAGES.contains(&code) => Ok((code.to_string(), None)),
+        "cohere_transcribe" => Err(format!(
+            "Cohere Transcribe can't detect the spoken language — set one of {} \
+             (current: {})",
+            // Only the codes the language setting accepts.
+            super::super::LANGUAGE_NAMES
+                .iter()
+                .map(|(c, _)| *c)
+                .filter(|c| COHERE_LANGUAGES.contains(c))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if code.is_empty() { "auto" } else { code }
+        )),
+        // Whisper: "" lets it detect; Parakeet always detects.
+        _ => Ok((code.to_string(), None)),
+    }
+}
+
+pub(super) fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recognizer, String> {
     let spec = resolve_asr_at(ctx.models_dir, ctx.fake, &ctx.config.asr_model());
     let code = ctx.config.asr_language();
     let code = if code == "auto" { "" } else { code.as_str() };
-    let config = recognizer_config(&spec, code, &ctx.config.asr_provider(), threads);
+    let (config_code, language) = asr_language(spec.kind, code)?;
+    let config = recognizer_config(&spec, &config_code, &ctx.config.asr_provider(), threads);
     let inner = OfflineRecognizer::create(&config)
         .ok_or_else(|| format!("could not load the {} transcription model", spec.kind))?;
-    // Qwen3-ASR takes the hint as a language name ("German"), not a code.
-    // Ukrainian is not among its languages, so that hint is left to its
-    // own detection rather than forced.
-    let language = match spec.kind {
-        "qwen3_asr" if !code.is_empty() && code != "uk" => {
-            super::super::LANGUAGE_NAMES.iter().find(|(c, _)| *c == code).map(|(_, name)| *name)
-        }
-        _ => None,
-    };
     Ok(Recognizer { inner, language })
 }
 
@@ -214,8 +253,10 @@ impl Transcription {
         wav: &Path,
         ranges: Option<&[(f64, f64)]>,
     ) -> Result<(Self, impl FnOnce() + Send + 'static), String> {
-        let samples = load_wav(wav)?;
+        // Recognizer first: a model/language mismatch fails before the
+        // whole recording is decoded.
         let recognizer = load_recognizer(ctx, 1)?;
+        let samples = load_wav(wav)?;
         let spans = match ranges {
             Some(rs) => sample_ranges(rs, samples.len()),
             None => vec![(0, samples.len())],

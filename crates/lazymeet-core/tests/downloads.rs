@@ -69,6 +69,15 @@ fn body_for(path: &str) -> Vec<u8> {
             ("q/decoder.int8.onnx", b"qwen-decoder"),
             ("q/README.md", b"readme"),
         ]),
+        // The layout (and member order) of the real sherpa-onnx release archive.
+        "/cohere.tar.bz2" => tar_bz2(&[
+            ("c/encoder.int8.onnx", b"cohere-encoder"),
+            ("c/test_wavs/de.wav", b"wav"),
+            ("c/decoder.int8.onnx", b"cohere-decoder"),
+            ("c/encoder.int8.onnx.data", b"cohere-weights"),
+            ("c/tokens.txt", b"tokens"),
+            ("c/README.md", b"readme"),
+        ]),
         _ => b"not found".to_vec(),
     }
 }
@@ -203,4 +212,37 @@ fn qwen3_asr_archive_lands_where_the_recognizer_looks() {
     ] {
         assert_eq!(std::fs::read(paths.tokenizer.join(file)).unwrap(), content);
     }
+}
+
+#[test]
+fn cohere_archive_lands_where_the_recognizer_looks() {
+    let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let port = spawn_server();
+    std::env::set_var("LAZYMEET_COHERE_URL", format!("http://127.0.0.1:{port}/cohere.tar.bz2"));
+    let _guard = EnvGuard(vec!["LAZYMEET_COHERE_URL"]);
+
+    let app = TestApp::with_fake(false);
+    assert!(models::request_download(&app.ctx, "asr", "cohere-transcribe"));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while models::resolve_asr(&app.ctx, "cohere-transcribe").kind != "cohere_transcribe" {
+        let status = models::models_status(&app.ctx);
+        let opt = status["asr"]["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["id"] == "cohere-transcribe")
+            .cloned()
+            .unwrap();
+        assert!(opt["error"].is_null(), "download failed: {opt}");
+        assert!(Instant::now() < deadline, "download never finished: {opt}");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    let paths = models::resolve_asr(&app.ctx, "cohere-transcribe");
+    assert_eq!(std::fs::read(&paths.encoder).unwrap(), b"cohere-encoder");
+    assert_eq!(std::fs::read(&paths.decoder).unwrap(), b"cohere-decoder");
+    assert_eq!(std::fs::read(&paths.tokens).unwrap(), b"tokens");
+    // The graph loads its weights by this exact name, next to itself.
+    let weights = paths.encoder.with_file_name("encoder.int8.onnx.data");
+    assert_eq!(std::fs::read(weights).unwrap(), b"cohere-weights");
 }

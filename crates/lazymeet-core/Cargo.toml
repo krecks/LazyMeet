@@ -43,6 +43,10 @@ required-features = ["native-pipeline"]
 name = "diarize"
 required-features = ["native-pipeline"]
 
+[[example]]
+name = "transcribe"
+required-features = ["native-pipeline"]
+
 [dependencies]
 # The official sherpa-onnx bindings. The default `static` feature links the
 # prebuilt static libraries from the sherpa-onnx GitHub release (onnxruntime
