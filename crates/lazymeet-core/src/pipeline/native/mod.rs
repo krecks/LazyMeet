@@ -55,9 +55,7 @@ use asr::{load_wav, Transcription};
 use diarize::{new_extractor, speaker_embedding};
 
 pub use asr::transcribe;
-pub use bench::{
-    bench_audio_from_file, bench_audio_synth, bench_llm, bench_onnx, transcribe_clips, LlmBench,
-};
+pub use bench::{bench_llm, bench_wav, transcribe_clips, LlmBench};
 pub use diarize::diarize;
 pub use llm::summarize;
 
