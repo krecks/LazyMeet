@@ -62,6 +62,7 @@ fn main() {
             commands::put_config,
             commands::get_models,
             commands::download_model,
+            commands::remove_model,
             commands::create_meeting,
             commands::probe_media,
             commands::prepare_media_preview,

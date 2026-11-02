@@ -174,6 +174,12 @@ pub fn download_model(ctx: &Arc<Ctx>, step: &str, id: &str) -> ApiResult<Value> 
     Ok(json!({"ok": true}))
 }
 
+/// Delete a downloaded model (not the active or a first-run one).
+pub fn remove_model(ctx: &Arc<Ctx>, step: &str, id: &str) -> ApiResult<Value> {
+    models::remove_model(ctx, step, id)?;
+    Ok(models::models_status(ctx))
+}
+
 // --------------------------------------------------------------------------
 // Meetings
 // --------------------------------------------------------------------------

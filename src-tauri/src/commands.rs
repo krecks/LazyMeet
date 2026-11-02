@@ -58,6 +58,11 @@ pub async fn download_model(ctx: State<'_, App>, step: String, id: String) -> Ap
     api::download_model(&ctx, &step, &id)
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn remove_model(ctx: State<'_, App>, step: String, id: String) -> ApiResult<Value> {
+    api::remove_model(&ctx, &step, &id)
+}
+
 // --- Meetings ---------------------------------------------------------------
 
 /// `ranges` (`[[start, end], ...]` in seconds, or null/omitted for the whole
