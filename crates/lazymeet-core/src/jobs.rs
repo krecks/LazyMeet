@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
@@ -68,7 +69,8 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
     }
     let job = {
         let mut active = ctx.jobs.active.lock().unwrap();
-        if active.is_some() {
+        // A running benchmark holds the machine; its end re-pumps.
+        if active.is_some() || ctx.bench_running.load(Ordering::SeqCst) {
             return;
         }
         let mut queue = ctx.jobs.queue.lock().unwrap();
@@ -91,9 +93,29 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
     }
 }
 
-/// True while a meeting is being processed (the benchmark refuses to run then).
+/// True while a meeting is being processed.
 pub fn is_busy(ctx: &Ctx) -> bool {
     ctx.jobs.active.lock().unwrap().is_some()
+}
+
+/// Why the benchmark can't take the machine now, or None once it has: set
+/// under the queue's lock, so a meeting and a benchmark never overlap.
+pub fn claim_for_benchmark(ctx: &Ctx) -> Option<&'static str> {
+    let active = ctx.jobs.active.lock().unwrap();
+    if active.is_some() {
+        return Some("a recording is being processed — run the benchmark once it finishes");
+    }
+    if ctx.bench_running.swap(true, Ordering::SeqCst) {
+        return Some("a benchmark is already running");
+    }
+    None
+}
+
+/// Give the machine back after a benchmark and start any meeting that
+/// queued meanwhile.
+pub fn release_from_benchmark(ctx: &Arc<Ctx>) {
+    ctx.bench_running.store(false, Ordering::SeqCst);
+    pump_queue(ctx);
 }
 
 fn finish_active(ctx: &Arc<Ctx>, meeting_id: &str) {

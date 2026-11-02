@@ -5,7 +5,6 @@
 //! events; one run at a time, and never while a meeting is processing.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -30,13 +29,8 @@ pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
     if !crate::models::is_ready(ctx) {
         return Err(ApiError::conflict("models are still downloading"));
     }
-    if crate::jobs::is_busy(ctx) {
-        return Err(ApiError::conflict(
-            "a recording is being processed — run the benchmark once it finishes",
-        ));
-    }
-    if ctx.bench_running.swap(true, Ordering::SeqCst) {
-        return Err(ApiError::conflict("a benchmark is already running"));
+    if let Some(reason) = crate::jobs::claim_for_benchmark(ctx) {
+        return Err(ApiError::conflict(reason));
     }
 
     let ctx = ctx.clone();
@@ -48,7 +42,7 @@ pub fn start(ctx: &Arc<Ctx>, source: Option<PathBuf>) -> ApiResult<Value> {
                 json!({"status": "error", "message": "benchmark crashed"}),
             );
         }
-        ctx.bench_running.store(false, Ordering::SeqCst);
+        crate::jobs::release_from_benchmark(&ctx);
     });
     Ok(json!({"started": true}))
 }

@@ -56,6 +56,8 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         // Set by env var, which outranks config.json — the UI locks these.
         "env_locked": config::env_locked(),
         "limits": limits,
+        // Spoken/notes languages as (code, name); "auto" is added by the UI.
+        "languages": LANGUAGE_NAMES,
         // Backends available in this build on this platform — the UI builds
         // the compute selects from these (CPU everywhere; NPU for the
         // recognition models on Apple Silicon; Metal GPU for the summarizer).
@@ -96,6 +98,26 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             let lang = v.as_str().unwrap_or_default();
             if !supported_languages().contains(&lang) {
                 return Err(ApiError::invalid(format!("unsupported language for {key}")));
+            }
+        }
+    }
+    // The model + spoken-language pair as it will be after this change:
+    // Cohere Transcribe, e.g., cannot run on "auto". Checked only when the
+    // change touches the pair, so an unrelated save never trips over it.
+    if fields.contains_key("ASR_MODEL") || fields.contains_key("ASR_LANGUAGE") {
+        let current = ctx.config.read().unwrap();
+        let pick = |key: &str, now: String| match fields.get(key) {
+            Some(Value::Null) => {
+                config::default_value(key).as_str().unwrap_or_default().to_string()
+            }
+            Some(v) => v.as_str().unwrap_or_default().to_string(),
+            None => now,
+        };
+        let model = pick("ASR_MODEL", current.asr_model());
+        let language = pick("ASR_LANGUAGE", current.asr_language());
+        if let Some(entry) = models::asr_catalog().into_iter().find(|e| e.id == model) {
+            if let Some(problem) = models::asr_language_problem(&entry, &language) {
+                return Err(ApiError::invalid(problem));
             }
         }
     }
@@ -180,6 +202,7 @@ pub fn create_meeting(
             return Err(ApiError::invalid("unsupported language"));
         }
     }
+    check_asr_language(ctx, language)?;
     let filename = src
         .file_name()
         .and_then(|n| n.to_str())
@@ -202,6 +225,19 @@ pub fn create_meeting(
         .map_err(|e| ApiError::internal(format!("could not copy the recording: {e}")))?;
     jobs::dispatch(ctx, id.clone(), jobs::Job::Process { upload: dest });
     Ok(json!({"id": id}))
+}
+
+/// Fail fast when the transcription model a job would run can't take the
+/// recording's language (`language` = the meeting's choice; None = the
+/// setting), instead of erroring once processing starts.
+fn check_asr_language(ctx: &Ctx, language: Option<&str>) -> ApiResult<()> {
+    let config = ctx.config.read().unwrap();
+    let entry = models::effective_asr_entry(&ctx.paths.models_dir, ctx.fake, &config.asr_model());
+    let language = language.map(str::to_string).unwrap_or_else(|| config.asr_language());
+    match models::asr_language_problem(&entry, &language) {
+        Some(problem) => Err(ApiError::invalid(problem)),
+        None => Ok(()),
+    }
 }
 
 /// Extract an audio-only AAC preview of a recording for the prep screen —
@@ -267,6 +303,7 @@ pub fn reprocess_meeting(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str) -> ApiRes
             if store::audio_path(&ctx.paths, &record).is_none() {
                 return Err(ApiError::not_found("the recording is no longer on disk"));
             }
+            check_asr_language(ctx, record.get("language").and_then(|v| v.as_str()))?;
             jobs::Job::Retranscribe
         }
         _ => return Err(ApiError::invalid("mode must be \"notes\" or \"transcription\"")),
