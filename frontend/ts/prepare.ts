@@ -8,7 +8,7 @@ import { $, call, convertFileSrc } from "./core";
 import { el, fmtTs, iconBtn, showToast } from "./helpers";
 import { selectMeeting } from "./meeting";
 import { refreshMeetings } from "./meetings";
-import { fillLanguageSelect, modelName } from "./settings";
+import { fillLanguageSelect } from "./settings";
 import { state } from "./state";
 
 let prep = null; // { path, filename, duration, peaks, ranges, probeFailed,
@@ -37,11 +37,12 @@ async function syncPrepLanguage() {
   const note = $("prep-language-note");
   try {
     const [cfg, models] = await Promise.all([call("get_config"), call("get_models")]);
-    // The selection runs once it's downloaded; until then the default does.
-    const model = models.asr.options.find((o) => o.id === cfg.values.ASR_MODEL && o.ready) || null;
+    // The model a recording started now runs (the default until the
+    // selection is downloaded).
+    const model = models.asr.options.find((o) => o.id === models.asr.effective) || null;
     fillLanguageSelect(select, cfg.languages, cfg.values.ASR_LANGUAGE, model);
     note.textContent = model?.needs_language
-      ? `${modelName(model)} needs the spoken language.`
+      ? `${model.name} needs the spoken language.`
       : "";
     note.classList.toggle("hidden", !model?.needs_language);
   } catch {

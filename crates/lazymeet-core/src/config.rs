@@ -253,7 +253,11 @@ pub struct Config {
 
 impl Config {
     pub fn resolve(paths: &Paths) -> Self {
-        let overrides = load_overrides(paths);
+        Self::from_overrides(&load_overrides(paths))
+    }
+
+    /// The snapshot `overrides` (config.json's contents) resolves to.
+    pub fn from_overrides(overrides: &Map<String, Value>) -> Self {
         let mut values = Map::new();
         for spec in tunables() {
             let from_env = std::env::var(spec.env)

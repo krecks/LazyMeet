@@ -185,7 +185,7 @@ fn qwen3_asr_archive_lands_where_the_recognizer_looks() {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let paths = models::resolve_asr(&app.ctx, "qwen3-asr-0.6b");
-        if paths.kind == "qwen3_asr" {
+        if paths.entry.kind == "qwen3_asr" {
             break;
         }
         let status = models::models_status(&app.ctx);
@@ -224,7 +224,7 @@ fn cohere_archive_lands_where_the_recognizer_looks() {
     let app = TestApp::with_fake(false);
     assert!(models::request_download(&app.ctx, "asr", "cohere-transcribe"));
     let deadline = Instant::now() + Duration::from_secs(20);
-    while models::resolve_asr(&app.ctx, "cohere-transcribe").kind != "cohere_transcribe" {
+    while models::resolve_asr(&app.ctx, "cohere-transcribe").entry.kind != "cohere_transcribe" {
         let status = models::models_status(&app.ctx);
         let opt = status["asr"]["options"]
             .as_array()
@@ -257,10 +257,8 @@ fn cohere_archive_lands_where_the_recognizer_looks() {
             .cloned()
             .unwrap()
     };
-    assert_eq!(option("cohere-transcribe")["removable"], true);
+    assert_eq!(option("cohere-transcribe")["remove_blocked"], serde_json::Value::Null);
     assert!(option("cohere-transcribe")["disk_bytes"].as_u64().unwrap() > 0);
-    // The first-run default can never be removed.
-    assert_eq!(option("parakeet-tdt-0.6b-v3")["removable"], false);
     assert_eq!(
         models::remove_model(&app.ctx, "asr", "parakeet-tdt-0.6b-v3").unwrap_err().code,
         409
@@ -273,7 +271,15 @@ fn cohere_archive_lands_where_the_recognizer_looks() {
         app.ctx.refresh_config();
     };
     select(&[("ASR_MODEL", "cohere-transcribe".into()), ("ASR_LANGUAGE", "de".into())]);
-    assert_eq!(option("cohere-transcribe")["removable"], false);
+    assert_eq!(
+        option("cohere-transcribe")["remove_blocked"],
+        "In use — select another model first"
+    );
+    // The first-run default can never be removed, even when not in use.
+    assert_eq!(
+        models::remove_model(&app.ctx, "asr", "parakeet-tdt-0.6b-v3").unwrap_err().code,
+        409
+    );
     assert_eq!(models::remove_model(&app.ctx, "asr", "cohere-transcribe").unwrap_err().code, 409);
 
     select(&[]);

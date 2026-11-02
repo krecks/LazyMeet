@@ -928,8 +928,6 @@ mark.find-hit.current {
 }
 .config-row input[type="number"] { width: 4.5rem; }
 .config-row select { max-width: 100%; min-width: 0; }
-.config-row.wide { grid-template-columns: 1fr 280px; }
-.config-row.wide select { width: 100%; }
 .config-row.stacked { grid-template-columns: 1fr; }
 .config-row.stacked .config-control {
   grid-column: 1;

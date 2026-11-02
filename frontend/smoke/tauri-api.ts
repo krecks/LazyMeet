@@ -15,7 +15,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   if (cmd === "list_meetings") return [];
   if (cmd === "get_speakers") return [];
   if (cmd === "get_config" || cmd === "put_config") return config();
-  if (cmd === "get_models" || cmd === "remove_model") return models();
+  if (cmd === "get_models") return models();
+  if (cmd === "remove_model") return { ok: true };
   if (cmd === "get_data_info") {
     return {
       data_dir: "/Users/you/Library/Application Support/LazyMeet",

@@ -35,7 +35,7 @@ pub(super) fn recognizer_config(
     let model = &mut config.model_config;
     model.num_threads = threads;
     model.provider = Some(provider.to_string());
-    match spec.kind {
+    match spec.entry.kind {
         "whisper" => {
             model.whisper = OfflineWhisperModelConfig {
                 encoder: path_str(&spec.encoder),
@@ -90,18 +90,16 @@ pub(super) fn recognizer_config(
 /// auto): returns (code for the model config, per-stream hint), or why the
 /// pair can't run.
 fn asr_language(spec: &AsrPaths, code: &str) -> Result<(String, Option<&'static str>), String> {
-    if let Some(problem) =
-        crate::models::language_problem(&spec.name, spec.languages, spec.needs_language, code)
-    {
+    if let Some(problem) = spec.entry.language_problem(code) {
         return Err(problem);
     }
-    match spec.kind {
+    match spec.entry.kind {
         // Qwen3-ASR takes the hint as a language name ("German") on each
         // stream; codes outside its languages are left to its own detection.
         "qwen3_asr" => {
             let name = super::super::LANGUAGE_NAMES
                 .iter()
-                .find(|(c, _)| *c == code && spec.languages.contains(c))
+                .find(|(c, _)| *c == code && spec.entry.languages.contains(c))
                 .map(|(_, name)| *name);
             Ok((String::new(), name))
         }
@@ -118,7 +116,7 @@ pub(super) fn load_recognizer(ctx: &PipelineCtx, threads: i32) -> Result<Recogni
     let (config_code, language) = asr_language(&spec, code)?;
     let config = recognizer_config(&spec, &config_code, &ctx.config.asr_provider(), threads);
     let inner = OfflineRecognizer::create(&config)
-        .ok_or_else(|| format!("could not load the {} transcription model", spec.kind))?;
+        .ok_or_else(|| format!("could not load the {} transcription model", spec.entry.kind))?;
     Ok(Recognizer { inner, language })
 }
 
