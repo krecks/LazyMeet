@@ -19,12 +19,12 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use serde_json::{Map, Value};
 
 use sherpa_onnx::{
-    FastClusteringConfig, OfflineQwen3ASRModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
-    OfflineSpeakerDiarization, OfflineSpeakerDiarizationConfig,
-    OfflineSpeakerSegmentationModelConfig, OfflineSpeakerSegmentationPyannoteModelConfig,
-    OfflineTransducerModelConfig, OfflineWhisperModelConfig, SileroVadModelConfig,
-    SpeakerEmbeddingExtractor, SpeakerEmbeddingExtractorConfig, VadModelConfig,
-    VoiceActivityDetector,
+    FastClusteringConfig, OfflineCohereTranscribeModelConfig, OfflineQwen3ASRModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineSpeakerDiarization,
+    OfflineSpeakerDiarizationConfig, OfflineSpeakerSegmentationModelConfig,
+    OfflineSpeakerSegmentationPyannoteModelConfig, OfflineTransducerModelConfig,
+    OfflineWhisperModelConfig, SileroVadModelConfig, SpeakerEmbeddingExtractor,
+    SpeakerEmbeddingExtractorConfig, VadModelConfig, VoiceActivityDetector,
 };
 
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -55,7 +55,9 @@ use asr::{load_wav, Transcription};
 use diarize::{new_extractor, speaker_embedding};
 
 pub use asr::transcribe;
-pub use bench::{bench_audio_from_file, bench_audio_synth, bench_llm, bench_onnx, LlmBench};
+pub use bench::{
+    bench_audio_from_file, bench_audio_synth, bench_llm, bench_onnx, transcribe_clips, LlmBench,
+};
 pub use diarize::diarize;
 pub use llm::summarize;
 
@@ -251,6 +253,29 @@ pub fn probe_media(ctx: &PipelineCtx, src: &Path) -> Result<MediaProbe, String> 
 
 fn path_str(p: &Path) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
+}
+
+/// `f` over `items` on `workers` threads pulling from a shared index;
+/// results keep the input order.
+fn par_map<T: Sync, R: Send>(items: &[T], workers: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut done: Vec<(usize, R)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers.max(1))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(item) = items.get(i) else { return out };
+                        out.push((i, f(item)));
+                    }
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
 }
 
 /// Transcription and diarization read the same WAV with disjoint models, so

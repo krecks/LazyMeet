@@ -1,6 +1,6 @@
 //! Built-in benchmark primitives (explicit backends, driven by `bench.rs`).
 
-use super::asr::{load_wav, recognizer_config, Recognizer};
+use super::asr::{load_recognizer, load_wav, recognizer_config, Recognizer};
 use super::diarize::{new_extractor, pyannote_diarizer, speaker_embedding};
 use super::llm::{llama_backend, Llm, FORMAT};
 use super::*;
@@ -84,19 +84,8 @@ pub fn bench_onnx(
     // One warmup pass (first call pays one-time graph setup), then measure.
     let _ = recognizer.transcribe(&asr[..sr.min(asr.len())]);
     let pieces: Vec<&[f32]> = asr.chunks(10 * sr).collect();
-    let next = std::sync::atomic::AtomicUsize::new(0);
     let t = Instant::now();
-    std::thread::scope(|s| {
-        for _ in 0..threads.max(1) {
-            s.spawn(|| {
-                while let Some(piece) =
-                    pieces.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-                {
-                    let _ = recognizer.transcribe(piece);
-                }
-            });
-        }
-    });
+    par_map(&pieces, threads as usize, |piece| recognizer.transcribe(piece));
     rows.push((
         "Transcription".to_string(),
         t.elapsed().as_secs_f64(),
@@ -203,4 +192,21 @@ pub fn bench_llm(
         generated_tokens: timing.generated_tokens.max(1),
         generate_secs: timing.generate_secs,
     })
+}
+
+/// Decode whole 16 kHz WAV clips (no VAD) with `workers` one-thread workers
+/// sharing one recognizer, in input order — for word-error-rate evaluation
+/// on labelled test sets.
+pub fn transcribe_clips(
+    ctx: &PipelineCtx,
+    clips: &[std::path::PathBuf],
+    workers: usize,
+) -> Result<Vec<String>, String> {
+    let recognizer = load_recognizer(ctx, 1)?;
+    par_map(clips, workers, |clip| {
+        let samples = load_wav(clip).map_err(|e| format!("{}: {e}", clip.display()))?;
+        Ok(recognizer.transcribe(&samples).trim().to_string())
+    })
+    .into_iter()
+    .collect()
 }

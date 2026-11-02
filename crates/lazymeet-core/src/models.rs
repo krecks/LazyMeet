@@ -152,7 +152,8 @@ pub struct CatalogEntry {
     pub id: &'static str,
     pub label: String,
     pub size: String,
-    /// ASR: loader kind ("nemo_transducer" | "whisper" | "qwen3_asr");
+    /// ASR: loader kind ("nemo_transducer" | "whisper" | "qwen3_asr" |
+    /// "cohere_transcribe");
     /// diarization: engine ("nemotron" | "pyannote"); empty for LLMs.
     pub kind: &'static str,
     /// ASR: model dir under models_dir; diarization: the model file; LLM:
@@ -257,7 +258,7 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
                 "Detects the language by itself; accepts a spoken-language hint",
             ],
             cons: vec![
-                "Largest download of the transcription models",
+                "Larger download than Parakeet and Whisper",
                 "About half as fast as Parakeet on the CPU",
             ],
             spec: ModelSpec::archive(
@@ -274,6 +275,37 @@ pub fn asr_catalog() -> Vec<CatalogEntry> {
                     ("vocab.json", "qwen3-asr-0.6b/tokenizer/vocab.json"),
                     ("merges.txt", "qwen3-asr-0.6b/tokenizer/merges.txt"),
                     ("tokenizer_config.json", "qwen3-asr-0.6b/tokenizer/tokenizer_config.json"),
+                ],
+            ),
+        },
+        CatalogEntry {
+            id: "cohere-transcribe",
+            label: "Cohere Transcribe 2B — 14 languages, most accurate".into(),
+            size: "≈1.7 GB download".into(),
+            kind: "cohere_transcribe",
+            path: PathBuf::from("cohere-transcribe"),
+            pros: vec![
+                "Most accurate open model for English and the major European languages",
+                "14 languages incl. German, English, Chinese, Japanese and Korean",
+            ],
+            cons: vec![
+                "Needs the spoken language set — it can't detect it",
+                "Largest download and memory use (≈3 GB on disk, ≈5 GB RAM)",
+                "About half as fast as Parakeet on the CPU",
+            ],
+            spec: ModelSpec::archive(
+                "Cohere Transcribe",
+                env_or(
+                    "LAZYMEET_COHERE_URL",
+                    format!("{REL}/asr-models/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2"),
+                ),
+                "cohere-transcribe/encoder.onnx",
+                &[
+                    // The graph refers to its weights by this exact name.
+                    ("encoder.int8.onnx.data", "cohere-transcribe/encoder.int8.onnx.data"),
+                    ("encoder", "cohere-transcribe/encoder.onnx"),
+                    ("decoder", "cohere-transcribe/decoder.onnx"),
+                    ("tokens.txt", "cohere-transcribe/tokens.txt"),
                 ],
             ),
         },
