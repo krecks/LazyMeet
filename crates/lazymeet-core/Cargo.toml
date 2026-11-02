@@ -48,7 +48,7 @@ required-features = ["native-pipeline"]
 # prebuilt static libraries from the sherpa-onnx GitHub release (onnxruntime
 # included) — no C++ build, no dylib rpath issues, one self-contained binary.
 # Pinned exactly: the C API structs change between releases.
-sherpa-onnx = { version = "=1.13.8", optional = true }
+sherpa-onnx = { version = "=2.0.1", optional = true }
 # Nemotron 3 Diarization runs on the onnxruntime that sherpa-onnx already
 # links statically (1.28.2): `disable-linking` makes ort-sys resolve the ORT
 # C API from those same symbols instead of linking or downloading a second
