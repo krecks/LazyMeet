@@ -960,6 +960,9 @@ mark.find-hit.current {
   margin-top: 0.6rem;
 }
 .model-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   font: inherit;
   text-align: left;
   color: inherit;

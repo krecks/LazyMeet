@@ -1,0 +1,195 @@
+{
+ "parakeet-tdt-0.6b-v3": {
+  "label": "Parakeet TDT 0.6B v3 — 25 European languages (default)",
+  "size": "≈700 MB",
+  "pros": [
+   "Best accuracy for European languages, incl. German and English",
+   "Fastest option — transcribes far faster than real time on the CPU",
+   "Detects the language by itself, with punctuation and capitalization"
+  ],
+  "cons": [
+   "Only 25 (European) languages — no Chinese, Japanese or Korean",
+   "Less robust than Whisper on heavy accents or noisy recordings"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "whisper-small": {
+  "label": "Whisper Small — 90+ languages",
+  "size": "≈600 MB download",
+  "pros": [
+   "Widest coverage — 90+ languages incl. Chinese, Japanese, Korean",
+   "Robust with accents, background noise and far-from-mic speech",
+   "Accepts a spoken-language hint (setting below)"
+  ],
+  "cons": [
+   "Several times slower than Parakeet",
+   "Can invent text during long silences or music"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "whisper-base": {
+  "label": "Whisper Base — smallest, less accurate",
+  "size": "≈150 MB download",
+  "pros": [
+   "Smallest download and lowest memory use",
+   "Fastest of the Whisper family",
+   "Same 90+ language coverage"
+  ],
+  "cons": [
+   "Least accurate — noticeably more transcription errors",
+   "Struggles with accents, jargon and people talking over each other"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "qwen3-asr-0.6b": {
+  "label": "Qwen3-ASR 0.6B — 30 languages incl. Chinese, Japanese, Korean",
+  "size": "≈880 MB download",
+  "pros": [
+   "Wide coverage — 30 languages plus 22 Chinese dialects",
+   "Published accuracy on par with Whisper Large v3, well ahead of Whisper Small",
+   "Detects the language by itself; accepts a spoken-language hint"
+  ],
+  "cons": [
+   "Larger download than Parakeet and Whisper",
+   "About half as fast as Parakeet on the CPU"
+  ],
+  "languages": [
+   "en",
+   "de",
+   "fr",
+   "es",
+   "it",
+   "pt",
+   "nl",
+   "pl",
+   "ru",
+   "tr",
+   "zh",
+   "ja",
+   "ko",
+   "ar",
+   "el",
+   "vi"
+  ],
+  "needs_language": false
+ },
+ "cohere-transcribe": {
+  "label": "Cohere Transcribe 2B — 14 languages, most accurate",
+  "size": "≈1.7 GB download",
+  "pros": [
+   "Most accurate open model for English and the major European languages",
+   "14 languages incl. German, English, Chinese, Japanese and Korean"
+  ],
+  "cons": [
+   "Needs the spoken language set — it can't detect it",
+   "Largest download and memory use (≈3 GB on disk, ≈5 GB RAM)",
+   "About half as fast as Parakeet on the CPU"
+  ],
+  "languages": [
+   "ar",
+   "de",
+   "el",
+   "en",
+   "es",
+   "fr",
+   "it",
+   "ja",
+   "ko",
+   "nl",
+   "pl",
+   "pt",
+   "vi",
+   "zh"
+  ],
+  "needs_language": true
+ },
+ "nemotron-3-diarization": {
+  "label": "Nemotron 3 Diarization — up to 8 speakers (default)",
+  "size": "≈120 MB",
+  "pros": [
+   "Fewer mixed-up or invented speakers",
+   "More than twice as fast as the classic model",
+   "Follows people talking over each other"
+  ],
+  "cons": [
+   "Tells at most 8 speakers apart",
+   "No tuning settings"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "pyannote-3.0": {
+  "label": "Classic (pyannote 3.0) — any number of speakers",
+  "size": "≈6 MB download",
+  "pros": [
+   "No limit on the number of speakers",
+   "Tunable: speaker separation and minimum speaking time"
+  ],
+  "cons": [
+   "Mixes up or invents speakers more often",
+   "Less than half as fast"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "qwen3.5-0.8b": {
+  "label": "Qwen 3.5 0.8B — tiny, fastest",
+  "size": "≈0.5 GB download",
+  "pros": [
+   "Notes in seconds, even on modest hardware",
+   "Tiny download, runs in about 1 GB of memory"
+  ],
+  "cons": [
+   "Short, plain notes that miss nuance",
+   "Action items often incomplete; weakest outside English"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "qwen3.5-2b": {
+  "label": "Qwen 3.5 2B — fast, light",
+  "size": "≈1.3 GB download",
+  "pros": [
+   "Quick summaries with about 2 GB of memory",
+   "Clearly better notes than the 0.8B"
+  ],
+  "cons": [
+   "Takeaways stay brief — subtle decisions can be missed",
+   "Less reliable than the 4B in languages other than English"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "qwen3.5-4b": {
+  "label": "Qwen 3.5 4B — balanced (default)",
+  "size": "≈2.7 GB",
+  "pros": [
+   "Good balance of quality and speed",
+   "Reliable takeaways and action items",
+   "Solid notes in German, English and other major languages"
+  ],
+  "cons": [
+   "Needs roughly 3–4 GB of free memory",
+   "A long meeting takes a few minutes on CPU-only machines"
+  ],
+  "languages": [],
+  "needs_language": false
+ },
+ "qwen3.5-9b": {
+  "label": "Qwen 3.5 9B — strongest, slowest",
+  "size": "≈5.7 GB download",
+  "pros": [
+   "Highest-quality notes — best for long, complex or multilingual meetings",
+   "Most faithful decisions and action items"
+  ],
+  "cons": [
+   "Large download and needs roughly 7 GB of free memory",
+   "Slowest — can take many minutes without GPU acceleration"
+  ],
+  "languages": [],
+  "needs_language": false
+ }
+}
