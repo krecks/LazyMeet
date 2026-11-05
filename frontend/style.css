@@ -1364,9 +1364,9 @@ mark.find-hit.current {
 
 /* ------------------------------------------------------ prepare screen */
 .prep-body {
-  max-width: 1320px;
   gap: 1.1rem;
 }
+.prep-body.has-picture { max-width: 1320px; }
 .prep-player {
   display: flex;
   flex-direction: column;
@@ -1450,10 +1450,12 @@ mark.find-hit.current {
 .prep-actions .speakers-field { margin: 0; }
 .prep-spacer { flex: 1; }
 
-/* Desktop: video beside the segment list, waveform full width under both
-   (the wider it is, the finer the selection), actions along the bottom. */
+/* Desktop, for recordings with a picture: video beside the segment list,
+   waveform full width under both (the wider it is, the finer the
+   selection), actions along the bottom. `has-picture` is set by prepare.ts
+   once the video shows a frame; audio stays stacked. */
 @media (min-width: 980px) {
-  .prep-body {
+  .prep-body.has-picture {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
     grid-template-areas:
@@ -1463,15 +1465,15 @@ mark.find-hit.current {
     align-items: start;
     column-gap: 1.6rem;
   }
-  .prep-player { grid-area: player; }
-  .prep-body .wave-wrap { grid-area: wave; }
-  .prep-ranges { grid-area: ranges; }
-  .prep-actions { grid-area: actions; }
-  .prep-player video { max-height: 440px; }
+  .has-picture .prep-player { grid-area: player; }
+  .has-picture .wave-wrap { grid-area: wave; }
+  .has-picture .prep-ranges { grid-area: ranges; }
+  .has-picture .prep-actions { grid-area: actions; }
+  .has-picture .prep-player video { max-height: 440px; }
   /* heading on its own line, both buttons on the next */
-  .prep-ranges .note-head { flex-wrap: wrap; }
-  .prep-ranges .note-head h3 { flex-basis: 100%; }
-  .prep-ranges .range-label { min-width: 0; white-space: nowrap; }
+  .has-picture .prep-ranges .note-head { flex-wrap: wrap; }
+  .has-picture .prep-ranges .note-head h3 { flex-basis: 100%; }
+  .has-picture .prep-ranges .range-label { min-width: 0; white-space: nowrap; }
 }
 
 .wave-zoom {

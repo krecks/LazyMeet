@@ -4,7 +4,8 @@
 import { closePrepare, openPrepare } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings, openSpeakers } from "../ts/settings";
-import { renderResult } from "../ts/meeting";
+import { renderResult, selectMeeting } from "../ts/meeting";
+import { DOCS_MEETING_ID } from "./docs";
 import { state } from "../ts/state";
 import { LIMITS } from "./fixtures";
 
@@ -38,7 +39,10 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("fatal screen: " + document.getElementById("fatal-msg")!.textContent!.trim());
   }
   if (hidden("app")) problems.push("main screen not visible");
-  if (!document.getElementById("meeting-list")!.textContent!.includes("No meetings yet")) {
+  if (
+    location.hash !== "#meeting" &&
+    !document.getElementById("meeting-list")!.textContent!.includes("No meetings yet")
+  ) {
     problems.push("meeting-list empty state missing");
   }
   if (
@@ -61,6 +65,31 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("openPrepare threw: " + e.message);
   }
 
+  // README screenshots: `#meeting` (a finished meeting) and `#docs-prepare`
+  // (a 28-minute recording with a break cut out).
+  if (location.hash === "#meeting") {
+    closePrepare();
+    selectMeeting(DOCS_MEETING_ID);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finish();
+    return;
+  }
+  if (location.hash === "#docs-prepare") {
+    closePrepare();
+    await openPrepare("/Users/you/Recordings/website-relaunch-sync.m4a");
+    const setTime = (input: HTMLInputElement | undefined, value: string) => {
+      if (!input) return problems.push("prep time input missing");
+      input.value = value;
+      input.dispatchEvent(new Event("blur"));
+    };
+    setTime(document.querySelectorAll<HTMLInputElement>("#prep-range-list .time-input")[1], "0:21:52.0");
+    document.getElementById("prep-add-range")!.click();
+    setTime(document.querySelectorAll<HTMLInputElement>("#prep-range-list .time-input")[2], "0:23:05.0");
+    setTime(document.querySelectorAll<HTMLInputElement>("#prep-range-list .time-input")[3], "0:28:32.4");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    finish();
+    return;
+  }
   // `#prepare`: leave the prepare screen open for screenshots.
   if (location.hash === "#prepare") {
     finish();

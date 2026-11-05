@@ -50,6 +50,13 @@ async function syncPrepLanguage() {
   }
 }
 
+/// Side-by-side layout (video beside the segment list) only once there is a
+/// picture to show; audio files, and formats that fall back to an audio
+/// preview (mkv, avi, …), keep the stacked layout with a full-width player.
+function setHasPicture(on: boolean) {
+  document.querySelector(".prep-body")!.classList.toggle("has-picture", on);
+}
+
 export async function openPrepare(path) {
   releasePrepMedia();
   prep = {
@@ -72,6 +79,7 @@ export async function openPrepare(path) {
   $("prep-file").textContent = prep.filename;
   $("prep-nopreview").classList.add("hidden");
   $("prep-video").classList.remove("audio-only", "hidden");
+  setHasPicture(false);
   $("prep-wave-status").textContent = "Analyzing audio…";
   $("prep-wave-status").classList.remove("hidden");
   $("prep-range-list").innerHTML = "";
@@ -90,6 +98,7 @@ export async function openPrepare(path) {
     video.onloadedmetadata = () => {
       // Audio-only files: collapse the black video box to bare controls.
       if (!video.videoWidth) video.classList.add("audio-only");
+      setHasPicture(!!video.videoWidth);
     };
     video.src = convertFileSrc(path);
   } catch {

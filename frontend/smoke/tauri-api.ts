@@ -6,13 +6,17 @@
 // null, so a new command at boot shows up as a smoke failure rather than a
 // crash in the real app.
 import { config, models, speakers } from "./fixtures";
+import { docsMeeting, docsMeetings, docsPeaks, DOCS_PREP_DURATION, silentWavUrl } from "./docs";
+
+const hash = () => location.hash;
 
 export const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
 
 export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<any> {
   calls.push({ cmd, args });
   if (cmd === "get_setup") return { ready: true, items: [] };
-  if (cmd === "list_meetings") return [];
+  if (cmd === "list_meetings") return hash() === "#meeting" ? docsMeetings() : [];
+  if (cmd === "get_meeting") return docsMeeting();
   if (cmd === "get_speakers") return speakers();
   if (cmd === "get_config" || cmd === "put_config") return config();
   if (cmd === "get_models") return models();
@@ -28,12 +32,14 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     };
   }
   if (cmd === "probe_media") {
+    if (hash() === "#docs-prepare") return { duration: DOCS_PREP_DURATION, peaks: docsPeaks() };
     return { duration: 3, peaks: Array.from({ length: 64 }, (_, i) => Math.abs(Math.sin(i))) };
   }
   return null;
 }
 
 export function convertFileSrc(path: string): string {
+  if (hash() === "#docs-prepare") return silentWavUrl();
   return "asset://localhost/" + path;
 }
 

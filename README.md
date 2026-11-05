@@ -4,9 +4,9 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 **Local, private meeting transcription & summaries.** Drag and drop a recording
-(e.g. an OBS capture) and get a **per-speaker transcript**, a **summary**, and
-**action items** — everything runs on your machine. No cloud, no accounts, **no
-API keys**.
+(e.g. an OBS capture) and get a **per-speaker transcript**, **notes** (a short
+and a detailed summary, key takeaways, action items) and a **meeting title** —
+everything runs on your machine. No cloud, no accounts, **no API keys**.
 
 Speaker identification is built in: name a speaker once and that name
 **auto-applies to the same voice in future recordings**, backed by a local
@@ -14,7 +14,7 @@ voiceprint library that learns from every confirmed match.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/meeting-dark.png">
-  <img alt="LazyMeet showing a finished meeting: summary, key takeaways, action items, and a per-speaker transcript with recognized-speaker badges" src="docs/screenshots/meeting-light.png">
+  <img alt="LazyMeet showing a finished meeting with a generated title: summary with an In detail section, key takeaways and action items each with a detail line, the per-stage timings, and a per-speaker transcript with recognized-speaker badges" src="docs/screenshots/meeting-light.png">
 </picture>
 
 ## How it works
@@ -26,7 +26,7 @@ Tauri desktop app — one binary, everything in Rust
      3. NVIDIA Parakeet (ONNX)  → transcript with timestamps
      4. Nemotron 3 Diarization  → who-spoke-when (onnxruntime)
      5. speaker identification  → match/name voices via a saved speaker library
-     6. llama.cpp (in-process)  → summary, takeaways, action items
+     6. llama.cpp (in-process)  → title, summary, takeaways, action items
 ```
 
 sherpa-onnx and llama.cpp are linked statically into the app; ffmpeg ships as
@@ -44,14 +44,14 @@ fully offline:
 | Summarization | Qwen 3.5 (0.8B–9B selectable, GGUF) via llama.cpp | Hugging Face (ungated) |
 | ffmpeg | static binary | bundled with the app |
 
-Models are switched in Settings — each option lists its trade-offs and
-downloads on demand; models you no longer use can be removed there to free
+Models are switched in Settings — a list of the options with the pros and
+cons of each; a new pick downloads on demand, and models you no longer use can be removed there to free
 disk space. Cohere Transcribe is the most accurate option but can't detect
 the spoken language, so it needs one set (in Settings or per recording):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
-  <img alt="The Settings screen comparing transcription models side by side, with pros and cons for each" src="docs/screenshots/settings.png">
+  <img alt="The Settings screen listing the transcription models, one row each with its pros and cons" src="docs/screenshots/settings.png">
 </picture>
 
 ## Install (end users)
@@ -82,8 +82,10 @@ see its waveform, and choose which parts get transcribed — drag directly on
 the waveform to skip a break or transcribe only the segments that matter. You
 can also fix the number of speakers and hint the spoken language. The whole
 file is preselected, so the fast path stays a single click on **Transcribe**.
+On a wide window, recordings with video show the picture beside the segment
+list; audio files keep a full-width player above the waveform.
 
-![The prepare screen with an audio preview, a zoomable waveform, and two selected time ranges](docs/screenshots/prepare.png)
+![The prepare screen for an audio file: player, a zoomable waveform with a break cut out, and two selected time ranges](docs/screenshots/prepare.png)
 
 ## Speaker naming across files
 
@@ -232,8 +234,13 @@ the same major.minor as the `tauri` crate — tauri-cli refuses to build when
 they differ. Checks:
 `npm run typecheck` (tsc, no emit), `npm run build` (typecheck + bundle), and
 `./scripts/smoke_frontend.sh`, which builds the bundle in smoke mode with the
-Tauri API stubbed out and boots it headlessly to assert the first-run state
-and the prepare screen.
+Tauri API stubbed out and boots it headlessly to assert the first-run state,
+the prepare screen, settings and the meeting notes.
+
+The README screenshots come from the same smoke bundle (`npm run
+build:smoke`, serve `frontend/dist-smoke/`), opened at `#meeting`, `#docs`
+(Settings) and `#docs-prepare` at 1440 px wide, 2× scale; the content lives in
+`frontend/smoke/docs.ts`.
 
 ### Cross-platform builds
 
