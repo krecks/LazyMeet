@@ -13,7 +13,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   calls.push({ cmd, args });
   if (cmd === "get_setup") return { ready: true, items: [] };
   if (cmd === "list_meetings") return [];
-  if (cmd === "get_speakers") return [];
+  // `#speakers` screenshots the Known speakers page with a few saved voices.
+  if (cmd === "get_speakers") {
+    return location.hash === "#speakers" ? ["Anna Berger", "Jonas Keller", "Mara Lindqvist", "Tomás Ortega", "Yuki Sato"] : [];
+  }
   if (cmd === "get_config" || cmd === "put_config") return config();
   if (cmd === "get_models") return models();
   if (cmd === "remove_model") return { ok: true };

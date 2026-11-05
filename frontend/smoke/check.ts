@@ -3,7 +3,7 @@
 // that the shell greps for.
 import { closePrepare, openPrepare } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
-import { openSettings } from "../ts/settings";
+import { openSettings, openSpeakers } from "../ts/settings";
 import { renderResult } from "../ts/meeting";
 import { state } from "../ts/state";
 import { LIMITS } from "./fixtures";
@@ -58,6 +58,18 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("openPrepare threw: " + e.message);
   }
 
+  // `#prepare`: leave the prepare screen open for screenshots.
+  if (location.hash === "#prepare") {
+    finish();
+    return;
+  }
+  // `#speakers`: the Known speakers page (the stub returns saved voices).
+  if (location.hash === "#speakers") {
+    closePrepare();
+    openSpeakers();
+    finish();
+    return;
+  }
   // `#docs`: the clean Settings page for the README screenshot.
   if (location.hash === "#docs") {
     closePrepare();

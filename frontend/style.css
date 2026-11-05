@@ -939,10 +939,13 @@ mark.find-hit.current {
 .search-more { padding: 0.4rem 0.6rem; font-size: 0.82rem; }
 
 /* -------------------------------------------------------------- settings */
+/* Full-window pages (settings, speakers, benchmark, prepare). A desktop
+   window is wide: use it, instead of a phone-width column with empty
+   margins. Text-heavy paragraphs keep their own measure below. */
 .settings-body {
-  max-width: 640px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 1.6rem 2rem 4rem;
   display: flex;
   flex-direction: column;
   gap: 1.4rem;
@@ -956,19 +959,20 @@ mark.find-hit.current {
 }
 .settings-section-head { margin-bottom: 1rem; }
 .settings-section-head h2 { font-size: 1.25rem; }
-.settings-section-head p { margin: 0.3rem 0 0; font-size: 0.87rem; }
+.settings-section-head p { margin: 0.3rem 0 0; font-size: 0.87rem; max-width: 72ch; }
+.bench-how ul, .bench-how p { max-width: 90ch; }
 
 .config-row {
   display: grid;
-  grid-template-columns: 1fr 180px;
-  gap: 0.2rem 1rem;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 0.2rem 2rem;
   align-items: center;
   padding: 0.75rem 0;
   border-top: 1px solid var(--border);
 }
 .config-row:first-child { border-top: none; }
 .config-row .config-label { font-weight: 600; font-size: 0.9rem; }
-.config-row .config-help { grid-column: 1; font-size: 0.78rem; color: var(--text-muted); margin: 0; }
+.config-row .config-help { grid-column: 1; font-size: 0.78rem; color: var(--text-muted); margin: 0; max-width: 72ch; }
 .config-row .config-control {
   grid-column: 2;
   grid-row: 1 / span 2;
@@ -1007,49 +1011,86 @@ mark.find-hit.current {
 .model-status .bar { margin-top: 0.35rem; }
 .model-status .btn { margin-left: 0.4rem; padding: 0.1rem 0.5rem; font-size: 0.75rem; }
 
-/* model comparison cards (pros/cons overview under the model selects) */
+/* Model picker: a list, one row per model — name and status on the left,
+   pros and cons side by side, so every option reads in one line of sight. */
 .model-overview {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0.6rem;
-  margin-top: 0.6rem;
-}
-.model-card {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  margin-top: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.model-card {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) minmax(0, 1.25fr) minmax(0, 1.25fr);
+  grid-template-areas:
+    "head pros cons"
+    "tag  pros cons";
+  /* the second row takes the slack, so the tagline stays under the name */
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  column-gap: 1.5rem;
   font: inherit;
   text-align: left;
   color: inherit;
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  padding: 0.65rem 0.75rem;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.65rem 0.9rem 0.7rem 2.2rem;
+  position: relative;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: background 0.15s ease;
 }
-.model-card:hover:not(:disabled) { border-color: var(--border-strong); }
-.model-card.selected {
+.model-card:first-child { border-top: none; }
+/* radio dot: the list is a radiogroup, so it should look like one */
+.model-card::before {
+  content: "";
+  position: absolute;
+  left: 0.8rem;
+  top: 0.85rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+}
+.model-card:hover:not(:disabled) { background: var(--surface-2); }
+.model-card.selected { background: var(--accent-soft); }
+.model-card.selected::before {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--surface);
 }
+.model-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .model-card:disabled { cursor: default; }
 .model-card-head {
+  grid-area: head;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
 }
-.model-card-name { font-weight: 600; font-size: 0.85rem; }
-.model-card-badge { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; }
+.model-card-name { font-weight: 600; font-size: 0.88rem; }
+.model-card-badge { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
 .model-card-badge.ready { color: var(--success); }
 .model-card-badge.failed { color: var(--danger); }
-.model-card-tagline { margin: 0.15rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
+.model-card-tagline { grid-area: tag; margin: 0.15rem 0 0; font-size: 0.76rem; color: var(--text-muted); }
+.model-card .model-pros { grid-area: pros; }
+.model-card .model-cons { grid-area: cons; }
+/* A narrow window stacks the row again. */
+@media (max-width: 760px) {
+  .model-card {
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "tag" "pros" "cons";
+  }
+  .model-card .model-pros { margin-top: 0.4rem; }
+}
 .model-pros,
 .model-cons {
   list-style: none;
-  margin: 0.45rem 0 0;
+  margin: 0;
   padding: 0;
   font-size: 0.74rem;
   color: var(--text-muted);
@@ -1060,7 +1101,7 @@ mark.find-hit.current {
 .model-cons li {
   position: relative;
   padding-left: 1rem;
-  margin-top: 0.15rem;
+  margin-bottom: 0.15rem;
   line-height: 1.35;
 }
 .model-pros li::before,
@@ -1191,16 +1232,23 @@ mark.find-hit.current {
 .savebar[hidden] { display: none; }
 .savebar-text { flex: 1; font-size: 0.88rem; font-weight: 600; }
 
+/* Two or three columns on a desktop window instead of one long list with
+   the actions a screen-width away from the name. */
+.speaker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  column-gap: 2.5rem;
+}
 .speaker-list li {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.2rem;
-  border-top: 1px solid var(--border);
+  padding: 0.45rem 0.2rem;
+  border-bottom: 1px solid var(--border);
   font-size: 0.92rem;
 }
-.speaker-list li:first-child { border-top: none; }
+.speaker-list li.list-empty { grid-column: 1 / -1; border-bottom: none; }
 .speaker-list .speaker-name { display: flex; align-items: center; gap: 0.55rem; flex: 1; min-width: 0; }
 .speaker-list .speaker-name .icon { width: 15px; height: 15px; color: var(--text-muted); }
 .speaker-list .speaker-name input { font-size: 0.9rem; width: min(16rem, 100%); }
@@ -1314,8 +1362,31 @@ mark.find-hit.current {
 
 /* ------------------------------------------------------ prepare screen */
 .prep-body {
-  max-width: 760px;
+  max-width: 1320px;
   gap: 1.1rem;
+}
+/* Desktop: video beside the segment list, waveform full width under both
+   (the wider it is, the finer the selection), actions along the bottom. */
+@media (min-width: 980px) {
+  .prep-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-areas:
+      "player ranges"
+      "wave   wave"
+      "actions actions";
+    align-items: start;
+    column-gap: 1.6rem;
+  }
+  .prep-player { grid-area: player; }
+  .prep-body .wave-wrap { grid-area: wave; }
+  .prep-ranges { grid-area: ranges; }
+  .prep-actions { grid-area: actions; }
+  .prep-player video { max-height: 440px; }
+  /* heading on its own line, both buttons on the next */
+  .prep-ranges .note-head { flex-wrap: wrap; }
+  .prep-ranges .note-head h3 { flex-basis: 100%; }
+  .prep-ranges .range-label { min-width: 0; white-space: nowrap; }
 }
 .prep-player {
   display: flex;
