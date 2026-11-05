@@ -332,6 +332,10 @@ pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String
     native_only(ctx, |_| native_impl::title_from_notes(ctx, notes))
 }
 
+/// Builds a question's prompt, given a check of whether a text still fits
+/// the model's context.
+pub type PromptBuilder<'a> = &'a dyn Fn(&dyn Fn(&str) -> bool) -> String;
+
 /// Free the summary model kept loaded between questions (call before the
 /// process exits; the Metal backend aborts on live GPU buffers at exit).
 pub fn release_llm() {
@@ -345,7 +349,7 @@ pub fn release_llm() {
 pub fn ask(
     ctx: &PipelineCtx,
     system: &str,
-    build_prompt: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+    build_prompt: PromptBuilder<'_>,
     max_tokens: usize,
     on_delta: &mut dyn FnMut(&str),
     cancel: &std::sync::atomic::AtomicBool,
@@ -469,7 +473,7 @@ mod native_impl {
     pub fn ask(
         _: &PipelineCtx,
         _: &str,
-        _: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+        _: PromptBuilder<'_>,
         _: usize,
         _: &mut dyn FnMut(&str),
         _: &std::sync::atomic::AtomicBool,

@@ -446,7 +446,7 @@ pub fn release_llm() {
 pub fn ask(
     ctx: &PipelineCtx,
     system: &str,
-    build_prompt: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+    build_prompt: crate::pipeline::PromptBuilder<'_>,
     max_tokens: usize,
     on_delta: &mut dyn FnMut(&str),
     cancel: &std::sync::atomic::AtomicBool,
@@ -454,7 +454,7 @@ pub fn ask(
     let _gpu = LLM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let key = (ctx.config.summary_model(), ctx.config.summary_provider());
     let mut cache = ASK_CACHE.lock().unwrap();
-    if cache.as_ref().is_none_or(|(m, p, _, _)| (m, p) != (&key.0, &key.1)) {
+    if cache.as_ref().map_or(true, |(m, p, _, _)| (m, p) != (&key.0, &key.1)) {
         *cache = None; // free the old one before loading the next
         *cache = Some((key.0.clone(), key.1.clone(), Llm::load(ctx)?, std::time::Instant::now()));
         start_cache_janitor();

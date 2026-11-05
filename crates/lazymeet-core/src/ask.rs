@@ -308,7 +308,7 @@ fn run(
     ctx: &Ctx,
     request_id: &str,
     system: &str,
-    build_prompt: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+    build_prompt: pipeline::PromptBuilder<'_>,
 ) -> ApiResult<String> {
     if ctx.bench_running.load(Ordering::SeqCst) {
         return Err(ApiError::conflict("the benchmark is running — ask again once it's done"));
@@ -351,7 +351,7 @@ pub fn ask_meeting(
     let question = check_question(question)?;
     let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;
-    if record.get("segments").and_then(|v| v.as_array()).is_none_or(|a| a.is_empty()) {
+    if record.get("segments").and_then(|v| v.as_array()).map_or(true, |a| a.is_empty()) {
         return Err(ApiError::conflict("there is no transcript to ask about yet"));
     }
     let answer =
