@@ -411,6 +411,9 @@ function startSummaryEdit() {
   const p = $("summary-text");
   const longBlock = $("summary-long-block");
   p.classList.add("hidden");
+  // The long form is edited below; showing its stale copy too would duplicate it.
+  const longWasHidden = longBlock.hidden;
+  longBlock.hidden = true;
   $("summary-edit-btn").classList.add("hidden");
   const editor = el("div", "editor");
   // The summary and its long form are two lengths of one edit, so each box
@@ -433,6 +436,7 @@ function startSummaryEdit() {
   const cleanup = () => {
     editor.remove();
     p.classList.remove("hidden");
+    longBlock.hidden = longWasHidden;
   };
   const commit = async () => {
     try {
@@ -540,7 +544,8 @@ function startItemEdit(field, index, li, span) {
   detailInput.placeholder = "Detail (optional): context, numbers, deadline…";
   detailInput.setAttribute("aria-label", "Detail");
   editor.append(input, detailInput);
-  li.insertBefore(editor, span);
+  // The line sits inside .item-body, not directly in the <li>.
+  span.parentNode.insertBefore(editor, span);
   input.focus();
 
   let settled = false;

@@ -4,6 +4,8 @@
 import { closePrepare, openPrepare } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings } from "../ts/settings";
+import { renderResult } from "../ts/meeting";
+import { state } from "../ts/state";
 import { LIMITS } from "./fixtures";
 
 export async function runSmokeChecks(): Promise<void> {
@@ -68,6 +70,11 @@ export async function runSmokeChecks(): Promise<void> {
     await checkSettings(problems, hidden);
   } catch (e: any) {
     problems.push("settings check threw: " + e.message);
+  }
+  try {
+    checkNotes(problems);
+  } catch (e: any) {
+    problems.push("notes check threw: " + e.message);
   }
   if (location.hash === "#bench") {
     try {
@@ -157,4 +164,60 @@ function checkBench(problems: string[], hidden: (id: string) => boolean) {
   if (document.querySelectorAll("#bench-results tbody tr").length !== 4) problems.push("bench rows");
   if (!document.querySelector("#bench-results tr.best")) problems.push("fastest summary not marked");
   if (hidden("bench-apply")) problems.push("apply hidden although settings differ");
+}
+
+// A finished meeting in the {short, detail} notes shape the backend hands out.
+const MEETING = {
+  id: "smoke-meeting",
+  title: "Weekly sync",
+  filename: "sync.mp4",
+  status: "done",
+  created_at: "2026-11-05T10:00:00Z",
+  summary: "Short summary.",
+  summary_long: "First paragraph.\n\nSecond paragraph.",
+  takeaways: [{ short: "Diarization works.", detail: "Runs end to end." }],
+  action_items: [{ short: "Anna: ship it", detail: "" }],
+  timings: { extract: 1, transcribe: 124, diarize: 20, identify: 11, summarize: 22, total: 178 },
+  segments: [{ start: 0, end: 2, speaker: "spk_0", text: "Hello." }],
+  speakers: { spk_0: "Anna" },
+  recognized: [],
+  confirmed: [],
+  has_audio: false,
+  versions: [],
+};
+
+function checkNotes(problems: string[]) {
+  state.activeId = MEETING.id;
+  state.currentMeeting = MEETING;
+  renderResult(MEETING);
+  if (document.querySelectorAll("#summary-long-text p").length !== 2) problems.push("long summary paragraphs");
+  const timings = document.getElementById("timings-note")!.textContent || "";
+  if (!timings.startsWith("Took 2m 58s — transcription 2m 04s")) problems.push(`timings line: ${timings}`);
+  if (document.querySelector("#takeaways .item-detail")?.textContent !== "Runs end to end.") {
+    problems.push("takeaway detail missing");
+  }
+  // Editing an item opens both fields; cancelling restores the list.
+  document.querySelector<HTMLElement>('#takeaways [aria-label="Edit"]')!.click();
+  const editor = document.querySelector("#takeaways .item-editor");
+  if (!editor) problems.push("item editor did not open");
+  else if ((editor.querySelector("textarea") as HTMLTextAreaElement).value !== "Runs end to end.") {
+    problems.push("item editor detail not prefilled");
+  }
+  [...document.querySelectorAll<HTMLButtonElement>("#takeaways .editor-actions button")]
+    .find((b) => b.textContent === "Cancel")
+    ?.click();
+  if (state.editing) problems.push(`still editing after cancel: ${state.editing}`);
+  if (document.querySelector("#takeaways .item-editor")) problems.push("item editor left behind");
+  // The summary editor replaces the long block rather than showing it twice.
+  document.getElementById("summary-edit-btn")!.click();
+  if (!document.getElementById("summary-long-block")!.hidden) problems.push("long summary shown while editing");
+  if (document.querySelectorAll("#summary-block textarea").length < 2) {
+    problems.push("summary editor missing the long-form box");
+  }
+  [...document.querySelectorAll<HTMLButtonElement>(".editor-actions button")]
+    .find((b) => b.textContent === "Cancel")
+    ?.click();
+  if (document.getElementById("summary-long-block")!.hidden) problems.push("long summary not restored");
+  state.activeId = null;
+  state.currentMeeting = null;
 }
