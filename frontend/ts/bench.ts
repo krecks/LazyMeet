@@ -52,7 +52,7 @@ export async function startBenchmark(path) {
 
 export async function pickBenchmarkFile() {
   try {
-    const path = await call("pick_recording");
+    const [path] = await call("pick_recording");
     if (path) startBenchmark(path);
   } catch (e) {
     showToast(`Couldn't open the file picker: ${e.message}`);

@@ -17,6 +17,7 @@ pub mod jobs;
 pub mod models;
 pub mod pipeline;
 pub mod store;
+pub mod watch;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -81,6 +82,7 @@ pub fn startup(ctx: &Arc<Ctx>) -> std::io::Result<()> {
     // Reads every meeting file: off the launch path.
     let backfill = ctx.clone();
     std::thread::spawn(move || jobs::queue_title_backfill(&backfill));
+    watch::start(ctx);
     Ok(())
 }
 

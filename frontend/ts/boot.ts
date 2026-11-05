@@ -76,6 +76,13 @@ async function main() {
   // Backend events replace the old polling loops; listeners must be armed
   // before the first fetches so no transition slips between them.
   await listen("meeting-updated", (e) => onMeetingUpdated(e.payload));
+  // The watch folder imported a recording (or failed to).
+  await listen("meetings-changed", (e: any) => {
+    const p = e.payload || {};
+    if (p.imported) showToast(`Imported ${p.imported.filename} from the watch folder`, 4000, true);
+    if (p.error) showToast(p.error);
+    refreshMeetings();
+  });
   await listen("models-progress", (e) => onModelsProgress(e.payload));
   await listen("benchmark-progress", (e) => onBenchProgress(e.payload));
   await listen("setup-progress", (e) => {

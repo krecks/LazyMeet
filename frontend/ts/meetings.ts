@@ -5,9 +5,12 @@ import { $, call, getCurrentWebview } from "./core";
 import { confirmThen, el, escapeHtml, fmtRelative, type MenuItem, openMenu, plural, prefs, showToast } from "./helpers";
 import { exportMeetings, pickExportFormat } from "./exports";
 import { selectMeeting, showEmpty } from "./meeting";
-import { openPrepare } from "./prepare";
+import { openPrepareMany } from "./prepare";
 import { gsearch } from "./search";
 import { state } from "./state";
+
+/// The recording extensions the backend accepts (watch::MEDIA_EXTENSIONS).
+const MEDIA_RE = /\.(mp4|mkv|mov|avi|webm|flv|ts|m4v|wav|mp3|m4a|aac|flac|ogg|oga|opus|wma|aiff|aif)$/i;
 
 export function setupDropzone() {
   const dz = $("dropzone");
@@ -15,8 +18,8 @@ export function setupDropzone() {
   // filesystem path, so the old <input type="file"> can't feed the backend).
   const browse = async () => {
     try {
-      const path = await call("pick_recording");
-      if (path) openPrepare(path);
+      const paths: string[] = await call("pick_recording");
+      if (paths.length) openPrepareMany(paths);
     } catch (e) {
       showToast(`Couldn't open the file picker: ${e.message}`);
     }
@@ -37,8 +40,10 @@ export function setupDropzone() {
     else if (type === "leave") dz.classList.remove("drag");
     else if (type === "drop") {
       dz.classList.remove("drag");
-      const path = event.payload.paths && event.payload.paths[0];
-      if (path) openPrepare(path); // replaces the current prep file if one is open
+      // Every dropped file, in turn; replaces whatever prep was open.
+      const paths = (event.payload.paths || []).filter((p) => MEDIA_RE.test(p));
+      if (paths.length) openPrepareMany(paths);
+      else if (event.payload.paths?.length) showToast("That isn't an audio or video file LazyMeet can read.");
     }
   });
 }

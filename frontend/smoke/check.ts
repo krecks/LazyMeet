@@ -1,7 +1,7 @@
 // Assertions for the headless smoke test (see scripts/smoke_frontend.sh).
 // `main.ts` runs this right after boot; the result is one <pre id="smoke-result">
 // that the shell greps for.
-import { closePrepare, openPrepare } from "../ts/prepare";
+import { closePrepare, openPrepare, openPrepareMany } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings, openSpeakers } from "../ts/settings";
 import { renderResult, selectMeeting } from "../ts/meeting";
@@ -124,6 +124,11 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("notes check threw: " + e.message);
   }
   try {
+    await checkBatchPrepare(problems, hidden);
+  } catch (e: any) {
+    problems.push("batch prepare check threw: " + e.message);
+  }
+  try {
     checkSidebar(problems, hidden);
   } catch (e: any) {
     problems.push("sidebar check threw: " + e.message);
@@ -180,6 +185,16 @@ async function checkSettings(problems: string[], hidden: (id: string) => boolean
   const disk = q("#model-disk-list")!;
   if (!disk.querySelector('[aria-label="Remove Whisper Base"]')) problems.push("no remove button");
   if (disk.querySelector('[aria-label="Remove Parakeet TDT 0.6B v3"]')) problems.push("default removable");
+  // Watch folder: off by default, set with the folder picker.
+  const watchRow = q('[data-row="WATCH_DIR"]');
+  if (!watchRow) problems.push("watch folder row missing");
+  else if (location.hash !== "#settings") {
+    if (watchRow.querySelector(".folder-path")!.textContent !== "Off") problems.push("watch folder not off");
+    [...watchRow.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Choose…")!.click();
+    await new Promise((r) => setTimeout(r, 20));
+    if (watchRow.querySelector(".folder-path")!.textContent !== "/Users/you/Movies/OBS") problems.push("folder not shown");
+    if (q("#settings-savebar")!.hidden) problems.push("picking a folder did not mark settings dirty");
+  }
   // `#settings` keeps the page as-is for screenshots.
   if (location.hash !== "#settings") {
     q<HTMLElement>("#config-discard")!.click();
@@ -299,6 +314,7 @@ function checkNotes(problems: string[]) {
 function checkSidebar(problems: string[], hidden: (id: string) => boolean) {
   const titles = () => [...document.querySelectorAll("#meeting-list .m-title")].map((n) => n.textContent);
   const groups = () => [...document.querySelectorAll("#meeting-list .list-group")].map((n) => n.textContent);
+  state.activeId = null; // the batch check opened the meeting it created
   state.meetings = docsMeetings();
   prefs.set("sort", "newest");
   renderMeetingList();
@@ -341,4 +357,41 @@ function checkSidebar(problems: string[], hidden: (id: string) => boolean) {
 
   state.meetings = [];
   renderMeetingList();
+}
+
+async function checkBatchPrepare(problems: string[], hidden: (id: string) => boolean) {
+  const created = () => calls.filter((c) => c.cmd === "create_meeting");
+  const before = created().length;
+  const settle = () => new Promise((r) => setTimeout(r, 50));
+  await openPrepareMany(["/tmp/a.mp4", "/tmp/b.m4a", "/tmp/c.mkv"]);
+  await settle();
+  const file = () => document.getElementById("prep-file")!.textContent;
+  if (file() !== "a.mp4 · file 1 of 3") problems.push(`batch header: ${file()}`);
+  if (hidden("prep-skip") || hidden("prep-rest")) problems.push("batch buttons hidden");
+  document.getElementById("prep-transcribe")!.click();
+  await settle();
+  if (created().length !== before + 1) problems.push("first file not queued");
+  if (file() !== "b.m4a · file 2 of 3") problems.push(`after transcribe: ${file()}`);
+  document.getElementById("prep-skip")!.click();
+  await settle();
+  if (file() !== "c.mkv · file 3 of 3") problems.push(`after skip: ${file()}`);
+  if (!hidden("prep-rest")) problems.push("'Transcribe all' shown on the last file");
+  document.getElementById("prep-transcribe")!.click();
+  await settle();
+  const paths = created().slice(before).map((c) => c.args!.path);
+  if (paths.join(",") !== "/tmp/a.mp4,/tmp/c.mkv") problems.push(`queued: ${paths.join(",")}`);
+  if (!hidden("prepare")) problems.push("prepare still open after the batch");
+
+  // "Transcribe all" queues the rest whole.
+  await openPrepareMany(["/tmp/d.mp4", "/tmp/e.mp4", "/tmp/f.mp4"]);
+  await settle();
+  document.getElementById("prep-rest")!.click();
+  await settle();
+  await settle();
+  const rest = created().slice(before + 2);
+  if (rest.map((c) => c.args!.path).join(",") !== "/tmp/d.mp4,/tmp/e.mp4,/tmp/f.mp4") {
+    problems.push(`transcribe all queued: ${rest.map((c) => c.args!.path).join(",")}`);
+  }
+  if (rest.slice(1).some((c) => c.args!.ranges !== null)) problems.push("waiting files not queued whole");
+  if (!hidden("prepare")) problems.push("prepare still open after transcribe all");
 }

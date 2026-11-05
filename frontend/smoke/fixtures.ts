@@ -27,6 +27,7 @@ const DEFAULTS = {
   SUMMARY_PROVIDER: "gpu",
   NUM_THREADS: 0,
   KEEP_AUDIO: true,
+  WATCH_DIR: "",
 };
 export const LIMITS = {
   SPEAKER_THRESHOLD: { min: 0, max: 1 },

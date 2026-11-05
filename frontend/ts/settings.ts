@@ -22,6 +22,8 @@ interface ConfigMeta {
    */
   threads?: boolean;
   toggle?: boolean;
+  /** A folder path: shown read-only, set with the native folder picker. */
+  folder?: boolean;
   number?: boolean;
   step?: number;
   /** Shown only while this holds for the form's current values. */
@@ -96,6 +98,12 @@ const CONFIG_META: Record<string, ConfigMeta> = {
     label: "Keep recording audio",
     help: "Keep each recording's audio so transcript sections can be played back and re-transcribed. Video files are replaced by their audio track to save space. Turn off to delete it once the notes are ready.",
     toggle: true,
+  },
+  WATCH_DIR: {
+    section: "config-data",
+    label: "Watch folder",
+    help: "New recordings that appear in this folder — OBS's recording folder, say — are transcribed on their own, whole and with the default settings. Files already in it when you pick it are left alone.",
+    folder: true,
   },
   NUM_THREADS: {
     section: "config-advanced",
@@ -372,6 +380,44 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     });
     control.append(ta, restore);
     parts = [label, help, control];
+  } else if (meta.folder) {
+    // The value lives in a hidden input; the visible field just shows it.
+    const value = document.createElement("input");
+    value.type = "hidden";
+    value.value = cfg.values[name] || "";
+    describe(value);
+    const shown = el("span", "folder-path");
+    const sync = () => {
+      shown.textContent = value.value || "Off";
+      shown.classList.toggle("muted", !value.value);
+      off.hidden = !value.value;
+    };
+    const choose = el("button", "btn ghost small");
+    choose.type = "button";
+    choose.textContent = "Choose…";
+    choose.disabled = locked;
+    choose.addEventListener("click", async () => {
+      try {
+        const dir = await call("pick_folder");
+        if (!dir) return;
+        value.value = dir;
+        sync();
+        onFormInput();
+      } catch (e) {
+        showToast(`Couldn't open the folder picker: ${e.message}`);
+      }
+    });
+    const off = el("button", "link-btn");
+    off.type = "button";
+    off.textContent = "Turn off";
+    off.disabled = locked;
+    off.addEventListener("click", () => {
+      value.value = "";
+      sync();
+      onFormInput();
+    });
+    control.append(value, shown, choose, off);
+    sync();
   } else if (meta.toggle) {
     const sw = el("span", "switch");
     const input = document.createElement("input");

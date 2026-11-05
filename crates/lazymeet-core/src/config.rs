@@ -170,6 +170,8 @@ pub fn tunables() -> Vec<TunableSpec> {
             Some(max_threads() as f64),
         ),
         t("KEEP_AUDIO", "LAZYMEET_KEEP_AUDIO", Kind::Bool, None, None),
+        // A folder whose new recordings are imported on their own ("" = off).
+        t("WATCH_DIR", "LAZYMEET_WATCH_DIR", Kind::Str, None, Some(1000.0)),
     ]
 }
 
@@ -216,6 +218,7 @@ pub fn default_value(name: &str) -> Value {
         "MIN_SPEAKER_SECONDS" => json!(15.0),
         "NUM_THREADS" => json!(AUTO_THREADS),
         "KEEP_AUDIO" => json!(true),
+        "WATCH_DIR" => json!(""),
         _ => Value::Null,
     }
 }
@@ -371,6 +374,10 @@ impl Config {
     }
     pub fn summary_provider(&self) -> String {
         self.str_of("SUMMARY_PROVIDER")
+    }
+    /// The watch folder setting as written ("" when off).
+    pub fn watch_dir(&self) -> String {
+        self.str_of("WATCH_DIR")
     }
     pub fn keep_audio(&self) -> bool {
         self.values["KEEP_AUDIO"].as_bool().unwrap_or(true)

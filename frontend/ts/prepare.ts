@@ -17,6 +17,9 @@ let prep = null; // { path, filename, duration, peaks, ranges, probeFailed,
 let prepDrag = null; // transient pointer interaction on the waveform
 let prepStopAt = null; // pause the preview at this time (segment play)
 let prepPlayingIndex = null; // range row currently previewing (⏵/⏹ icon)
+/// Several files dropped or picked at once are prepared one after another:
+/// the files still waiting, how many there were, and the meetings created.
+const batch = { rest: [] as string[], total: 0, created: [] as string[] };
 
 const MIN_SEG_SECS = 0.5;
 const WAVE_H = 110; // main waveform area height (px)
@@ -57,7 +60,31 @@ function setHasPicture(on: boolean) {
   document.querySelector(".prep-body")!.classList.toggle("has-picture", on);
 }
 
-export async function openPrepare(path) {
+/// Prepare several recordings: the first opens now, the rest wait their
+/// turn ("File 2 of 5"). One path behaves exactly like openPrepare.
+export async function openPrepareMany(paths: string[]) {
+  if (!paths.length) return;
+  batch.rest = paths.slice(1);
+  batch.total = paths.length;
+  batch.created = [];
+  await openPrepare(paths[0], true);
+}
+
+function renderBatch() {
+  const many = batch.total > 1;
+  const position = batch.total - batch.rest.length;
+  $("prep-file").textContent = many ? `${prep.filename} · file ${position} of ${batch.total}` : prep.filename;
+  $("prep-skip").classList.toggle("hidden", !many);
+  $("prep-rest").classList.toggle("hidden", !batch.rest.length);
+  ($("prep-transcribe") as HTMLButtonElement).textContent = batch.rest.length ? "Transcribe, next file" : "Transcribe";
+}
+
+export async function openPrepare(path, keepBatch = false) {
+  if (!keepBatch) {
+    batch.rest = [];
+    batch.total = 1;
+    batch.created = [];
+  }
   releasePrepMedia();
   prep = {
     path,
@@ -75,8 +102,10 @@ export async function openPrepare(path) {
     $(screen).classList.add("hidden");
   }
   $("prepare").classList.remove("hidden");
-  syncPrepLanguage();
-  $("prep-file").textContent = prep.filename;
+  // Within a batch, the speakers and language picked for the previous file
+  // carry over; a fresh open starts on the saved defaults.
+  if (!keepBatch || batch.total - batch.rest.length === 1) syncPrepLanguage();
+  renderBatch();
   $("prep-nopreview").classList.add("hidden");
   $("prep-video").classList.remove("audio-only", "hidden");
   setHasPicture(false);
@@ -180,13 +209,73 @@ function releasePrepMedia() {
 export function closePrepare() {
   releasePrepMedia();
   prep = null;
+  batch.rest = [];
+  batch.total = 0;
   $("prepare").classList.add("hidden");
   $("app").classList.remove("hidden");
 }
 
-async function startTranscription() {
+/// Cancel: the open file and any still waiting are dropped; files already
+/// queued from this batch keep going.
+async function cancelPrepare() {
+  const queued = batch.created.length;
+  if (!queued) return closePrepare();
+  await finishBatch();
+  showToast(`Queued ${queued} of the recordings; the rest were left out`, 3000, true);
+}
+
+/// Leave the prepare screen after a batch: show the first meeting created.
+async function finishBatch() {
+  const first = batch.created[0];
+  closePrepare();
+  await refreshMeetings();
+  if (first) selectMeeting(first);
+}
+
+/// The next waiting file, or the end of the batch.
+async function nextFile() {
+  const next = batch.rest.shift();
+  if (next) await openPrepare(next, true);
+  else await finishBatch();
+}
+
+function prepSettings() {
+  const numSpeakers = parseInt(($("num-speakers") as HTMLSelectElement)?.value ?? "-1", 10);
+  return {
+    num_speakers: Number.isNaN(numSpeakers) ? -1 : numSpeakers,
+    language: ($("prep-language") as HTMLSelectElement)?.value || "auto",
+  };
+}
+
+/// "Transcribe the rest as they are": this file with its selection, every
+/// waiting file whole, all with the speakers and language picked here.
+async function transcribeRest() {
   if (state.uploading || !prep) return;
-  if (!prep.probeFailed && prep.ranges.length === 0) return;
+  const settings = prepSettings();
+  const rest = batch.rest.splice(0);
+  if (!(await startTranscription(false))) return;
+  state.uploading = true;
+  try {
+    for (const path of rest) {
+      try {
+        const { id } = await call("create_meeting", { path, ranges: null, ...settings });
+        batch.created.push(id);
+      } catch (e) {
+        showToast(`Couldn't add ${basename(path)}: ${e.message}`);
+      }
+    }
+  } finally {
+    state.uploading = false;
+  }
+  showToast(`Queued ${batch.created.length} recordings`, 3000, true);
+  await finishBatch();
+}
+
+/// Queue the open file. Within a batch this moves on to the next file;
+/// `advance` false leaves that to the caller. Returns whether it was queued.
+async function startTranscription(advance = true): Promise<boolean> {
+  if (state.uploading || !prep) return false;
+  if (!prep.probeFailed && prep.ranges.length === 0) return false;
   // A whole-file selection (and a failed probe) goes as null — the backend
   // then behaves exactly as before this screen existed.
   const whole =
@@ -195,25 +284,20 @@ async function startTranscription() {
       prep.ranges[0].start <= 0.05 &&
       prep.ranges[0].end >= prep.duration - 0.05);
   const ranges = whole ? null : prep.ranges.map((r) => [r.start, r.end]);
-  const numSpeakers = parseInt($("num-speakers")?.value ?? "-1", 10);
   state.uploading = true;
   $("prep-transcribe").disabled = true;
   try {
-    const { id } = await call("create_meeting", {
-      path: prep.path,
-      num_speakers: Number.isNaN(numSpeakers) ? -1 : numSpeakers,
-      ranges,
-      language: $("prep-language")?.value || "auto",
-    });
-    closePrepare();
-    await refreshMeetings();
-    selectMeeting(id);
+    const { id } = await call("create_meeting", { path: prep.path, ranges, ...prepSettings() });
+    batch.created.push(id);
   } catch (e) {
     showToast(`Couldn't start transcription: ${e.message}`);
     $("prep-transcribe").disabled = false;
+    return false;
   } finally {
     state.uploading = false;
   }
+  if (advance) await nextFile();
+  return true;
 }
 
 // All range mutations funnel through here: clamp to the recording, drop
@@ -688,9 +772,11 @@ function addRangeInGap() {
 
 // One-time wiring for the prep screen (called from initApp).
 export function setupPrepare() {
-  $("prep-back").addEventListener("click", closePrepare);
-  $("prep-cancel").addEventListener("click", closePrepare);
-  $("prep-transcribe").addEventListener("click", startTranscription);
+  $("prep-back").addEventListener("click", cancelPrepare);
+  $("prep-cancel").addEventListener("click", cancelPrepare);
+  $("prep-transcribe").addEventListener("click", () => startTranscription());
+  $("prep-skip").addEventListener("click", () => nextFile());
+  $("prep-rest").addEventListener("click", transcribeRest);
   $("prep-add-range").addEventListener("click", addRangeInGap);
   $("prep-select-all").addEventListener("click", () => {
     if (prep && prep.peaks) setPrepRanges([{ start: 0, end: prep.duration }]);
@@ -710,7 +796,7 @@ export function setupPrepare() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && prep && !$("prepare").classList.contains("hidden")) {
-      closePrepare();
+      cancelPrepare();
     }
   });
   window.addEventListener("resize", () => {

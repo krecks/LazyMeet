@@ -95,6 +95,21 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
             return Err(ApiError::invalid("unknown summary model"));
         }
     }
+    if let Some(v) = fields.get("WATCH_DIR").filter(|v| !v.is_null()) {
+        let dir = std::path::Path::new(v.as_str().unwrap_or_default().trim());
+        if !dir.as_os_str().is_empty() {
+            if !dir.is_absolute() || !dir.is_dir() {
+                return Err(ApiError::invalid("the watch folder must be an existing folder"));
+            }
+            // The app's own data folder holds its working copies — watching
+            // it would import every recording again, forever.
+            let data = ctx.paths.data_dir.canonicalize().unwrap_or(ctx.paths.data_dir.clone());
+            let picked = dir.canonicalize().unwrap_or(dir.to_path_buf());
+            if picked.starts_with(&data) || data.starts_with(&picked) {
+                return Err(ApiError::invalid("pick a folder outside LazyMeet's data folder"));
+            }
+        }
+    }
     for key in ["ASR_LANGUAGE", "SUMMARY_LANGUAGE"] {
         if let Some(v) = fields.get(key).filter(|v| !v.is_null()) {
             let lang = v.as_str().unwrap_or_default();

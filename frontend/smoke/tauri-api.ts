@@ -21,6 +21,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   if (cmd === "get_config" || cmd === "put_config") return config();
   if (cmd === "get_models") return models();
   if (cmd === "remove_model") return { ok: true };
+  if (cmd === "create_meeting") return { id: `smoke-${calls.filter((c) => c.cmd === "create_meeting").length}` };
+  if (cmd === "pick_folder") return "/Users/you/Movies/OBS";
   if (cmd === "get_data_info") {
     return {
       data_dir: "/Users/you/Library/Application Support/LazyMeet",

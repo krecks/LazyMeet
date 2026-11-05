@@ -125,21 +125,31 @@ pub async fn prepare_media_preview(app: AppHandle, path: String) -> ApiResult<Va
 }
 
 /// Native replacement for the `<input type="file">` picker (webview File
-/// objects have no filesystem path).
+/// objects have no filesystem path). Several files can be picked at once;
+/// returns an empty list when cancelled.
 #[tauri::command(rename_all = "snake_case")]
-pub async fn pick_recording(app: AppHandle) -> ApiResult<Option<String>> {
+pub async fn pick_recording(app: AppHandle) -> ApiResult<Vec<String>> {
     blocking(move || {
         let picked = app
             .dialog()
             .file()
-            .add_filter(
-                "Recordings",
-                &[
-                    "mp4", "mkv", "mov", "avi", "webm", "flv", "ts", "m4v", "wav", "mp3", "m4a",
-                    "aac", "flac", "ogg", "oga", "opus", "wma", "aiff", "aif",
-                ],
-            )
-            .blocking_pick_file();
+            .add_filter("Recordings", lazymeet_core::watch::MEDIA_EXTENSIONS)
+            .blocking_pick_files()
+            .unwrap_or_default();
+        Ok(picked
+            .into_iter()
+            .filter_map(|p| p.into_path().ok())
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect())
+    })
+    .await
+}
+
+/// Pick a folder (the watch folder setting). None when cancelled.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn pick_folder(app: AppHandle) -> ApiResult<Option<String>> {
+    blocking(move || {
+        let picked = app.dialog().file().blocking_pick_folder();
         Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
     })
     .await
