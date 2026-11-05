@@ -165,6 +165,13 @@ pub fn update_meeting(
             changes.insert("speakers".into(), Value::Object(merged));
         }
     }
+    // A generated title (it always carries `title_by_user: false`) never
+    // replaces one the user set — checked here, under the lock, so a rename
+    // that lands while a job ran wins.
+    if changes.get("title_by_user") == Some(&json!(false)) && !title_is_auto(&record) {
+        changes.remove("title");
+        changes.remove("title_by_user");
+    }
     for (k, v) in changes {
         record.insert(k, v);
     }

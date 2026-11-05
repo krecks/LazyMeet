@@ -351,8 +351,10 @@ pub fn clean_title(raw: &str) -> String {
             t = t[prefix.len()..].trim_start();
         }
     }
-    let quotes: &[char] = &['"', '\'', '*', '#', '`', '“', '”', '„', '«', '»', '‘', '’'];
-    let t = t.trim_matches(|c: char| quotes.contains(&c) || c.is_whitespace());
+    let quotes: &[char] = &['"', '\'', '*', '`', '“', '”', '„', '«', '»', '‘', '’'];
+    let is_wrap = |c: char| quotes.contains(&c) || c.is_whitespace();
+    // `#` only leads (a markdown heading); trailing it is content ("C#").
+    let t = t.trim_start_matches(|c: char| is_wrap(c) || c == '#').trim_end_matches(is_wrap);
     let t = t.trim_end_matches(['.', ':', ';', ',']).trim();
     let t: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
     if t.chars().count() <= MAX_TITLE_CHARS {
@@ -360,7 +362,8 @@ pub fn clean_title(raw: &str) -> String {
     }
     let cut: String = t.chars().take(MAX_TITLE_CHARS).collect();
     match cut.rfind(' ') {
-        Some(i) if i > MAX_TITLE_CHARS / 2 => {
+        // `i` is a byte offset: compare in chars like the limit.
+        Some(i) if cut[..i].chars().count() > MAX_TITLE_CHARS / 2 => {
             cut[..i].trim_end_matches([',', '-', '–', ':']).trim().into()
         }
         _ => cut,

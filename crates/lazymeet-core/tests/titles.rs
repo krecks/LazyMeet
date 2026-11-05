@@ -59,6 +59,25 @@ fn a_user_title_survives_regeneration() {
 }
 
 #[test]
+fn a_late_rename_beats_a_generated_title() {
+    let app = TestApp::fake();
+    let mid = app.upload("late.mp4", b"fake video bytes");
+    app.wait_terminal(&mid);
+    api::patch_meeting(&app.ctx, &mid, &obj(&[("title", json!("Mine"))])).unwrap();
+    // What a job that read the record before the rename would write.
+    let r = store::update_meeting(
+        &app.ctx.paths,
+        &app.ctx.locks,
+        &mid,
+        false,
+        obj(&[("title", json!(FAKE_TITLE)), ("title_by_user", json!(false))]),
+    )
+    .unwrap();
+    assert_eq!(r["title"], "Mine");
+    assert_eq!(r["title_by_user"], true);
+}
+
+#[test]
 fn backfill_titles_only_untouched_legacy_meetings() {
     let app = TestApp::fake();
     let named_by_file = app.upload("Call.mp4", b"fake video bytes");
@@ -96,6 +115,7 @@ fn model_titles_are_cleaned() {
     assert_eq!(clean_title("Title: **Hiring sync**\nextra line"), "Hiring sync");
     assert_eq!(clean_title("  „Kickoff  Projekt Atlas“ "), "Kickoff Projekt Atlas");
     assert_eq!(clean_title(""), "");
+    assert_eq!(clean_title("## Intro to C#"), "Intro to C#");
     // Multi-byte text where a "Title:" prefix would be checked must not panic.
     assert_eq!(clean_title("Präsentation Phase zwei"), "Präsentation Phase zwei");
     assert_eq!(clean_title("Ärger über Lieferzeiten"), "Ärger über Lieferzeiten");

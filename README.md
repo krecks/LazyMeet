@@ -69,7 +69,8 @@ Each meeting's notes have a short and a long form: a 2-3 sentence summary plus
 an expandable **In detail** narrative, and key takeaways and action items that
 carry a one-line point with the context, numbers and deadlines behind it.
 Everything is editable, and the notes can be regenerated with another model
-without re-transcribing.
+without re-transcribing. The same model names the meeting ("Q3 pricing review
+with Acme" rather than `2026-04-24 12-29-55.mkv`) unless you renamed it.
 
 You install nothing else — ffmpeg, the models, and the LLM are all bundled or
 auto-downloaded.
