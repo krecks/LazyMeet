@@ -8,6 +8,7 @@ import { renderResult, selectMeeting } from "../ts/meeting";
 import { DOCS_MEETING_ID } from "./docs";
 import { state } from "../ts/state";
 import { LIMITS } from "./fixtures";
+import { calls } from "./tauri-api";
 
 export async function runSmokeChecks(): Promise<void> {
   const problems: string[] = [];
@@ -267,6 +268,23 @@ function checkNotes(problems: string[]) {
     .find((b) => b.textContent === "Cancel")
     ?.click();
   if (document.getElementById("summary-long-block")!.hidden) problems.push("long summary not restored");
+  // Export opens a format menu; the pick goes to the backend and is remembered.
+  document.getElementById("export-btn")!.click();
+  const formats = [...document.querySelectorAll<HTMLButtonElement>(".menu .menu-item")];
+  if (formats.length !== 7) problems.push(`export menu items: ${formats.length}`);
+  formats.find((b) => b.textContent!.startsWith("PDF"))?.click();
+  if (document.querySelector(".menu")) problems.push("export menu stayed open");
+  const exported = calls.filter((c) => c.cmd === "export_meeting").pop();
+  if (exported?.args?.format !== "pdf") problems.push(`export call: ${JSON.stringify(exported)}`);
+  document.getElementById("export-btn")!.click();
+  if (!document.querySelector(".menu .menu-item.active")?.textContent!.startsWith("PDF")) {
+    problems.push("last export format not remembered");
+  }
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  document.querySelector<HTMLElement>(".menu .menu-item")?.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+  );
+  if (document.querySelector(".menu")) problems.push("Escape did not close the menu");
   state.activeId = null;
   state.currentMeeting = null;
 }

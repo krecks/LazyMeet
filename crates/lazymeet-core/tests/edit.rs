@@ -44,7 +44,8 @@ fn title_rename_flows_everywhere() {
     assert_eq!(entry["duration"].as_f64(), Some(last_end));
     assert!(entry["speaker_count"].as_u64().unwrap() >= 1);
 
-    let (md, filename) = api::export_meeting(&app.ctx, mid).unwrap();
+    let (md, filename) = api::export_meeting(&app.ctx, mid, "md").unwrap();
+    let md = String::from_utf8(md).unwrap();
     assert!(md.starts_with("# Weekly Standup"));
     assert_eq!(filename, "Weekly-Standup.md");
 }
@@ -140,7 +141,8 @@ fn content_edit_on_done_meeting() {
         json!([{"short": "Alice: deploy", "detail": "After the freeze, on Friday."}])
     );
 
-    let (md, _) = api::export_meeting(&app.ctx, mid).unwrap();
+    let (md, _) = api::export_meeting(&app.ctx, mid, "md").unwrap();
+    let md = String::from_utf8(md).unwrap();
     assert!(md.contains("We agreed on the plan."));
     assert!(md.contains("Long version."));
     assert!(md.contains("- [ ] Alice: deploy\n  After the freeze, on Friday."));

@@ -156,3 +156,85 @@ export function escapeHtml(str) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+
+export interface MenuItem {
+  label: string;
+  hint?: string;
+  active?: boolean;
+  danger?: boolean;
+  onPick: () => void;
+}
+
+let openMenuEl: HTMLElement | null = null;
+
+export function closeMenu() {
+  openMenuEl?.remove();
+  openMenuEl = null;
+}
+
+/// A small dropdown under `anchor`: click or Enter picks, Escape or a click
+/// outside closes, arrow keys move between items.
+export function openMenu(anchor: HTMLElement, items: MenuItem[], label = "Menu") {
+  closeMenu();
+  const menu = el("div", "menu");
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", label);
+  for (const item of items) {
+    const btn = el("button", "menu-item" + (item.active ? " active" : "") + (item.danger ? " danger" : ""));
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.innerHTML = `<span></span>${item.hint ? '<span class="menu-hint"></span>' : ""}`;
+    (btn.firstChild as HTMLElement).textContent = item.label;
+    if (item.hint) (btn.lastChild as HTMLElement).textContent = item.hint;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenu();
+      item.onPick();
+    });
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  menu.style.top = `${r.bottom + 6}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - width - 8))}px`;
+  openMenuEl = menu;
+  const buttons = [...menu.querySelectorAll<HTMLButtonElement>(".menu-item")];
+  (buttons.find((b) => b.classList.contains("active")) || buttons[0])?.focus();
+  menu.addEventListener("keydown", (e) => {
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "ArrowDown") buttons[(i + 1) % buttons.length].focus();
+    else if (e.key === "ArrowUp") buttons[(i - 1 + buttons.length) % buttons.length].focus();
+    else if (e.key === "Escape") {
+      closeMenu();
+      anchor.focus();
+    } else return;
+    e.preventDefault();
+  });
+  // Close on the next click anywhere else (registered after this click ends).
+  setTimeout(() => {
+    const away = (e: MouseEvent) => {
+      if (openMenuEl === menu && !menu.contains(e.target as Node)) closeMenu();
+      if (openMenuEl !== menu) document.removeEventListener("mousedown", away, true);
+    };
+    document.addEventListener("mousedown", away, true);
+  });
+}
+
+/// localStorage that never throws (private windows, blocked storage).
+export const prefs = {
+  get(key: string): string | null {
+    try {
+      return localStorage.getItem(`lazymeet.${key}`);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string) {
+    try {
+      localStorage.setItem(`lazymeet.${key}`, value);
+    } catch {
+      /* not persisted — fine */
+    }
+  },
+};

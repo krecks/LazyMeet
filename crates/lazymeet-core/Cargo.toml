@@ -75,6 +75,11 @@ sha2 = "0.10"
 ureq = "2"
 tar = "0.4"
 bzip2 = "0.4"
+# Meeting exports: Word documents, and PDFs that embed only the glyphs used
+# (krilla subsets the bundled Noto Sans, so a notes PDF stays ~30 KB).
+docx-rs = "0.4.22"
+krilla = { version = "0.8.2", default-features = false, features = ["simple-text"] }
+skrifa = "0.42"
 # Transcript language detection for SUMMARY_LANGUAGE="auto" (native only).
 whatlang = { version = "0.18.0", optional = true }
 

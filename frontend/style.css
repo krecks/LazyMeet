@@ -324,6 +324,39 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   z-index: 40;
 }
 .dl-popover .setup-item { font-size: 0.8rem; }
+
+/* dropdown menu (export formats, bulk actions) */
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  padding: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+}
+.menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.45rem 0.7rem;
+  border: none;
+  border-radius: calc(var(--radius-l) - 4px);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2, var(--border)); outline: none; }
+.menu-item.active { font-weight: 600; }
+.menu-item.danger { color: var(--danger); }
+.menu-hint { color: var(--text-muted); font-size: 0.8rem; }
+.btn .icon.chev { width: 13px; height: 13px; margin-left: -0.15rem; }
 .dl-popover .dl-error {
   margin: 0.6rem 0;
   font-size: 0.8rem;

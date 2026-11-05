@@ -10,6 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::config;
 use crate::error::{ApiError, ApiResult};
+use crate::export;
 use crate::pipeline::{self, LANGUAGE_NAMES};
 use crate::store::{self, StoreError};
 use crate::{jobs, models, Ctx};
@@ -506,25 +507,54 @@ pub fn delete_meeting(ctx: &Ctx, meeting_id: &str) -> ApiResult<Value> {
 
 /// GET /api/meetings/{id}/export — returns (markdown, suggested filename);
 /// the shell shows a save dialog and writes the file.
-pub fn export_meeting(ctx: &Ctx, meeting_id: &str) -> ApiResult<(String, String)> {
+/// One meeting in `format` ("md", "txt", "srt", "vtt", "json", "docx",
+/// "pdf"): the bytes and a suggested file name.
+pub fn export_meeting(ctx: &Ctx, meeting_id: &str, format: &str) -> ApiResult<(Vec<u8>, String)> {
+    let format = export::Format::parse(format)
+        .ok_or_else(|| ApiError::invalid(format!("unknown export format: {format}")))?;
     let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;
-    let md = to_markdown(&record);
-    let title = record
-        .get("title")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .or_else(|| record.get("filename").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
-        .unwrap_or(meeting_id);
-    // Python: re.sub(r"[^\w\- ]+", "", title).strip().replace(" ", "-")
-    let safe: String = title
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
-        .collect::<String>()
-        .trim()
-        .replace(' ', "-");
-    let safe = if safe.is_empty() { meeting_id.to_string() } else { safe };
-    Ok((md, format!("{safe}.md")))
+    let public = store::public_meeting(&ctx.paths, &record);
+    export::export(&public, format).map_err(ApiError::internal)
+}
+
+/// Export several meetings into `dir`, one file each; a name already taken
+/// (on disk or earlier in this batch) gets " (2)", " (3)"… Returns the
+/// written paths. Meetings that no longer exist are skipped.
+pub fn export_meetings(
+    ctx: &Ctx,
+    meeting_ids: &[String],
+    format: &str,
+    dir: &Path,
+) -> ApiResult<Vec<String>> {
+    if !dir.is_dir() {
+        return Err(ApiError::invalid("export folder not found"));
+    }
+    let mut written = Vec::new();
+    for id in meeting_ids {
+        let (bytes, filename) = match export_meeting(ctx, id, format) {
+            Ok(out) => out,
+            Err(e) if e.code == 404 => continue,
+            Err(e) => return Err(e),
+        };
+        let path = unique_path(dir, &filename);
+        std::fs::write(&path, bytes)
+            .map_err(|e| ApiError::internal(format!("could not write {}: {e}", path.display())))?;
+        written.push(path.to_string_lossy().into_owned());
+    }
+    Ok(written)
+}
+
+fn unique_path(dir: &Path, filename: &str) -> PathBuf {
+    let candidate = dir.join(filename);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = filename.rsplit_once('.').unwrap_or((filename, ""));
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}).{ext}")))
+        .find(|p| !p.exists())
+        .expect("some suffix is free")
 }
 
 fn status_conflict(e: StoreError) -> ApiError {
@@ -599,72 +629,4 @@ pub fn get_data_info(ctx: &Ctx) -> Value {
         "total_bytes": meetings + uploads + models,
         "meeting_count": store::list_meetings(&ctx.paths, &ctx.locks).len(),
     })
-}
-
-// --------------------------------------------------------------------------
-// Markdown export
-// --------------------------------------------------------------------------
-
-fn to_markdown(record: &store::Record) -> String {
-    let speakers = record.get("speakers").and_then(|v| v.as_object());
-    let mut out = String::new();
-    let title = record
-        .get("title")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .or_else(|| record.get("filename").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
-        .unwrap_or("Meeting");
-    out.push_str(&format!("# {title}\n\n"));
-    if let Some(summary) = record.get("summary").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-    {
-        out.push_str(&format!("## Summary\n\n{summary}\n\n"));
-    }
-    if let Some(detail) =
-        record.get("summary_long").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-    {
-        out.push_str(&format!("## In detail\n\n{detail}\n\n"));
-    }
-    let list = |out: &mut String, key: &str, heading: &str, checkbox: bool| {
-        let items = store::note_items(record.get(key));
-        if items.is_empty() {
-            return;
-        }
-        out.push_str(&format!("## {heading}\n\n"));
-        let mark = if checkbox { "- [ ] " } else { "- " };
-        for item in &items {
-            let field = |k: &str| item.get(k).and_then(|v| v.as_str()).unwrap_or("");
-            let (short, detail) = (field("short"), field("detail"));
-            out.push_str(&format!("{mark}{short}\n"));
-            if !detail.is_empty() {
-                // Indented continuation keeps the list item intact.
-                out.push_str(&format!("  {detail}\n"));
-            }
-        }
-        out.push('\n');
-    };
-    list(&mut out, "takeaways", "Key takeaways", false);
-    list(&mut out, "action_items", "Action items", true);
-    out.push_str("## Transcript\n\n");
-    if let Some(segments) = record.get("segments").and_then(|v| v.as_array()) {
-        for seg in segments {
-            let spk_id = seg.get("speaker").and_then(|v| v.as_str()).unwrap_or("");
-            let name =
-                speakers.and_then(|m| m.get(spk_id)).and_then(|v| v.as_str()).unwrap_or(spk_id);
-            let start = seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let text = seg.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            out.push_str(&format!("**{name}** [{}]: {text}\n\n", fmt_ts(start)));
-        }
-    }
-    out
-}
-
-fn fmt_ts(seconds: f64) -> String {
-    let total = seconds as i64;
-    let (m, s) = (total / 60, total % 60);
-    let (h, m) = (m / 60, m % 60);
-    if h > 0 {
-        format!("{h:02}:{m:02}:{s:02}")
-    } else {
-        format!("{m:02}:{s:02}")
-    }
 }

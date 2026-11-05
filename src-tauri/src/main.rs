@@ -80,6 +80,7 @@ fn main() {
             commands::delete_meeting,
             commands::reprocess_meeting,
             commands::export_meeting,
+            commands::export_meetings,
             commands::get_speakers,
             commands::rename_known_speaker,
             commands::delete_speaker,

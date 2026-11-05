@@ -280,7 +280,9 @@ share, and modify it; if you distribute LazyMeet or a modified version, you
 must make the source available under the same license.
 
 The bundled ffmpeg binary is a separate program invoked by the app and remains
-under its own LGPL/GPL license. The AI models are downloaded at first run
+under its own LGPL/GPL license. PDF exports embed glyphs from the bundled Noto Sans
+fonts (`crates/lazymeet-core/assets/fonts/`), which are licensed under the SIL
+Open Font License 1.1 (`OFL.txt` next to them). The AI models are downloaded at first run
 directly from their publishers and keep their respective licenses (Parakeet:
 CC-BY-4.0, Nemotron 3 Diarization: OpenMDW-1.1, Qwen and Qwen3-ASR:
 Apache-2.0).

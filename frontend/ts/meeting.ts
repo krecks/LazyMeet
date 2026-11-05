@@ -3,6 +3,7 @@
 // selecting a meeting does one fetch for the current state.
 // --------------------------------------------------------------------------
 import { $, STAGES, call } from "./core";
+import { exportMeeting, pickExportFormat } from "./exports";
 import {
   confirmThen,
   disarm,
@@ -155,14 +156,7 @@ export function renderResult(m) {
   // one so it can't silently export something other than what's on screen.
   $("export-btn").disabled = !!viewed;
   $("export-btn").title = viewed ? "Go back to the current version to export" : "";
-  $("export-btn").onclick = async () => {
-    try {
-      const path = await call("export_meeting", { meeting_id: m.id });
-      if (path) showToast(`Exported to ${path}`, 4000, true);
-    } catch (e) {
-      showToast(`Export failed: ${e.message}`);
-    }
-  };
+  $("export-btn").onclick = () => pickExportFormat($("export-btn"), (format) => exportMeeting(m.id, format));
   $("copy-notes-btn").onclick = () => copyText(notesAsText(shown), "Notes copied");
   $("copy-transcript-btn").onclick = () => copyText(transcriptAsText(shown), "Transcript copied");
   deleteBtn.onclick = () => {

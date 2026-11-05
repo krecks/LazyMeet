@@ -12,6 +12,7 @@ pub mod bench;
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod export;
 pub mod jobs;
 pub mod models;
 pub mod pipeline;

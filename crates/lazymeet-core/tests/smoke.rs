@@ -47,7 +47,8 @@ fn full_lifecycle() {
 
     api::patch_meeting(&app.ctx, &mid, &changes("title", json!("Daily Standup"))).unwrap();
 
-    let (md, filename) = api::export_meeting(&app.ctx, &mid).unwrap();
+    let (md, filename) = api::export_meeting(&app.ctx, &mid, "md").unwrap();
+    let md = String::from_utf8(md).unwrap();
     assert!(md.starts_with("# Daily Standup"));
     assert!(md.contains("Alice"));
     assert_eq!(filename, "Daily-Standup.md");

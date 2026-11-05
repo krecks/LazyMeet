@@ -232,21 +232,25 @@ pub async fn reprocess_meeting(
     api::reprocess_meeting(&ctx, &meeting_id, &mode)
 }
 
-/// Export = build the markdown in core, then a native save dialog. Returns the
-/// written path, or null when the user cancelled.
+/// Export = build the file in core (`format`: md, txt, srt, vtt, json, docx,
+/// pdf), then a native save dialog. Returns the written path, or null when
+/// the user cancelled.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn export_meeting(
     app: AppHandle,
     ctx: State<'_, App>,
     meeting_id: String,
+    format: Option<String>,
 ) -> ApiResult<Option<String>> {
-    let (markdown, filename) = api::export_meeting(&ctx, &meeting_id)?;
+    let format = format.unwrap_or_else(|| "md".into());
+    let (bytes, filename) = api::export_meeting(&ctx, &meeting_id, &format)?;
+    let kind = lazymeet_core::export::Format::parse(&format).expect("validated by export_meeting");
     blocking(move || {
         let Some(target) = app
             .dialog()
             .file()
             .set_file_name(&filename)
-            .add_filter("Markdown", &["md"])
+            .add_filter(kind.label(), &[kind.ext()])
             .blocking_save_file()
         else {
             return Ok(None); // cancelled
@@ -254,9 +258,34 @@ pub async fn export_meeting(
         let path = target
             .into_path()
             .map_err(|e| ApiError::internal(format!("invalid save location: {e}")))?;
-        std::fs::write(&path, markdown)
+        std::fs::write(&path, bytes)
             .map_err(|e| ApiError::internal(format!("could not write the export: {e}")))?;
         Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+}
+
+/// Export several meetings: pick a folder, then one file per meeting in it.
+/// Returns the written paths, or null when the user cancelled.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn export_meetings(
+    app: AppHandle,
+    ctx: State<'_, App>,
+    meeting_ids: Vec<String>,
+    format: String,
+) -> ApiResult<Option<Vec<String>>> {
+    if lazymeet_core::export::Format::parse(&format).is_none() {
+        return Err(ApiError::invalid(format!("unknown export format: {format}")));
+    }
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let Some(dir) = app.dialog().file().set_title("Export to folder").blocking_pick_folder()
+        else {
+            return Ok(None);
+        };
+        let dir =
+            dir.into_path().map_err(|e| ApiError::internal(format!("invalid folder: {e}")))?;
+        api::export_meetings(&ctx, &meeting_ids, &format, &dir).map(Some)
     })
     .await
 }
