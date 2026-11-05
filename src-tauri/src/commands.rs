@@ -268,6 +268,37 @@ pub async fn merge_segments(
     api::merge_segments(&ctx, &meeting_id, index)
 }
 
+/// Ask about one meeting: the answer streams as `ask-progress` events
+/// tagged with `request_id`; the call returns the finished {q, a, at}.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ask_meeting(
+    ctx: State<'_, App>,
+    meeting_id: String,
+    question: String,
+    request_id: String,
+) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::ask::ask_meeting(&ctx, &meeting_id, &question, &request_id))
+        .await
+}
+
+/// Ask across all finished meetings; returns {q, a, sources}.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ask_all(
+    ctx: State<'_, App>,
+    question: String,
+    request_id: String,
+) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::ask::ask_all(&ctx, &question, &request_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cancel_ask(ctx: State<'_, App>, request_id: String) -> ApiResult<Value> {
+    lazymeet_core::ask::cancel(&ctx, &request_id);
+    Ok(Value::Null)
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn delete_meetings(ctx: State<'_, App>, meeting_ids: Vec<String>) -> ApiResult<Value> {
     api::delete_meetings(&ctx, &meeting_ids)

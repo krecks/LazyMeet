@@ -23,6 +23,19 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   if (cmd === "remove_model") return { ok: true };
   if (cmd === "create_meeting") return { id: `smoke-${calls.filter((c) => c.cmd === "create_meeting").length}` };
   if (cmd === "pick_folder") return "/Users/you/Movies/OBS";
+  if (cmd === "ask_meeting") {
+    return { q: args!.question, a: "Launch holds at August 14 [00:28].\n\nLegal reviews first [0:52].", at: "2026-11-06T10:00:00Z" };
+  }
+  if (cmd === "ask_all") {
+    return {
+      q: args!.question,
+      a: "M2 set the relaunch for August 14 [M2 00:28]; the roadmap moved it once [M1 12:05-12:40].",
+      sources: [
+        { label: "M1", id: "docs-roadmap", title: "Q3 roadmap planning" },
+        { label: "M2", id: "smoke-meeting", title: "Weekly sync" },
+      ],
+    };
+  }
   if (cmd === "get_data_info") {
     return {
       data_dir: "/Users/you/Library/Application Support/LazyMeet",

@@ -83,6 +83,9 @@ fn main() {
             commands::export_meeting,
             commands::export_meetings,
             commands::delete_meetings,
+            commands::ask_meeting,
+            commands::ask_all,
+            commands::cancel_ask,
             commands::split_segment,
             commands::merge_segments,
             commands::tag_meetings,
@@ -108,6 +111,14 @@ fn main() {
             app.manage(ctx);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running LazyMeet");
+        .build(tauri::generate_context!())
+        .expect("error while building LazyMeet")
+        .run(|_app, event| {
+            // Free the model kept loaded for follow-up questions before the
+            // process exits: the Metal backend aborts on GPU buffers that
+            // are still alive at exit.
+            if let tauri::RunEvent::Exit = event {
+                lazymeet_core::pipeline::release_llm();
+            }
+        });
 }

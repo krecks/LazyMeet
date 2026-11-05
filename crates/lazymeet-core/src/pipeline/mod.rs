@@ -332,6 +332,30 @@ pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String
     native_only(ctx, |_| native_impl::title_from_notes(ctx, notes))
 }
 
+/// Free the summary model kept loaded between questions (call before the
+/// process exits; the Metal backend aborts on live GPU buffers at exit).
+pub fn release_llm() {
+    #[cfg(feature = "native-pipeline")]
+    native::release_llm();
+}
+
+/// Answer a question with the summary model: `build_prompt` gets a check of
+/// whether a prompt still fits the context, streams the answer to `on_delta`
+/// and stops early when `cancel` is set.
+pub fn ask(
+    ctx: &PipelineCtx,
+    system: &str,
+    build_prompt: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+    max_tokens: usize,
+    on_delta: &mut dyn FnMut(&str),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
+    if ctx.fake {
+        return Ok(fake::ask(&build_prompt(&|p| p.chars().count() <= 20_000), on_delta, cancel));
+    }
+    native_only(ctx, |_| native_impl::ask(ctx, system, build_prompt, max_tokens, on_delta, cancel))
+}
+
 /// Prefix of the note stored when summarization fails (the transcript is
 /// kept); anything that reads notes back can tell them from real ones.
 pub const SUMMARY_UNAVAILABLE: &str = "(Automatic summary unavailable";
@@ -440,6 +464,16 @@ mod native_impl {
         unreachable!()
     }
     pub fn title_from_notes(_: &PipelineCtx, _: &str) -> Result<String, String> {
+        unreachable!()
+    }
+    pub fn ask(
+        _: &PipelineCtx,
+        _: &str,
+        _: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+        _: usize,
+        _: &mut dyn FnMut(&str),
+        _: &std::sync::atomic::AtomicBool,
+    ) -> Result<String, String> {
         unreachable!()
     }
 }

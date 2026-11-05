@@ -129,6 +129,11 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("batch prepare check threw: " + e.message);
   }
   try {
+    await checkAskAll(problems, hidden);
+  } catch (e: any) {
+    problems.push("ask-all check threw: " + e.message);
+  }
+  try {
     checkSidebar(problems, hidden);
   } catch (e: any) {
     problems.push("sidebar check threw: " + e.message);
@@ -307,6 +312,18 @@ async function checkNotes(problems: string[]) {
     state.editing = null;
     renderResult(MEETING);
   }
+  // Ask: the block shows for a finished meeting; answers link their times.
+  if (document.getElementById("ask-block")!.classList.contains("hidden")) problems.push("ask block hidden");
+  (document.getElementById("ask-input") as HTMLInputElement).value = "When is the launch?";
+  document.getElementById("ask-form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const cites = [...document.querySelectorAll<HTMLButtonElement>("#qa-list button.cite")];
+  if (cites.map((c) => c.textContent).join(",") !== "00:28,0:52") problems.push(`ask cites: ${cites.map((c) => c.textContent).join(",")}`);
+  if (document.querySelectorAll("#qa-list .qa-a p").length !== 2) problems.push("answer paragraphs");
+  cites[0]?.click(); // jumps to the segment at 0:28 — must not throw
+  if (state.currentMeeting.qa?.length !== 1) problems.push("answer not kept on the meeting");
+  delete state.currentMeeting.qa;
+
   // Regenerate notes opens a panel with the template and language.
   document.getElementById("regen-notes-btn")!.click();
   await new Promise((r) => setTimeout(r, 30));
@@ -430,4 +447,18 @@ async function checkBatchPrepare(problems: string[], hidden: (id: string) => boo
   }
   if (rest.slice(1).some((c) => c.args!.ranges !== null)) problems.push("waiting files not queued whole");
   if (!hidden("prepare")) problems.push("prepare still open after transcribe all");
+}
+
+async function checkAskAll(problems: string[], hidden: (id: string) => boolean) {
+  (document.getElementById("meeting-search") as HTMLInputElement).value = "When is the relaunch?";
+  document.getElementById("search-ask")!.click();
+  await new Promise((r) => setTimeout(r, 20));
+  if (hidden("search-answer")) problems.push("all-meetings answer hidden");
+  const cites = [...document.querySelectorAll<HTMLButtonElement>("#search-answer button.cite")];
+  const labels = cites.map((c) => `${c.textContent}>${c.dataset.meeting}`).join(",");
+  if (labels !== "M2 · 00:28>smoke-meeting,M1 · 12:05>docs-roadmap") problems.push(`ask-all cites: ${labels}`);
+  const named = document.querySelector("#search-answer .cite-title")?.textContent;
+  if (named !== "Weekly sync") problems.push(`bare label not named: ${named}`);
+  (document.getElementById("meeting-search") as HTMLInputElement).value = "";
+  document.getElementById("search-answer")!.classList.add("hidden");
 }

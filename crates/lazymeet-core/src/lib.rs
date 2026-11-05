@@ -8,6 +8,7 @@
 //! implements [`events::Events`] over its event system.
 
 pub mod api;
+pub mod ask;
 pub mod bench;
 pub mod config;
 pub mod error;
@@ -42,6 +43,8 @@ pub struct Ctx {
     pub ffmpeg: Option<PathBuf>,
     /// True while the built-in hardware benchmark runs (one at a time).
     pub bench_running: std::sync::atomic::AtomicBool,
+    /// Questions being answered (their cancel flags).
+    pub ask: ask::AskState,
 }
 
 impl Ctx {
@@ -57,6 +60,7 @@ impl Ctx {
             locks: store::StoreLocks::default(),
             ffmpeg: None,
             bench_running: std::sync::atomic::AtomicBool::new(false),
+            ask: ask::AskState::default(),
         })
     }
 

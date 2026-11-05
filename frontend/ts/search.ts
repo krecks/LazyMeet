@@ -171,10 +171,46 @@ export function hideSearchResults() {
 /// Set by openHit, consumed by the next renderTranscript for that meeting.
 let pendingScrollSeg = null;
 
+/// The segment playing at `seconds` (the last one starting by then).
+export function segmentAt(m, seconds: number): number {
+  let index = 0;
+  (m.segments || []).forEach((seg, i) => {
+    if (seg.start <= seconds + 0.5) index = i;
+  });
+  return index;
+}
+
+/// Scroll to the moment `seconds` of the meeting on screen, flash it, and
+/// play it when the audio is kept.
+export function jumpToTime(m, seconds: number, play = true) {
+  const index = segmentAt(m, seconds);
+  const seg = $("transcript").children[index] as HTMLElement | undefined;
+  if (!seg) return;
+  seg.scrollIntoView({ block: "center", behavior: "smooth" });
+  seg.classList.remove("flash");
+  void seg.offsetWidth;
+  seg.classList.add("flash");
+  if (play) seg.querySelector<HTMLButtonElement>('[aria-label="Play this section"]')?.click();
+}
+
+/// Open a meeting at a moment (a citation in a cross-meeting answer).
+export function openMeetingAt(id: string, seconds: number) {
+  if (state.currentMeeting?.id === id && $("result").offsetParent !== null) {
+    jumpToTime(state.currentMeeting, seconds);
+    return;
+  }
+  pendingScrollSeg = { id, time: seconds };
+  selectMeeting(id);
+}
+
 export function consumePendingScroll(m) {
   if (!pendingScrollSeg || pendingScrollSeg.id !== m.id) return;
-  const { index, query } = pendingScrollSeg;
+  const { index, query, time } = pendingScrollSeg;
   pendingScrollSeg = null;
+  if (time !== undefined) {
+    jumpToTime(m, time, false);
+    return;
+  }
   // Arm the find bar with the same term and make the clicked occurrence the
   // current match, so next/prev carries on from where the user landed.
   $("find-input").value = query;

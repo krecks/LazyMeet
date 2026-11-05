@@ -208,6 +208,19 @@ impl Llm {
         user: &str,
         max_tokens: usize,
     ) -> Result<(String, ChatTiming), String> {
+        self.chat_stream(system, user, max_tokens, &mut |_| {}, None)
+    }
+
+    /// `chat_timed`, handing the answer to `on_delta` as it is written (in
+    /// whole UTF-8 characters) and stopping early once `cancel` is set.
+    pub(super) fn chat_stream(
+        &self,
+        system: &str,
+        user: &str,
+        max_tokens: usize,
+        on_delta: &mut dyn FnMut(&str),
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> Result<(String, ChatTiming), String> {
         let backend = llama_backend()?;
         let template = self.model.chat_template(None).map_err(|e| format!("chat template: {e}"))?;
         let mut prompt = self
@@ -275,7 +288,13 @@ impl Llm {
         // last chunk, which is all `batch` still holds.
         let mut n_cur = tokens.len() as i32;
         let mut n_gen = 0usize;
+        // Bytes of `out` already handed to on_delta (a token can end inside
+        // a multi-byte character; that part waits for the next token).
+        let mut emitted = 0usize;
         loop {
+            if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst)) {
+                break;
+            }
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
             if self.model.is_eog_token(token) || n_gen >= max_tokens {
@@ -284,6 +303,14 @@ impl Llm {
             #[allow(deprecated)]
             if let Ok(bytes) = self.model.token_to_bytes(token, Special::Tokenize) {
                 out.extend(bytes);
+            }
+            let valid = match std::str::from_utf8(&out[emitted..]) {
+                Ok(s) => s.len(),
+                Err(e) => e.valid_up_to(),
+            };
+            if valid > 0 {
+                on_delta(std::str::from_utf8(&out[emitted..emitted + valid]).unwrap_or(""));
+                emitted += valid;
             }
             batch.clear();
             batch.add(token, n_cur, &[0], true).map_err(|e| e.to_string())?;
@@ -392,6 +419,72 @@ fn parse_summary(content: &str) -> Summary {
     }
 }
 
+/// One model on the GPU at a time: summaries, titles and questions take
+/// this lock for as long as they hold a loaded model.
+static LLM_LOCK: Mutex<()> = Mutex::new(());
+
+/// The model questions keep loaded between follow-ups: (model id, provider,
+/// model, last used). Dropped after `CACHE_IDLE`, when the settings pick
+/// another model, and before a summary loads its own copy.
+#[allow(clippy::type_complexity)]
+static ASK_CACHE: Mutex<Option<(String, String, Llm, std::time::Instant)>> = Mutex::new(None);
+const CACHE_IDLE: std::time::Duration = std::time::Duration::from_secs(120);
+
+fn evict_ask_cache() {
+    ASK_CACHE.lock().unwrap_or_else(|e| e.into_inner()).take();
+}
+
+/// Free the cached model (app exit). Waits for a question in progress.
+pub fn release_llm() {
+    let _gpu = LLM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    evict_ask_cache();
+}
+
+/// Answer `build_prompt`'s question, streaming to `on_delta`. The prompt
+/// builder gets a `fits` check in real tokens, so it can fill the context
+/// with as much transcript as there is room for.
+pub fn ask(
+    ctx: &PipelineCtx,
+    system: &str,
+    build_prompt: &dyn Fn(&dyn Fn(&str) -> bool) -> String,
+    max_tokens: usize,
+    on_delta: &mut dyn FnMut(&str),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
+    let _gpu = LLM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let key = (ctx.config.summary_model(), ctx.config.summary_provider());
+    let mut cache = ASK_CACHE.lock().unwrap();
+    if cache.as_ref().is_none_or(|(m, p, _, _)| (m, p) != (&key.0, &key.1)) {
+        *cache = None; // free the old one before loading the next
+        *cache = Some((key.0.clone(), key.1.clone(), Llm::load(ctx)?, std::time::Instant::now()));
+        start_cache_janitor();
+    }
+    let (_, _, llm, used) = cache.as_mut().expect("loaded above");
+    *used = std::time::Instant::now();
+    let budget = (llm.n_ctx as usize).saturating_sub(max_tokens + 600).max(512);
+    let fits = |text: &str| llm.count_tokens(text) <= budget;
+    let user = build_prompt(&fits);
+    let (answer, _) = llm.chat_stream(system, &user, max_tokens, on_delta, Some(cancel))?;
+    *used = std::time::Instant::now();
+    Ok(strip_thinking(&answer))
+}
+
+/// Once per process: a thread that drops the cached model when idle.
+fn start_cache_janitor() {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_secs(20));
+            // try_lock: a question in progress is using it — not idle.
+            if let Ok(mut cache) = ASK_CACHE.try_lock() {
+                if cache.as_ref().is_some_and(|(_, _, _, used)| used.elapsed() > CACHE_IDLE) {
+                    *cache = None;
+                }
+            }
+        });
+    });
+}
+
 /// Long meetings are chunked to fit the context window (map-reduce: summarize
 /// each chunk to notes, then summarize the notes). The final answer is strict
 /// JSON parsed defensively.
@@ -400,6 +493,8 @@ pub fn summarize(
     segments: &[MergedSegment],
     speakers: &Map<String, Value>,
 ) -> Result<Summary, String> {
+    let _gpu = LLM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    evict_ask_cache();
     let llm = Llm::load(ctx)?;
     let lines = transcript_lines(segments, speakers);
     let budget = (llm.n_ctx as usize).saturating_sub(RESERVE).max(1024);
@@ -437,6 +532,8 @@ pub fn summarize(
 /// A title from a meeting's existing notes: a short prompt and a ~20-token
 /// answer, so a few seconds even on the CPU.
 pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String> {
+    let _gpu = LLM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    evict_ask_cache();
     let llm = Llm::load(ctx)?;
     let notes = llm.truncate_to_tokens(notes, 3000);
     let lang = lang_instruction(ctx, &notes);

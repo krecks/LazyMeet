@@ -171,8 +171,11 @@
         <section id="search-results" class="hidden search-results">
           <div class="search-head">
             <h2 id="search-summary" class="serif" aria-live="polite"></h2>
+            <button id="search-ask" class="btn ghost" type="button"
+              title="Answer the search text as a question, from all your meetings"><span>Ask across meetings</span></button>
             <button id="search-clear" class="btn ghost" type="button"><span>Clear</span></button>
           </div>
+          <div id="search-answer" class="search-answer hidden" aria-live="polite"></div>
           <div id="search-groups"></div>
         </section>
 
@@ -242,6 +245,19 @@
               <ul id="action-items" class="note-list actions"></ul>
             </div>
             <p id="timings-note" class="timings-note hidden"></p>
+          </section>
+
+          <section id="ask-block" class="ask-block hidden" aria-label="Ask about this meeting">
+            <div class="note-head"><h3>Ask</h3></div>
+            <div id="qa-list" class="qa-list" aria-live="polite"></div>
+            <form id="ask-form" class="ask-form">
+              <input id="ask-input" type="text" maxlength="1000" autocomplete="off"
+                placeholder="Ask about this meeting — e.g. What did we decide about the launch date?"
+                aria-label="Question about this meeting" />
+              <button id="ask-btn" class="btn" type="submit">Ask</button>
+              <button id="ask-stop" class="btn ghost hidden" type="button">Stop</button>
+            </form>
+            <p class="muted small ask-note">Answered on this computer by the summary model, from the transcript. Times in an answer jump to that moment.</p>
           </section>
 
           <section class="transcript-section">

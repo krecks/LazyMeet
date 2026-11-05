@@ -135,6 +135,32 @@ pub fn summary_for(config: &crate::config::Config) -> Summary {
     out
 }
 
+/// A canned answer that quotes the question and cites the first transcript
+/// time in the prompt, streamed word by word.
+pub fn ask(
+    prompt: &str,
+    on_delta: &mut dyn FnMut(&str),
+    cancel: &std::sync::atomic::AtomicBool,
+) -> String {
+    let question = prompt.rsplit("Question: ").next().unwrap_or("").trim();
+    let cite = prompt
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix('[').and_then(|r| r.split_once(']')).map(|(t, _)| t.to_string())
+        })
+        .unwrap_or_else(|| "00:00".into());
+    let answer = format!("About \"{question}\": the team agreed on the plan [{cite}].");
+    let mut out = String::new();
+    for word in answer.split_inclusive(' ') {
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+        on_delta(word);
+        out.push_str(word);
+    }
+    out
+}
+
 /// Write a tiny valid (silent) 16 kHz mono 16-bit WAV so downstream stubs have
 /// a real file.
 pub fn write_silent_wav(out_wav: &Path) -> std::io::Result<()> {

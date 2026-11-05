@@ -5,6 +5,7 @@
 import { $, STAGES, call } from "./core";
 import { exportMeeting, pickExportFormat } from "./exports";
 import { type NotesChoice, openRegenPanel } from "./notesopts";
+import { renderAsk } from "./ask";
 import {
   confirmThen,
   disarm,
@@ -207,6 +208,7 @@ export function renderResult(m) {
   renderNoteList(shown, "takeaways", "takeaways", editable);
   renderNoteList(shown, "action-items", "action_items", editable);
   renderTimings(viewed ? null : m.timings);
+  renderAsk(m, !!viewed);
 
   const colorOf = buildColorMap(shown.segments || []);
   renderLegend(shown, colorOf, !!viewed);

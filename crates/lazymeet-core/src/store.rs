@@ -209,6 +209,18 @@ pub fn patch_meeting(
     Ok(Some(record))
 }
 
+/// Append a question-and-answer to a meeting, keeping the newest `max`.
+/// Not part of the meeting's versions: asking doesn't change its content.
+pub fn push_qa(paths: &Paths, locks: &StoreLocks, meeting_id: &str, entry: Value, max: usize) {
+    let _g = locks.meetings.lock().unwrap();
+    let Some(mut record) = get_meeting_unlocked(paths, meeting_id) else { return };
+    let mut qa = record.get("qa").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    qa.push(entry);
+    let skip = qa.len().saturating_sub(max);
+    record.insert("qa".into(), Value::Array(qa.into_iter().skip(skip).collect()));
+    let _ = atomic_write_json(&meeting_path(paths, meeting_id), &Value::Object(record));
+}
+
 /// Most tags a meeting carries, and the longest tag.
 pub const MAX_TAGS: usize = 20;
 pub const MAX_TAG_CHARS: usize = 32;

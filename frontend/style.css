@@ -540,6 +540,42 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .bulk-count { font-size: 0.8rem; font-weight: 600; margin-right: auto; }
 .bulk-bar input { flex: 1 1 100%; order: 1; font-size: 0.82rem; }
 .btn.small { padding: 0.28rem 0.6rem; font-size: 0.8rem; }
+/* Ask */
+.ask-block { margin: 1.4rem 0 0.4rem; }
+.qa-list { display: flex; flex-direction: column; gap: 0.9rem; margin-bottom: 0.8rem; }
+.qa-item { border-left: 2px solid var(--accent); padding: 0.1rem 0 0.1rem 0.9rem; }
+.qa-q { margin: 0 0 0.3rem; font-weight: 600; font-size: 0.92rem; }
+.qa-a p { margin: 0 0 0.45rem; line-height: 1.55; }
+.qa-item.pending .qa-a::after { content: "▍"; color: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.ask-form { display: flex; gap: 0.5rem; }
+.ask-form input { flex: 1; }
+.ask-note { margin: 0.45rem 0 0; }
+button.cite {
+  font: inherit;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  padding: 0 0.35rem;
+  margin: 0 0.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  vertical-align: 0.05em;
+}
+button.cite:hover { border-color: var(--accent); }
+.cite-title { font-style: italic; }
+.search-answer {
+  margin: 0 0 1.2rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.search-answer .btn { align-self: flex-start; }
 .seg-tools { display: flex; gap: 1rem; margin: 0.3rem 0 0.1rem; font-size: 0.8rem; }
 .folder-path {
   max-width: 22rem;
