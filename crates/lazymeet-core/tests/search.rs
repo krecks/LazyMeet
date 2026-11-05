@@ -268,9 +268,21 @@ fn hits_per_meeting_are_capped_but_the_count_is_honest() {
 #[test]
 fn meetings_still_processing_match_on_their_title() {
     let app = TestApp::fake();
-    let mid = app.upload("Arbeitspaket Review.mp4", b"fake video bytes");
+    // A queued record with no job behind it: an upload would race the fake
+    // pipeline, which finishes in milliseconds and replaces the filename
+    // with the generated title.
+    let record = store::create_meeting(
+        &app.ctx.paths,
+        &app.ctx.locks,
+        "Arbeitspaket Review.mp4",
+        -1,
+        None,
+        None,
+    )
+    .unwrap();
+    let mid = record["id"].as_str().unwrap();
     let results = search(&app, "arbeitspaket");
-    let group = group_for(&results, &mid);
+    let group = group_for(&results, mid);
     assert_eq!(group["hits"][0]["kind"], "title");
     // title defaults to the upload filename before the run finishes
     assert_eq!(group["hits"][0]["text"], "Arbeitspaket Review.mp4");

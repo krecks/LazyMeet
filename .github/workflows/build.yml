@@ -158,9 +158,11 @@ jobs:
   release:
     # Publish whatever platforms built — one failed platform must not block
     # the others' installers. Re-running the tag later updates the same
-    # release with the missing assets.
-    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
-    needs: build
+    # release with the missing assets. But never without tests passing or
+    # with nothing to attach: `!cancelled()` alone also ran when the tests
+    # failed and every build was skipped, publishing an empty "Latest".
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.test.result == 'success'
+    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -169,6 +171,13 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: artifacts
+
+      - name: Require at least one installer
+        run: |
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.dmg artifacts/**/*.msi artifacts/**/*.exe artifacts/**/*.AppImage artifacts/**/*.deb)
+          echo "installers: ${#files[@]}"
+          [ ${#files[@]} -gt 0 ] || { echo "::error::no installers were built"; exit 1; }
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
