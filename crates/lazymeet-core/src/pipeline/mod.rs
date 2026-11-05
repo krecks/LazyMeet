@@ -70,6 +70,11 @@ impl NoteItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Summary {
+    /// A short meeting title (3-8 words) naming what the meeting was about;
+    /// empty when the model gave none. Replaces the filename unless the user
+    /// renamed the meeting themselves.
+    #[serde(default)]
+    pub title: String,
     /// The at-a-glance paragraph (2-3 sentences).
     pub summary: String,
     /// The detailed narrative; empty on records from before it existed.
@@ -317,6 +322,47 @@ pub fn summarize(
     native_only(ctx, |_| native_impl::summarize(ctx, segments, speakers))
 }
 
+/// A title for a meeting that already has notes, from those notes alone (a
+/// few seconds: no transcript pass). Used to retitle meetings processed
+/// before titles were generated.
+pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String> {
+    if ctx.fake {
+        return Ok(fake::summary().title);
+    }
+    native_only(ctx, |_| native_impl::title_from_notes(ctx, notes))
+}
+
+/// Longest title we keep from the model; the edit field allows 200.
+const MAX_TITLE_CHARS: usize = 80;
+
+/// Normalize a model-written title: first line only, no "Title:" label, no
+/// wrapping quotes/markdown, no trailing period, and a sane length (cut at a
+/// word boundary). Empty when nothing usable is left.
+pub fn clean_title(raw: &str) -> String {
+    let line = raw.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let mut t = line;
+    for prefix in ["title:", "titel:", "meeting title:"] {
+        // `get` (not slicing): the cut may fall inside a multi-byte char.
+        if t.get(..prefix.len()).is_some_and(|head| head.eq_ignore_ascii_case(prefix)) {
+            t = t[prefix.len()..].trim_start();
+        }
+    }
+    let quotes: &[char] = &['"', '\'', '*', '#', '`', '“', '”', '„', '«', '»', '‘', '’'];
+    let t = t.trim_matches(|c: char| quotes.contains(&c) || c.is_whitespace());
+    let t = t.trim_end_matches(['.', ':', ';', ',']).trim();
+    let t: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    if t.chars().count() <= MAX_TITLE_CHARS {
+        return t;
+    }
+    let cut: String = t.chars().take(MAX_TITLE_CHARS).collect();
+    match cut.rfind(' ') {
+        Some(i) if i > MAX_TITLE_CHARS / 2 => {
+            cut[..i].trim_end_matches([',', '-', '–', ':']).trim().into()
+        }
+        _ => cut,
+    }
+}
+
 #[cfg(feature = "native-pipeline")]
 use native as native_impl;
 
@@ -384,6 +430,9 @@ mod native_impl {
         _: &[MergedSegment],
         _: &Map<String, Value>,
     ) -> Result<Summary, String> {
+        unreachable!()
+    }
+    pub fn title_from_notes(_: &PipelineCtx, _: &str) -> Result<String, String> {
         unreachable!()
     }
 }

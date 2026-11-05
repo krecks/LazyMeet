@@ -23,7 +23,8 @@ fn title_rename_flows_everywhere() {
     let app = TestApp::fake();
     let meeting = process_meeting(&app, "edit.mp4");
     let mid = meeting["id"].as_str().unwrap();
-    assert_eq!(meeting["title"], "edit.mp4"); // defaults to the upload filename
+    // processing names it from the notes (see tests/titles.rs)
+    assert_eq!(meeting["title"], "Transcription pipeline sync");
 
     let updated =
         api::patch_meeting(&app.ctx, mid, &changes("title", json!("  Weekly Standup  "))).unwrap();

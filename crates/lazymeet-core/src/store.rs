@@ -344,6 +344,31 @@ fn rename_in_notes(record: &mut Record, old: &str, new: &str) {
     }
 }
 
+/// Whether a generated title may replace the meeting's current one: never
+/// once the user named it. `title_by_user` is true after a rename and false
+/// after an automatic title; records from before the flag count as named by
+/// the user exactly when their title differs from the filename.
+pub fn title_is_auto(record: &Record) -> bool {
+    if let Some(by_user) = record.get("title_by_user").and_then(|v| v.as_bool()) {
+        return !by_user;
+    }
+    let title = record.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let filename = record.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+    title.is_empty() || title == filename
+}
+
+/// The record changes that apply a generated title, if it may be applied.
+pub fn auto_title_changes(record: &Record, title: &str) -> Option<Map<String, Value>> {
+    let title = title.trim();
+    if title.is_empty() || !title_is_auto(record) {
+        return None;
+    }
+    let mut changes = Map::new();
+    changes.insert("title".into(), json!(title));
+    changes.insert("title_by_user".into(), json!(false));
+    Some(changes)
+}
+
 /// One notes list normalized to `[{short, detail}]`.
 ///
 /// Records written before the short/detail split store plain strings, and the

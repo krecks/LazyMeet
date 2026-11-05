@@ -57,7 +57,7 @@ use diarize::{new_extractor, speaker_embedding};
 pub use asr::transcribe;
 pub use bench::{bench_llm, bench_wav, transcribe_clips, LlmBench};
 pub use diarize::diarize;
-pub use llm::summarize;
+pub use llm::{summarize, title_from_notes};
 
 const SAMPLE_RATE: u32 = 16000;
 

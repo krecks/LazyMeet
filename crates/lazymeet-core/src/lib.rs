@@ -77,6 +77,7 @@ pub fn startup(ctx: &Arc<Ctx>) -> std::io::Result<()> {
     sweep_stale_files(ctx);
     models::ensure_models_async(ctx);
     jobs::sweep_orphans(ctx);
+    jobs::queue_title_backfill(ctx);
     Ok(())
 }
 

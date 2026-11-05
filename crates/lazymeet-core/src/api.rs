@@ -371,6 +371,8 @@ pub fn patch_meeting(ctx: &Ctx, meeting_id: &str, fields: &Map<String, Value>) -
             return Err(ApiError::invalid("title must be 1-200 characters"));
         }
         changes.insert("title".into(), json!(title));
+        // From now on generated titles leave it alone.
+        changes.insert("title_by_user".into(), json!(true));
     }
     let mut content_edit = false;
     for key in ["summary", "summary_long"] {

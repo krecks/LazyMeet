@@ -69,6 +69,10 @@ pub enum Job {
     Retranscribe,
     /// Summarization only, over the existing transcript.
     Resummarize,
+    /// Title only, from a finished meeting's existing notes (meetings
+    /// processed before titles were generated). Runs on a "done" meeting and
+    /// leaves its status alone.
+    Title,
 }
 
 #[derive(Default)]
@@ -118,9 +122,12 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
         while let Some((meeting_id, job)) = queue.pop_front() {
             // Skip entries deleted while they waited.
             let record = store::get_meeting(&ctx.paths, &ctx.locks, &meeting_id);
-            let queued = record.as_ref().and_then(|r| r.get("status")).and_then(|v| v.as_str())
-                == Some("queued");
-            if queued {
+            let status = record.as_ref().and_then(|r| r.get("status")).and_then(|v| v.as_str());
+            let runnable = match job {
+                Job::Title => status == Some("done"),
+                _ => status == Some("queued"),
+            };
+            if runnable {
                 *active = Some(meeting_id.clone());
                 picked = Some((meeting_id, job));
                 break;
@@ -371,6 +378,14 @@ pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
             None => Err("the recording is no longer on disk".into()),
         },
         Job::Resummarize => resummarize(ctx, meeting_id, &pctx, &config, &record),
+        Job::Title => {
+            // Best effort: a failure keeps the filename and must not turn a
+            // finished meeting into an error.
+            if let Err(exc) = retitle(ctx, meeting_id, &pctx) {
+                eprintln!("[lazymeet] title for {meeting_id} failed: {exc}");
+            }
+            Ok(())
+        }
     };
 
     if let Err(exc) = result {
@@ -380,6 +395,65 @@ pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
             false,
             obj(&[("status", json!("error")), ("error", json!(exc)), ("rejob", Value::Null)]),
         );
+    }
+}
+
+/// The title changes for a freshly generated `title`, checked against the
+/// record as it is NOW: the user may have renamed the meeting while the job
+/// ran, and their name wins.
+fn generated_title(ctx: &Ctx, meeting_id: &str, title: &str) -> Map<String, Value> {
+    store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
+        .and_then(|current| store::auto_title_changes(&current, title))
+        .unwrap_or_default()
+}
+
+/// The text a title-only pass reads: the notes, which already distill the
+/// meeting. None when there are no real notes to go on.
+fn notes_for_title(record: &store::Record) -> Option<String> {
+    let text = |k: &str| record.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let summary = text("summary");
+    if summary.is_empty() || summary.starts_with("(Automatic summary unavailable") {
+        return None;
+    }
+    let mut out = vec![summary, text("summary_long")];
+    for key in ["takeaways", "action_items"] {
+        for item in store::note_items(record.get(key)) {
+            out.push(format!("- {}", store::note_text(&item)));
+        }
+    }
+    Some(out.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n"))
+}
+
+/// Title-only job: name a finished meeting from its notes.
+fn retitle(ctx: &Arc<Ctx>, meeting_id: &str, pctx: &PipelineCtx) -> Result<(), String> {
+    let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id).unwrap_or_default();
+    if !store::title_is_auto(&record) {
+        return Ok(());
+    }
+    let Some(notes) = notes_for_title(&record) else { return Ok(()) };
+    let title = pipeline::title_from_notes(pctx, &notes)?;
+    let changes = generated_title(ctx, meeting_id, &title);
+    if !changes.is_empty() {
+        update_and_emit(ctx, meeting_id, false, changes);
+    }
+    Ok(())
+}
+
+/// On launch, queue a title-only pass for finished meetings still named
+/// after their file. Behind any real work in the queue, a few seconds each.
+pub fn queue_title_backfill(ctx: &Arc<Ctx>) {
+    for item in store::list_meetings(&ctx.paths, &ctx.locks) {
+        if item.get("status").and_then(|v| v.as_str()) != Some("done") {
+            continue;
+        }
+        let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
+        let Some(record) = store::get_meeting(&ctx.paths, &ctx.locks, id) else { continue };
+        if store::title_is_auto(&record)
+            && record.get("title_by_user").and_then(|v| v.as_bool()).is_none()
+            && notes_for_title(&record).is_some()
+        {
+            dispatch(ctx, id.to_string(), Job::Title);
+        }
     }
 }
 
@@ -512,22 +586,19 @@ fn run_full(
         json!(config.summary_model()),
         snapshot,
     );
-    update_and_emit(
-        ctx,
-        meeting_id,
-        false,
-        obj(&[
-            ("status", json!("done")),
-            ("summary", json!(summary.summary)),
-            ("summary_long", json!(summary.summary_long)),
-            ("takeaways", json!(summary.takeaways)),
-            ("action_items", json!(summary.action_items)),
-            ("timings", timings.to_value()),
-            ("error", Value::Null),
-            ("rejob", Value::Null),
-            ("versions", versions),
-        ]),
-    );
+    let mut done = obj(&[
+        ("status", json!("done")),
+        ("summary", json!(summary.summary)),
+        ("summary_long", json!(summary.summary_long)),
+        ("takeaways", json!(summary.takeaways)),
+        ("action_items", json!(summary.action_items)),
+        ("timings", timings.to_value()),
+        ("error", Value::Null),
+        ("rejob", Value::Null),
+        ("versions", versions),
+    ]);
+    done.extend(generated_title(ctx, meeting_id, &summary.title));
+    update_and_emit(ctx, meeting_id, false, done);
 
     // The extracted WAV is a processing intermediate either way. With
     // KEEP_AUDIO (default) only the audio stays for segment playback:
@@ -597,21 +668,18 @@ fn resummarize(
         "speakers": Value::Object(speakers.clone()),
     });
     let versions = versions_with(record, "notes", asr, json!(config.summary_model()), snapshot);
-    update_and_emit(
-        ctx,
-        meeting_id,
-        false,
-        obj(&[
-            ("status", json!("done")),
-            ("summary", json!(result.summary)),
-            ("summary_long", json!(result.summary_long)),
-            ("takeaways", json!(result.takeaways)),
-            ("action_items", json!(result.action_items)),
-            ("timings", timings.to_value()),
-            ("error", Value::Null),
-            ("rejob", Value::Null),
-            ("versions", versions),
-        ]),
-    );
+    let mut done = obj(&[
+        ("status", json!("done")),
+        ("summary", json!(result.summary)),
+        ("summary_long", json!(result.summary_long)),
+        ("takeaways", json!(result.takeaways)),
+        ("action_items", json!(result.action_items)),
+        ("timings", timings.to_value()),
+        ("error", Value::Null),
+        ("rejob", Value::Null),
+        ("versions", versions),
+    ]);
+    done.extend(generated_title(ctx, meeting_id, &result.title));
+    update_and_emit(ctx, meeting_id, false, done);
     Ok(())
 }

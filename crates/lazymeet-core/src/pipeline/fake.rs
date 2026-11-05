@@ -91,6 +91,7 @@ pub fn voiceprints(turns: &[Turn]) -> Voiceprints {
 pub fn summary() -> Summary {
     use super::NoteItem;
     Summary {
+        title: "Transcription pipeline sync".into(),
         summary: "Weekly sync covering the transcription pipeline. The diarization step is \
                   complete and the speaker library is the remaining item before Friday."
             .into(),
