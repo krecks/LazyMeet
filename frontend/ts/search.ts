@@ -26,6 +26,7 @@ const SNIPPET_PAD = 60; // characters of context kept either side of the hit
 
 const HIT_KINDS = {
   title: "Title",
+  tag: "Tag",
   speaker: "Speaker",
   summary: "Summary",
   takeaway: "Key takeaway",

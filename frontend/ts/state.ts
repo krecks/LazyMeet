@@ -13,6 +13,13 @@ export const state = {
   modelsReady: false as boolean,
   pendingMeeting: null as any,
   searchQuery: "" as string,
+  /// Sidebar multi-select: ids, the Shift-click anchor, and whether the
+  /// "Select" toggle shows checkboxes.
+  selected: new Set<string>(),
+  selectAnchor: null as string | null,
+  selectMode: false as boolean,
+  /// Sidebar tag filter: meetings must carry every tag in it.
+  tagFilter: new Set<string>(),
   setupReadyResolve: null as (() => void) | null,
   uploading: false as boolean,
   viewingVersion: null as number | null,

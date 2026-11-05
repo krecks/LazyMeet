@@ -232,6 +232,21 @@ pub async fn reprocess_meeting(
     api::reprocess_meeting(&ctx, &meeting_id, &mode)
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn delete_meetings(ctx: State<'_, App>, meeting_ids: Vec<String>) -> ApiResult<Value> {
+    api::delete_meetings(&ctx, &meeting_ids)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn tag_meetings(
+    ctx: State<'_, App>,
+    meeting_ids: Vec<String>,
+    add: Vec<String>,
+    remove: Vec<String>,
+) -> ApiResult<Value> {
+    api::tag_meetings(&ctx, &meeting_ids, &add, &remove)
+}
+
 /// Export = build the file in core (`format`: md, txt, srt, vtt, json, docx,
 /// pdf), then a native save dialog. Returns the written path, or null when
 /// the user cancelled.

@@ -207,6 +207,56 @@ pub fn patch_meeting(
     Ok(Some(record))
 }
 
+/// Most tags a meeting carries, and the longest tag.
+pub const MAX_TAGS: usize = 20;
+pub const MAX_TAG_CHARS: usize = 32;
+
+/// One tag as stored: trimmed, inner whitespace collapsed, at most
+/// `MAX_TAG_CHARS`; None when nothing is left.
+pub fn clean_tag(tag: &str) -> Option<String> {
+    let tag = tag.split_whitespace().collect::<Vec<_>>().join(" ");
+    if tag.is_empty() {
+        return None;
+    }
+    Some(tag.chars().take(MAX_TAG_CHARS).collect())
+}
+
+/// A record's tags, cleaned: strings only, duplicates dropped ignoring case
+/// (the first spelling wins), at most `MAX_TAGS`. Missing = no tags.
+pub fn tags(value: Option<&Value>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in value.and_then(|v| v.as_array()).into_iter().flatten() {
+        let Some(tag) = tag.as_str().and_then(clean_tag) else { continue };
+        if out.len() < MAX_TAGS && !out.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+            out.push(tag);
+        }
+    }
+    out
+}
+
+/// Add and remove tags on one meeting under the lock (removal ignores case).
+/// None if the meeting is gone. Works in any status, like a rename.
+pub fn edit_tags(
+    paths: &Paths,
+    locks: &StoreLocks,
+    meeting_id: &str,
+    add: &[String],
+    remove: &[String],
+) -> Option<Record> {
+    let _g = locks.meetings.lock().unwrap();
+    let mut record = get_meeting_unlocked(paths, meeting_id)?;
+    let remove: Vec<String> = remove.iter().map(|t| t.trim().to_lowercase()).collect();
+    let mut next: Vec<Value> = tags(record.get("tags"))
+        .into_iter()
+        .filter(|t| !remove.contains(&t.to_lowercase()))
+        .map(Value::from)
+        .collect();
+    next.extend(add.iter().map(|t| Value::from(t.as_str())));
+    record.insert("tags".into(), json!(tags(Some(&Value::Array(next)))));
+    let _ = atomic_write_json(&meeting_path(paths, meeting_id), &Value::Object(record.clone()));
+    Some(record)
+}
+
 /// Edit one transcript segment in place, under the lock.
 ///
 /// Reassigning a speaker deliberately leaves `speakers` and `voiceprints`
@@ -605,6 +655,7 @@ pub fn list_meetings(paths: &Paths, locks: &StoreLocks) -> Vec<Record> {
         item.insert("title".into(), title);
         item.insert("status".into(), rec.get("status").cloned().unwrap_or(Value::Null));
         item.insert("created_at".into(), rec.get("created_at").cloned().unwrap_or(Value::Null));
+        item.insert("tags".into(), json!(tags(rec.get("tags"))));
         let (duration, speaker_count) = transcript_stats(&rec);
         item.insert("duration".into(), json!(duration));
         item.insert("speaker_count".into(), json!(speaker_count));
@@ -686,6 +737,12 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
         let n = occurrences(title);
         if n > 0 {
             push(json!({"kind": "title", "text": title}), n, &mut hits, &mut count, &mut rows);
+        }
+        for tag in tags(rec.get("tags")) {
+            let n = occurrences(&tag);
+            if n > 0 {
+                push(json!({"kind": "tag", "text": tag}), n, &mut hits, &mut count, &mut rows);
+            }
         }
         for (id, name) in speakers.into_iter().flatten() {
             let Some(name) = name.as_str() else { continue };
@@ -834,6 +891,7 @@ pub fn public_meeting(paths: &Paths, record: &Record) -> Record {
     for key in ["takeaways", "action_items"] {
         out.insert(key.into(), Value::Array(note_items(record.get(key))));
     }
+    out.insert("tags".into(), json!(tags(record.get("tags"))));
     if !out.get("summary_long").is_some_and(|v| v.is_string()) {
         out.insert("summary_long".into(), json!(""));
     }

@@ -131,13 +131,33 @@
 
         <div class="side-head">
           <h2>Meetings</h2>
+          <div class="side-tools">
+            <button id="sort-btn" class="link-btn" type="button" aria-haspopup="menu" title="Sort meetings">
+              <span id="sort-label">Newest first</span>
+              <svg class="icon"><use href="#i-chev-down" /></svg>
+            </button>
+            <button id="select-btn" class="link-btn" type="button" aria-pressed="false"
+              title="Select several meetings (or ⌘/Ctrl-click, Shift-click)">Select</button>
+          </div>
         </div>
         <div class="search-field">
           <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
           <input id="meeting-search" type="search" placeholder="Search meetings and transcripts"
             aria-label="Search meetings and transcripts" />
         </div>
+        <div id="tag-filter" class="tag-filter hidden" role="group" aria-label="Filter by tag"></div>
         <ul id="meeting-list" class="meeting-list"></ul>
+        <div id="bulk-bar" class="bulk-bar hidden" role="toolbar" aria-label="Selected meetings">
+          <span id="bulk-count" class="bulk-count"></span>
+          <input id="bulk-tag-input" class="hidden" type="text" maxlength="32" placeholder="New tag, then Enter"
+            aria-label="New tag for the selected meetings" />
+          <button id="bulk-tag" class="btn ghost small" type="button" aria-haspopup="menu">Tag</button>
+          <button id="bulk-export" class="btn ghost small" type="button" aria-haspopup="menu">Export</button>
+          <button id="bulk-delete" class="btn danger small" type="button">Delete</button>
+          <button id="bulk-clear" class="icon-btn subtle" type="button" title="Clear selection" aria-label="Clear selection">
+            <svg class="icon"><use href="#i-x" /></svg>
+          </button>
+        </div>
       </aside>
 
       <main class="content">
@@ -171,6 +191,8 @@
               </button>
             </div>
             <p id="result-meta" class="muted small"></p>
+            <div id="result-tags" class="result-tags" role="group" aria-label="Tags"></div>
+            <datalist id="tag-names"></datalist>
             <div class="toolbar-actions">
               <button id="copy-notes-btn" class="btn ghost">
                 <svg class="icon"><use href="#i-copy" /></svg><span>Copy notes</span>

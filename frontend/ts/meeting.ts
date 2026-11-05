@@ -15,7 +15,7 @@ import {
   showToast,
   wireEditorKeys,
 } from "./helpers";
-import { refreshMeetings, renderMeetingList } from "./meetings";
+import { allTags, refreshMeetings, renderMeetingList } from "./meetings";
 import { copyText, noteDetail, noteLine, notesAsText, releasePlayer, transcriptAsText } from "./player";
 import { hideSearchResults, searchOpen } from "./search";
 import { state } from "./state";
@@ -33,7 +33,7 @@ export function selectMeeting(id) {
   showActiveMeeting();
 }
 
-function showEmpty() {
+export function showEmpty() {
   state.activeId = null;
   state.currentMeeting = null;
   state.editing = null;
@@ -147,6 +147,7 @@ export function renderResult(m) {
     (rangeCount ? ` · transcribed ${rangeCount} selected segment${rangeCount === 1 ? "" : "s"}` : "");
   $("result-title").onclick = startTitleEdit;
   $("title-edit-btn").onclick = startTitleEdit;
+  renderTags(m);
 
   // Wire the toolbar first so Delete/Export always work — even for an errored
   // meeting with nothing else to show.
@@ -587,3 +588,62 @@ async function saveList(field, items, viaFinishEdit = false) {
   }
 }
 
+
+// --------------------------------------------------------------------------
+// Tags on the open meeting
+// --------------------------------------------------------------------------
+
+/// Chips with a remove button, plus an input that suggests existing tags.
+/// Tags aren't versioned, so they stay editable on any version and status.
+function renderTags(m) {
+  const wrap = $("result-tags");
+  wrap.innerHTML = "";
+  for (const tag of m.tags || []) {
+    const chip = el("span", "tag-chip static");
+    const label = el("span");
+    label.textContent = tag;
+    chip.appendChild(label);
+    chip.appendChild(
+      iconBtn("i-x", `Remove tag ${tag}`, () => saveTags(m.id, (m.tags || []).filter((t) => t !== tag)), "tag-remove")
+    );
+    wrap.appendChild(chip);
+  }
+  const input = el("input", "tag-input");
+  input.type = "text";
+  input.maxLength = 32;
+  input.placeholder = (m.tags || []).length ? "Add tag" : "Add a tag";
+  input.setAttribute("aria-label", "Add a tag to this meeting");
+  input.setAttribute("list", "tag-names");
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) {
+      saveTags(m.id, [...(m.tags || []), input.value.trim()]);
+    } else if (e.key === "Escape") {
+      input.value = "";
+      input.blur();
+    }
+  });
+  wrap.appendChild(input);
+  const names = $("tag-names");
+  names.innerHTML = "";
+  const own = new Set((m.tags || []).map((t) => t.toLocaleLowerCase()));
+  for (const { tag } of allTags(state.meetings)) {
+    if (own.has(tag.toLocaleLowerCase())) continue;
+    const opt = document.createElement("option");
+    opt.value = tag;
+    names.appendChild(opt);
+  }
+}
+
+async function saveTags(meetingId: string, tags: string[]) {
+  try {
+    const m = await call("patch_meeting", { meeting_id: meetingId, fields: { tags } });
+    if (state.currentMeeting?.id === meetingId) {
+      state.currentMeeting.tags = m.tags;
+      renderTags(state.currentMeeting);
+      ($("result-tags").querySelector(".tag-input") as HTMLInputElement | null)?.focus();
+    }
+    await refreshMeetings();
+  } catch (e) {
+    showToast(`Couldn't save tags: ${e.message}`);
+  }
+}

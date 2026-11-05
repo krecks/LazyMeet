@@ -5,7 +5,9 @@ import { closePrepare, openPrepare } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings, openSpeakers } from "../ts/settings";
 import { renderResult, selectMeeting } from "../ts/meeting";
-import { DOCS_MEETING_ID } from "./docs";
+import { DOCS_MEETING_ID, docsMeetings } from "./docs";
+import { currentSort, dateGroup, renderMeetingList } from "../ts/meetings";
+import { prefs } from "../ts/helpers";
 import { state } from "../ts/state";
 import { LIMITS } from "./fixtures";
 import { calls } from "./tauri-api";
@@ -120,6 +122,11 @@ export async function runSmokeChecks(): Promise<void> {
     checkNotes(problems);
   } catch (e: any) {
     problems.push("notes check threw: " + e.message);
+  }
+  try {
+    checkSidebar(problems, hidden);
+  } catch (e: any) {
+    problems.push("sidebar check threw: " + e.message);
   }
   if (location.hash === "#bench") {
     try {
@@ -287,4 +294,51 @@ function checkNotes(problems: string[]) {
   if (document.querySelector(".menu")) problems.push("Escape did not close the menu");
   state.activeId = null;
   state.currentMeeting = null;
+}
+
+function checkSidebar(problems: string[], hidden: (id: string) => boolean) {
+  const titles = () => [...document.querySelectorAll("#meeting-list .m-title")].map((n) => n.textContent);
+  const groups = () => [...document.querySelectorAll("#meeting-list .list-group")].map((n) => n.textContent);
+  state.meetings = docsMeetings();
+  prefs.set("sort", "newest");
+  renderMeetingList();
+  const expected = [...new Set(state.meetings.map((m) => dateGroup(m.created_at)))].join("|");
+  if (groups().join("|") !== expected || groups().length < 3) {
+    problems.push(`date groups: ${groups().join("|")}`);
+  }
+  const chips = [...document.querySelectorAll<HTMLButtonElement>("#tag-filter .tag-chip")];
+  if (chips.map((c) => c.textContent).join(",") !== "Weekly2,Nordwind1,Relaunch1") {
+    problems.push(`tag chips: ${chips.map((c) => c.textContent).join(",")}`);
+  }
+  chips[0].click(); // Weekly
+  if (titles().length !== 2) problems.push(`tag filter shows ${titles().length}`);
+  document.querySelector<HTMLButtonElement>("#tag-filter .tag-chip.on")!.click();
+  if (titles().length !== 4) problems.push("tag filter did not clear");
+
+  // Sorting by length drops the date headers.
+  prefs.set("sort", "length");
+  renderMeetingList();
+  if (groups().length || titles()[0] !== "Q3 roadmap planning") problems.push(`length sort: ${titles()[0]}`);
+  if (document.getElementById("sort-label")!.textContent !== "Longest first") problems.push("sort label");
+  prefs.set("sort", "newest");
+  renderMeetingList();
+  if (currentSort() !== "newest") problems.push("sort not restored");
+
+  // Cmd-click selects without opening; Shift-click extends the range.
+  const items = () => [...document.querySelectorAll<HTMLButtonElement>("#meeting-list button")];
+  items()[0].dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+  items()[2].dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+  if (state.selected.size !== 3) problems.push(`selected after shift-click: ${state.selected.size}`);
+  if (hidden("bulk-bar")) problems.push("bulk bar hidden with a selection");
+  if (document.getElementById("bulk-count")!.textContent !== "3 selected") problems.push("bulk count");
+  if (state.activeId) problems.push("a cmd-click opened a meeting");
+  document.getElementById("bulk-tag")!.click();
+  const tagItems = [...document.querySelectorAll(".menu .menu-item")].map((n) => n.textContent);
+  if (!tagItems.includes("New tag…")) problems.push(`bulk tag menu: ${tagItems.join(",")}`);
+  document.querySelector<HTMLElement>(".menu .menu-item")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  document.getElementById("bulk-clear")!.click();
+  if (state.selected.size || !hidden("bulk-bar")) problems.push("selection not cleared");
+
+  state.meetings = [];
+  renderMeetingList();
 }

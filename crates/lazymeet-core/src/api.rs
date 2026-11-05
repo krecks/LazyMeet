@@ -375,6 +375,16 @@ pub fn patch_meeting(ctx: &Ctx, meeting_id: &str, fields: &Map<String, Value>) -
         // From now on generated titles leave it alone.
         changes.insert("title_by_user".into(), json!(true));
     }
+    if let Some(v) = fields.get("tags") {
+        let list = v.as_array().ok_or_else(|| ApiError::invalid("tags must be a list"))?;
+        if list.iter().any(|t| !t.is_string()) {
+            return Err(ApiError::invalid("tags must be strings"));
+        }
+        if list.len() > store::MAX_TAGS {
+            return Err(ApiError::invalid(format!("at most {} tags", store::MAX_TAGS)));
+        }
+        changes.insert("tags".into(), json!(store::tags(Some(v))));
+    }
     let mut content_edit = false;
     for key in ["summary", "summary_long"] {
         if let Some(v) = fields.get(key) {
@@ -505,8 +515,33 @@ pub fn delete_meeting(ctx: &Ctx, meeting_id: &str) -> ApiResult<Value> {
     Ok(json!({"deleted": true}))
 }
 
-/// GET /api/meetings/{id}/export — returns (markdown, suggested filename);
-/// the shell shows a save dialog and writes the file.
+/// Delete several meetings; ones already gone are skipped. Returns how many
+/// were deleted.
+pub fn delete_meetings(ctx: &Ctx, meeting_ids: &[String]) -> ApiResult<Value> {
+    let deleted =
+        meeting_ids.iter().filter(|id| store::delete_meeting(&ctx.paths, &ctx.locks, id)).count();
+    Ok(json!({"deleted": deleted}))
+}
+
+/// Add and remove tags on several meetings at once (missing ones skipped).
+/// Returns how many meetings were updated.
+pub fn tag_meetings(
+    ctx: &Ctx,
+    meeting_ids: &[String],
+    add: &[String],
+    remove: &[String],
+) -> ApiResult<Value> {
+    let add: Vec<String> = add.iter().filter_map(|t| store::clean_tag(t)).collect();
+    if add.is_empty() && remove.iter().all(|t| t.trim().is_empty()) {
+        return Err(ApiError::invalid("no tags to add or remove"));
+    }
+    let updated = meeting_ids
+        .iter()
+        .filter(|id| store::edit_tags(&ctx.paths, &ctx.locks, id, &add, remove).is_some())
+        .count();
+    Ok(json!({"updated": updated}))
+}
+
 /// One meeting in `format` ("md", "txt", "srt", "vtt", "json", "docx",
 /// "pdf"): the bytes and a suggested file name.
 pub fn export_meeting(ctx: &Ctx, meeting_id: &str, format: &str) -> ApiResult<(Vec<u8>, String)> {

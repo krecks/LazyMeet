@@ -5,7 +5,7 @@
 import { $, listen } from "./core";
 import { showFatal, showToast } from "./helpers";
 import { onMeetingUpdated } from "./meeting";
-import { refreshMeetings, renderMeetingList, setupDropzone } from "./meetings";
+import { refreshMeetings, renderMeetingList, setupDropzone, setupSidebar } from "./meetings";
 import { setupPrepare } from "./prepare";
 import { queueGlobalSearch, setupGlobalSearch } from "./search";
 import {
@@ -38,6 +38,7 @@ function initApp() {
   $("setup").classList.add("hidden");
   $("app").classList.remove("hidden");
   setupDropzone();
+  setupSidebar();
   setupPrepare();
   setupFind();
   setupGlobalSearch();

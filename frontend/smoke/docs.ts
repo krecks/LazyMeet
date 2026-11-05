@@ -10,10 +10,10 @@ export const DOCS_MEETING_ID = "docs-relaunch";
 export function docsMeetings() {
   return [
     // Still processing: no notes yet, so it still carries its file name.
-    { id: "docs-nordwind", filename: "customer-interview-nordwind.mp4", title: "customer-interview-nordwind.mp4", status: "transcribing", created_at: ago(4) },
-    { id: DOCS_MEETING_ID, filename: "2026-07-10 13-15-02.mkv", title: "Website relaunch go-live check", status: "done", created_at: ago(120) },
-    { id: "docs-roadmap", filename: "2026-07-07 10-00-41.mkv", title: "Q3 roadmap planning", status: "done", created_at: ago(3 * 1440) },
-    { id: "docs-support", filename: "support-handover.m4a", title: "Support handover to the June team", status: "done", created_at: ago(14 * 1440) },
+    { id: "docs-nordwind", filename: "customer-interview-nordwind.mp4", title: "customer-interview-nordwind.mp4", status: "transcribing", created_at: ago(4), tags: ["Nordwind"] },
+    { id: DOCS_MEETING_ID, filename: "2026-07-10 13-15-02.mkv", title: "Website relaunch go-live check", status: "done", created_at: ago(120), duration: 1712, tags: ["Relaunch", "Weekly"] },
+    { id: "docs-roadmap", filename: "2026-07-07 10-00-41.mkv", title: "Q3 roadmap planning", status: "done", created_at: ago(3 * 1440), duration: 2830, tags: ["Weekly"] },
+    { id: "docs-support", filename: "support-handover.m4a", title: "Support handover to the June team", status: "done", created_at: ago(14 * 1440), duration: 960 },
   ];
 }
 
@@ -33,6 +33,7 @@ export function docsMeeting() {
     title: "Website relaunch go-live check",
     status: "done",
     created_at: ago(120),
+    tags: ["Relaunch", "Weekly"],
     summary:
       "The team confirmed August 14 as the launch date for the relaunched website, with a go/no-go call on August 11. German translations and a legal review of the imprint and cookie banner are the open threads, so the German pages are final on Friday at the earliest.",
     summary_long:
