@@ -56,6 +56,13 @@ export function docsMeeting() {
     has_audio: false,
     versions: [],
     asr_model: "parakeet-tdt-0.6b-v3",
+    qa: [
+      {
+        q: "What does legal still need to review?",
+        a: "The imprint and the cookie banner copy — a review that usually takes about two days [0:52]. Until then the German pages aren't treated as final, which is why Anna wants a go/no-go call on the 11th [1:15].",
+        at: ago(30),
+      },
+    ],
   };
 }
 

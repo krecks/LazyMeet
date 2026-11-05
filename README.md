@@ -3,10 +3,13 @@
 [![Build](https://github.com/krecks/LazyMeet/actions/workflows/build.yml/badge.svg)](https://github.com/krecks/LazyMeet/actions/workflows/build.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-**Local, private meeting transcription & summaries.** Drag and drop a recording
-(e.g. an OBS capture) and get a **per-speaker transcript**, **notes** (a short
-and a detailed summary, key takeaways, action items) and a **meeting title** —
-everything runs on your machine. No cloud, no accounts, **no API keys**.
+**Local, private meeting transcription & summaries.** Record a meeting in the
+app — your microphone and the call's audio — or drop in a recording (an OBS
+capture, say) and get a **per-speaker transcript**, **notes** (a short and a
+detailed summary, key takeaways, action items) and a **meeting title**. Then
+**ask questions** about one meeting or all of them, tag and search them, and
+export to Word, PDF, subtitles or Markdown. Everything runs on your machine.
+No cloud, no accounts, **no API keys**.
 
 Speaker identification is built in: name a speaker once and that name
 **auto-applies to the same voice in future recordings**, backed by a local
@@ -14,7 +17,7 @@ voiceprint library that learns from every confirmed match.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/meeting-dark.png">
-  <img alt="LazyMeet showing a finished meeting with a generated title: summary with an In detail section, key takeaways and action items each with a detail line, the per-stage timings, and a per-speaker transcript with recognized-speaker badges" src="docs/screenshots/meeting-light.png">
+  <img alt="LazyMeet showing a finished meeting with a generated title and tags: the sidebar with Record a meeting, tag filters and date groups; the summary with an In detail section, key takeaways and action items each with a detail line, and the per-stage timings" src="docs/screenshots/meeting-light.png">
 </picture>
 
 ## How it works
@@ -61,9 +64,10 @@ the spoken language, so it needs one set (in Settings or per recording):
    (`.dmg`/`.app`, `.msi`/`.exe`, or `.AppImage`/`.deb`).
 2. Launch **LazyMeet**. On first run it downloads the AI models (a few GB) with a
    progress screen — this happens once.
-3. Drag a recording onto the window. Watch the stages, then read the transcript
-   and summary. Rename `Speaker 1/2/3` to real names; those names are remembered
-   and auto-applied to the same voices next time.
+3. Click **Record a meeting**, or drag one or more recordings onto the window.
+   Watch the stages, then read the transcript and summary. Rename
+   `Speaker 1/2/3` to real names; those names are remembered and auto-applied
+   to the same voices next time.
 
 Each meeting's notes have a short and a long form: a 2-3 sentence summary plus
 an expandable **In detail** narrative, and key takeaways and action items that
@@ -72,8 +76,33 @@ Everything is editable, and the notes can be regenerated with another model
 without re-transcribing. The same model names the meeting ("Q3 pricing review
 with Acme" rather than `2026-04-24 12-29-55.mkv`) unless you renamed it.
 
+The notes can be written for a **kind of meeting** — general, one-on-one,
+stand-up, interview, lecture or talk, sales or customer call — and in any
+supported **language**, whatever language was spoken: pick both on the prepare
+screen, change them later with **Regenerate notes**, or set the defaults in
+Settings. **Names and terms** you list in Settings (people, products, jargon)
+are spelled exactly in the notes and titles even where the transcript misheard
+them.
+
 You install nothing else — ffmpeg, the models, and the LLM are all bundled or
 auto-downloaded.
+
+## Record a meeting
+
+**Record a meeting** (under the dropzone) records your microphone and the
+computer's own audio — the other people on a Zoom, Teams or Meet call — into
+one file, with a level meter for each. **Stop** opens the prepare screen, so
+the chatter before the meeting can be cut. System audio uses Core Audio taps on
+macOS 14.6+ (macOS asks once for permission to record system audio), WASAPI
+loopback on Windows and the PulseAudio/PipeWire monitor of the default output
+on Linux; where it isn't available the microphone still records. A recording
+interrupted by a crash or never transcribed is offered again under the
+dropzone.
+
+Already recording with OBS? Point the **watch folder** (Settings → Data) at
+OBS's recording folder: every new recording is transcribed on its own once OBS
+has finished writing it. Files that were in the folder before are left alone,
+and the `.mp4` OBS remuxes from an `.mkv` isn't imported twice.
 
 ## Prepare a recording before transcribing
 
@@ -83,9 +112,44 @@ the waveform to skip a break or transcribe only the segments that matter. You
 can also fix the number of speakers and hint the spoken language. The whole
 file is preselected, so the fast path stays a single click on **Transcribe**.
 On a wide window, recordings with video show the picture beside the segment
-list; audio files keep a full-width player above the waveform.
+list; audio files keep a full-width player above the waveform. Drop or pick
+several files at once and they are prepared one after another — or queued
+whole with **Transcribe all**.
 
 ![The prepare screen for an audio file: player, a zoomable waveform with a break cut out, and two selected time ranges](docs/screenshots/prepare.png)
+
+## Ask your meetings
+
+Under the notes, **Ask** answers questions about the meeting from its
+transcript — "What did we decide about the launch date?", "What does Ben owe
+legal?" — with the same on-device model that writes the notes. Answers cite
+the moments they come from (`[12:34]`); click one to jump there and play it.
+The questions and answers stay with the meeting. In the search results, **Ask
+across meetings** answers the search text from all your meetings and links
+each point to the meeting and moment it comes from.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/ask-dark.png">
+  <img alt="The Ask block under a meeting's notes: the question 'What does legal still need to review?' answered in two sentences with clickable 0:52 and 1:15 times, above the transcript whose speaker chips show each person's talk time" src="docs/screenshots/ask-light.png">
+</picture>
+
+A transcript that fits the model's context is read whole; for longer ones (and
+across meetings) the parts that best match the question are picked. Answers
+take about 10–30 s on Apple Silicon, depending on the summary model and the
+length of the meeting.
+
+## Organize, edit and export
+
+- **Tags** on each meeting; filter the sidebar by tag, search finds them too.
+- The sidebar groups meetings by date and sorts by date, title or length.
+  ⌘/Ctrl-click and Shift-click (or **Select**) pick several meetings to tag,
+  export or delete at once.
+- The speaker legend shows how long each person talked.
+- In the transcript editor, **Split at cursor** and **Merge with next** fix
+  segments that diarization cut in the wrong place.
+- **Export** a meeting as Markdown, Word, PDF, plain text, SRT or WebVTT
+  subtitles (with speaker names), or JSON; several meetings export into a
+  folder, one file each.
 
 ## Speaker naming across files
 
@@ -170,12 +234,16 @@ video itself never sticks around. Turn **Keep recording audio** off in Settings
 (or set `LAZYMEET_KEEP_AUDIO=0`) to delete each recording as soon as
 processing finishes instead.
 
+Recordings made in the app are written to a `recordings` folder in the same
+place and moved into the meeting once you transcribe them. Questions are
+answered by the local summary model; nothing is sent anywhere.
+
 ## Development / building from source
 
 Requirements: Rust (stable) + Tauri CLI (`cargo install tauri-cli --version
 "^2"`), Node.js (the frontend is bundled by Vite — run `npm ci` once),
 cmake (llama.cpp builds from source), and the platform webview libs
-(Linux: `libwebkit2gtk-4.1-dev`). sherpa-onnx links the prebuilt static
+(Linux: `libwebkit2gtk-4.1-dev`, plus `libasound2-dev` for recording). sherpa-onnx links the prebuilt static
 libraries of its GitHub release, which its build script downloads on the
 first build; to build offline, put that archive in a directory and point
 `SHERPA_ONNX_ARCHIVE_DIR` at it.
@@ -238,7 +306,7 @@ Tauri API stubbed out and boots it headlessly to assert the first-run state,
 the prepare screen, settings and the meeting notes.
 
 The README screenshots come from the same smoke bundle (`npm run
-build:smoke`, serve `frontend/dist-smoke/`), opened at `#meeting`, `#docs`
+build:smoke`, serve `frontend/dist-smoke/`), opened at `#meeting` (also scrolled to the Ask block), `#docs`
 (Settings) and `#docs-prepare` at 1440 px wide, 2× scale; the content lives in
 `frontend/smoke/docs.ts`.
 
@@ -261,6 +329,9 @@ Environment variables (all optional):
 | `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Classic diarizer only: speakers with less speech fold into the closest main voice |
 | `LAZYMEET_NUM_THREADS` | auto (75 % of cores) | ONNX/LLM CPU threads; `0` = auto |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
+| `LAZYMEET_WATCH_DIR` | unset | A folder whose new recordings are imported on their own |
+| `LAZYMEET_NOTES_TEMPLATE` | `general` | Default kind of meeting for the notes: `general`, `one_on_one`, `standup`, `interview`, `lecture`, `sales` |
+| `LAZYMEET_VOCABULARY` | unset | Names and terms (one per line) the notes and titles must spell exactly |
 | `LAZYMEET_KEEP_AUDIO` | `1` | `1` = keep only the audio track for playback (video files are deleted after processing); `0` = delete recordings entirely (disables segment playback) |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |
 
