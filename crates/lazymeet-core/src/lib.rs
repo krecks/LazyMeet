@@ -17,6 +17,7 @@ pub mod export;
 pub mod jobs;
 pub mod models;
 pub mod pipeline;
+pub mod record;
 pub mod store;
 pub mod watch;
 
@@ -45,6 +46,8 @@ pub struct Ctx {
     pub bench_running: std::sync::atomic::AtomicBool,
     /// Questions being answered (their cancel flags).
     pub ask: ask::AskState,
+    /// The recording in progress, if any.
+    pub recorder: record::RecorderState,
 }
 
 impl Ctx {
@@ -61,6 +64,7 @@ impl Ctx {
             ffmpeg: None,
             bench_running: std::sync::atomic::AtomicBool::new(false),
             ask: ask::AskState::default(),
+            recorder: record::RecorderState::default(),
         })
     }
 

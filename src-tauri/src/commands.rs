@@ -299,6 +299,54 @@ pub async fn cancel_ask(ctx: State<'_, App>, request_id: String) -> ApiResult<Va
     Ok(Value::Null)
 }
 
+// --- Recording ---------------------------------------------------------------
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_audio_inputs(ctx: State<'_, App>) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::record::list_inputs(&ctx)).await
+}
+
+/// `mic`: an input's name, null for the default, "" for none.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn start_recording(
+    ctx: State<'_, App>,
+    mic: Option<String>,
+    system_audio: bool,
+) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::record::start(&ctx, mic.as_deref(), system_audio)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn stop_recording(ctx: State<'_, App>) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::record::stop(&ctx)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cancel_recording(ctx: State<'_, App>) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::record::cancel(&ctx)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn recording_status(ctx: State<'_, App>) -> ApiResult<Value> {
+    Ok(lazymeet_core::record::status(&ctx))
+}
+
+/// Recordings made but never transcribed (quit, crash, or cancelled prep).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn leftover_recordings(ctx: State<'_, App>) -> ApiResult<Value> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(Value::Array(lazymeet_core::record::leftovers(&ctx)))).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn discard_recording(ctx: State<'_, App>, path: String) -> ApiResult<Value> {
+    lazymeet_core::record::discard(&ctx, &PathBuf::from(path))
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn delete_meetings(ctx: State<'_, App>, meeting_ids: Vec<String>) -> ApiResult<Value> {
     api::delete_meetings(&ctx, &meeting_ids)

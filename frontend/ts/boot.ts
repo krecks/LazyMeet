@@ -7,6 +7,7 @@ import { showFatal, showToast } from "./helpers";
 import { onMeetingUpdated } from "./meeting";
 import { refreshMeetings, renderMeetingList, setupDropzone, setupSidebar } from "./meetings";
 import { onAskProgress, setupAsk } from "./ask";
+import { onRecordLevel, setupRecording } from "./record";
 import { setupPrepare } from "./prepare";
 import { queueGlobalSearch, setupGlobalSearch } from "./search";
 import {
@@ -41,6 +42,7 @@ function initApp() {
   setupDropzone();
   setupSidebar();
   setupAsk();
+  setupRecording();
   setupPrepare();
   setupFind();
   setupGlobalSearch();
@@ -79,6 +81,7 @@ async function main() {
   // before the first fetches so no transition slips between them.
   await listen("meeting-updated", (e) => onMeetingUpdated(e.payload));
   await listen("ask-progress", (e) => onAskProgress(e.payload));
+  await listen("record-level", (e) => onRecordLevel(e.payload));
   // The watch folder imported a recording (or failed to).
   await listen("meetings-changed", (e: any) => {
     const p = e.payload || {};

@@ -23,6 +23,14 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   if (cmd === "remove_model") return { ok: true };
   if (cmd === "create_meeting") return { id: `smoke-${calls.filter((c) => c.cmd === "create_meeting").length}` };
   if (cmd === "pick_folder") return "/Users/you/Movies/OBS";
+  if (cmd === "list_audio_inputs") {
+    return { inputs: [{ name: "MacBook Pro Microphone", default: true }, { name: "USB Mic", default: false }], system_audio: true };
+  }
+  if (cmd === "start_recording") return { recording: true, sources: args!.system_audio ? ["mic", "system"] : ["mic"], warnings: [] };
+  if (cmd === "stop_recording") return { path: "/Users/you/Library/Application Support/LazyMeet/recordings/2026-11-06 10-00-00/recording.m4a" };
+  if (cmd === "leftover_recordings") {
+    return hash() === "#meeting" ? [] : [{ name: "2026-11-05 16-30-12", path: "/tmp/rec/recording.m4a" }];
+  }
   if (cmd === "ask_meeting") {
     return { q: args!.question, a: "Launch holds at August 14 [00:28].\n\nLegal reviews first [0:52].", at: "2026-11-06T10:00:00Z" };
   }

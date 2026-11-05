@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app bundle's Info.plist by the Tauri bundler. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>LazyMeet records your microphone when you record a meeting. The audio stays on this Mac.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>LazyMeet records this Mac's audio — the other people on a call — when you record a meeting. The audio stays on this Mac.</string>
+</dict>
+</plist>

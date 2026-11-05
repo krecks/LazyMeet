@@ -540,6 +540,43 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .bulk-count { font-size: 0.8rem; font-weight: 600; margin-right: auto; }
 .bulk-bar input { flex: 1 1 100%; order: 1; font-size: 0.82rem; }
 .btn.small { padding: 0.28rem 0.6rem; font-size: 0.8rem; }
+/* Recording */
+.record-btn { width: 100%; justify-content: center; margin-top: 0.6rem; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); display: inline-block; flex: none; }
+.rec-dot.live { animation: pulse 1.2s ease-in-out infinite; }
+.record-bar {
+  border: 1.5px solid var(--danger);
+  border-radius: var(--radius-l);
+  padding: 0.8rem 0.9rem;
+  background: var(--danger-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.rec-top { display: flex; align-items: center; gap: 0.5rem; }
+.rec-time { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rec-meters { display: flex; flex-direction: column; gap: 0.3rem; }
+.rec-meter-row { display: grid; grid-template-columns: 4.6rem 1fr; align-items: center; gap: 0.4rem; }
+.rec-meter { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.rec-meter > div { height: 100%; width: 0; background: var(--success); transition: width 0.1s linear; }
+.rec-actions { display: flex; justify-content: flex-end; gap: 0.4rem; }
+.record-panel { padding: 0.8rem 0.9rem; gap: 0.55rem; width: 300px; }
+.record-check { display: flex; align-items: flex-start; gap: 0.45rem; font-size: 0.84rem; }
+.record-panel .btn { align-self: flex-end; }
+.record-panel p.muted { margin: 0; }
+.leftovers { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.6rem; }
+.leftover {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+}
+.leftover span { margin-right: auto; }
+.link-btn.danger { color: var(--danger); }
+
 /* Ask */
 .ask-block { margin: 1.4rem 0 0.4rem; }
 .qa-list { display: flex; flex-direction: column; gap: 0.9rem; margin-bottom: 0.8rem; }

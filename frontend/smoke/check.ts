@@ -129,6 +129,11 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("batch prepare check threw: " + e.message);
   }
   try {
+    await checkRecording(problems, hidden);
+  } catch (e: any) {
+    problems.push("recording check threw: " + e.message);
+  }
+  try {
     await checkAskAll(problems, hidden);
   } catch (e: any) {
     problems.push("ask-all check threw: " + e.message);
@@ -461,4 +466,34 @@ async function checkAskAll(problems: string[], hidden: (id: string) => boolean) 
   if (named !== "Weekly sync") problems.push(`bare label not named: ${named}`);
   (document.getElementById("meeting-search") as HTMLInputElement).value = "";
   document.getElementById("search-answer")!.classList.add("hidden");
+}
+
+async function checkRecording(problems: string[], hidden: (id: string) => boolean) {
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  if (!document.querySelector("#leftovers .leftover")) problems.push("leftover recording not offered");
+  document.getElementById("record-btn")!.click();
+  await settle();
+  const panel = document.querySelector(".record-panel");
+  if (!panel) return problems.push("record panel did not open");
+  const mic = panel.querySelector("select") as HTMLSelectElement;
+  const opts = [...mic.options].map((o) => o.textContent).join(",");
+  if (opts !== "Default microphone,MacBook Pro Microphone,USB Mic,No microphone") problems.push(`mic options: ${opts}`);
+  [...panel.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.includes("Start recording"))!.click();
+  await settle();
+  const startCall = calls.filter((c) => c.cmd === "start_recording").pop();
+  if (startCall?.args?.mic !== null || startCall?.args?.system_audio !== true) {
+    problems.push(`start call: ${JSON.stringify(startCall?.args)}`);
+  }
+  if (hidden("record-bar") || !hidden("dropzone")) problems.push("recording bar not shown");
+  const { onRecordLevel } = await import("../ts/record");
+  onRecordLevel({ mic: 0.1, system: 0.0, elapsed: 3 });
+  const width = (document.querySelector("#rec-meter-mic > div") as HTMLElement).style.width;
+  if (!width || width === "0%") problems.push(`mic meter: ${width}`);
+  document.getElementById("rec-stop")!.click();
+  await settle();
+  await settle();
+  if (!hidden("record-bar")) problems.push("recording bar still shown after stop");
+  if (hidden("prepare")) problems.push("stop did not open the prepare screen");
+  if (!document.getElementById("prep-file")!.textContent!.startsWith("recording.m4a")) problems.push("prepare not on the recording");
+  closePrepare();
 }

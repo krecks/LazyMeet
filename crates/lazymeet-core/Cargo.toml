@@ -10,7 +10,11 @@ rust-version = "1.77"
 # The real ML pipeline (sherpa-onnx + llama.cpp). Off => only the deterministic
 # FAKE pipeline is compiled, so the behavioral test suite builds in seconds:
 #   cargo test -p lazymeet-core --no-default-features
-default = ["native-pipeline"]
+default = ["native-pipeline", "capture"]
+# Recording in the app: microphone and system audio through cpal (Core Audio
+# taps on macOS 14.6+, WASAPI loopback on Windows, PulseAudio/PipeWire
+# monitor sources on Linux). Off => recording reports itself unavailable.
+capture = ["dep:cpal", "dep:hound"]
 native-pipeline = [
     "dep:sherpa-onnx",
     "dep:ort",
@@ -75,6 +79,7 @@ sha2 = "0.10"
 ureq = "2"
 tar = "0.4"
 bzip2 = "0.4"
+cpal = { version = "0.18.2", optional = true }
 # Meeting exports: Word documents, and PDFs that embed only the glyphs used
 # (krilla subsets the bundled Noto Sans, so a notes PDF stays ~30 KB).
 docx-rs = "0.4.22"
@@ -82,6 +87,11 @@ krilla = { version = "0.8.2", default-features = false, features = ["simple-text
 skrifa = "0.42"
 # Transcript language detection for SUMMARY_LANGUAGE="auto" (native only).
 whatlang = { version = "0.18.0", optional = true }
+
+# Linux: capture system audio from the PulseAudio (or pipewire-pulse) monitor
+# source of the default output; pure Rust, no system library at build time.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18.2", optional = true, features = ["pulseaudio"] }
 
 # Metal offload for the summarizer LLM on Apple Silicon (SUMMARY_PROVIDER
 # picks layer offload at runtime; elsewhere llama.cpp runs on the CPU).

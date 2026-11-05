@@ -129,6 +129,25 @@
           <span class="muted small">or click to choose an audio or video file</span>
         </div>
 
+        <button id="record-btn" class="btn ghost record-btn" type="button" aria-haspopup="dialog">
+          <span class="rec-dot"></span><span>Record a meeting</span>
+        </button>
+        <div id="record-bar" class="record-bar hidden" role="status" aria-label="Recording">
+          <div class="rec-top">
+            <span class="rec-dot live"></span><strong>Recording</strong>
+            <span id="rec-time" class="rec-time">0:00</span>
+          </div>
+          <div class="rec-meters">
+            <div class="rec-meter-row"><span class="muted small">Mic</span><div id="rec-meter-mic" class="rec-meter"><div></div></div></div>
+            <div class="rec-meter-row"><span class="muted small">Computer</span><div id="rec-meter-system" class="rec-meter"><div></div></div></div>
+          </div>
+          <div class="rec-actions">
+            <button id="rec-cancel" class="btn ghost small" type="button">Discard</button>
+            <button id="rec-stop" class="btn small" type="button">Stop</button>
+          </div>
+        </div>
+        <div id="leftovers" class="leftovers hidden" aria-label="Recordings not transcribed yet"></div>
+
         <div class="side-head">
           <h2>Meetings</h2>
           <div class="side-tools">

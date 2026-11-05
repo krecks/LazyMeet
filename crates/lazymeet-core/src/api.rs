@@ -303,8 +303,18 @@ pub fn create_meeting_with(
     let upload_dir = ctx.paths.uploads_dir().join(&id);
     std::fs::create_dir_all(&upload_dir)?;
     let dest = upload_dir.join(&filename);
-    std::fs::copy(src, &dest)
-        .map_err(|e| ApiError::internal(format!("could not copy the recording: {e}")))?;
+    // A recording made in the app is ours: move it (and drop its folder)
+    // rather than keep two copies. Anything else is the user's file — copy.
+    if let Some(folder) = crate::record::owned_folder(ctx, src) {
+        if std::fs::rename(src, &dest).is_err() {
+            std::fs::copy(src, &dest)
+                .map_err(|e| ApiError::internal(format!("could not copy the recording: {e}")))?;
+        }
+        let _ = std::fs::remove_dir_all(folder);
+    } else {
+        std::fs::copy(src, &dest)
+            .map_err(|e| ApiError::internal(format!("could not copy the recording: {e}")))?;
+    }
     jobs::dispatch(ctx, id.clone(), jobs::Job::Process { upload: dest });
     Ok(json!({"id": id}))
 }

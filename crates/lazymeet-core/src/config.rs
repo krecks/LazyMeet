@@ -65,6 +65,10 @@ impl Paths {
     pub fn uploads_dir(&self) -> PathBuf {
         self.data_dir.join("uploads")
     }
+    /// Recordings made in the app, one folder each, until they're imported.
+    pub fn recordings_dir(&self) -> PathBuf {
+        self.data_dir.join("recordings")
+    }
     pub fn speakers_file(&self) -> PathBuf {
         self.data_dir.join("speakers.json")
     }
