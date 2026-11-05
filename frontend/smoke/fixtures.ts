@@ -107,3 +107,11 @@ export function models() {
     },
   };
 }
+
+// Saved voices: none by default (the boot check expects the empty state);
+// `#speakers` fills the Known speakers page for screenshots.
+export function speakers(): string[] {
+  return location.hash === "#speakers"
+    ? ["Anna Berger", "Jonas Keller", "Mara Lindqvist", "Tomás Ortega", "Yuki Sato"]
+    : [];
+}

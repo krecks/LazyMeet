@@ -960,7 +960,6 @@ mark.find-hit.current {
 .settings-section-head { margin-bottom: 1rem; }
 .settings-section-head h2 { font-size: 1.25rem; }
 .settings-section-head p { margin: 0.3rem 0 0; font-size: 0.87rem; max-width: 72ch; }
-.bench-how ul, .bench-how p { max-width: 90ch; }
 
 .config-row {
   display: grid;
@@ -1063,7 +1062,8 @@ mark.find-hit.current {
   background: var(--accent);
   box-shadow: inset 0 0 0 2px var(--surface);
 }
-.model-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* the shared focus ring, drawn inside: rows touch the list's edge */
+.model-card:focus-visible { outline-offset: -2px; }
 .model-card:disabled { cursor: default; }
 .model-card-head {
   grid-area: head;
@@ -1359,34 +1359,13 @@ mark.find-hit.current {
 .bench-how ul { margin: 0.6rem 0 0.25rem; }
 .bench-how ul { padding-left: 1.2rem; }
 .bench-how li { margin-bottom: 0.4rem; }
+.bench-how ul,
+.bench-how p { max-width: 90ch; }
 
 /* ------------------------------------------------------ prepare screen */
 .prep-body {
   max-width: 1320px;
   gap: 1.1rem;
-}
-/* Desktop: video beside the segment list, waveform full width under both
-   (the wider it is, the finer the selection), actions along the bottom. */
-@media (min-width: 980px) {
-  .prep-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
-    grid-template-areas:
-      "player ranges"
-      "wave   wave"
-      "actions actions";
-    align-items: start;
-    column-gap: 1.6rem;
-  }
-  .prep-player { grid-area: player; }
-  .prep-body .wave-wrap { grid-area: wave; }
-  .prep-ranges { grid-area: ranges; }
-  .prep-actions { grid-area: actions; }
-  .prep-player video { max-height: 440px; }
-  /* heading on its own line, both buttons on the next */
-  .prep-ranges .note-head { flex-wrap: wrap; }
-  .prep-ranges .note-head h3 { flex-basis: 100%; }
-  .prep-ranges .range-label { min-width: 0; white-space: nowrap; }
 }
 .prep-player {
   display: flex;
@@ -1470,6 +1449,30 @@ mark.find-hit.current {
 }
 .prep-actions .speakers-field { margin: 0; }
 .prep-spacer { flex: 1; }
+
+/* Desktop: video beside the segment list, waveform full width under both
+   (the wider it is, the finer the selection), actions along the bottom. */
+@media (min-width: 980px) {
+  .prep-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-areas:
+      "player ranges"
+      "wave   wave"
+      "actions actions";
+    align-items: start;
+    column-gap: 1.6rem;
+  }
+  .prep-player { grid-area: player; }
+  .prep-body .wave-wrap { grid-area: wave; }
+  .prep-ranges { grid-area: ranges; }
+  .prep-actions { grid-area: actions; }
+  .prep-player video { max-height: 440px; }
+  /* heading on its own line, both buttons on the next */
+  .prep-ranges .note-head { flex-wrap: wrap; }
+  .prep-ranges .note-head h3 { flex-basis: 100%; }
+  .prep-ranges .range-label { min-width: 0; white-space: nowrap; }
+}
 
 .wave-zoom {
   position: absolute;

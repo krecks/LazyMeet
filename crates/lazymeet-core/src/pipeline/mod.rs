@@ -332,6 +332,10 @@ pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String
     native_only(ctx, |_| native_impl::title_from_notes(ctx, notes))
 }
 
+/// Prefix of the note stored when summarization fails (the transcript is
+/// kept); anything that reads notes back can tell them from real ones.
+pub const SUMMARY_UNAVAILABLE: &str = "(Automatic summary unavailable";
+
 /// Longest title we keep from the model; the edit field allows 200.
 const MAX_TITLE_CHARS: usize = 80;
 

@@ -77,7 +77,9 @@ pub fn startup(ctx: &Arc<Ctx>) -> std::io::Result<()> {
     sweep_stale_files(ctx);
     models::ensure_models_async(ctx);
     jobs::sweep_orphans(ctx);
-    jobs::queue_title_backfill(ctx);
+    // Reads every meeting file: off the launch path.
+    let backfill = ctx.clone();
+    std::thread::spawn(move || jobs::queue_title_backfill(&backfill));
     Ok(())
 }
 

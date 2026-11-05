@@ -41,7 +41,10 @@ export async function runSmokeChecks(): Promise<void> {
   if (!document.getElementById("meeting-list")!.textContent!.includes("No meetings yet")) {
     problems.push("meeting-list empty state missing");
   }
-  if (!document.getElementById("speaker-list")!.textContent!.includes("No saved voices")) {
+  if (
+    location.hash !== "#speakers" &&
+    !document.getElementById("speaker-list")!.textContent!.includes("No saved voices")
+  ) {
     problems.push("speaker-list empty state missing");
   }
 

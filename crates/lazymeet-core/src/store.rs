@@ -346,8 +346,9 @@ fn rename_in_notes(record: &mut Record, old: &str, new: &str) {
 
 /// Whether a generated title may replace the meeting's current one: never
 /// once the user named it. `title_by_user` is true after a rename and false
-/// after an automatic title; records from before the flag count as named by
-/// the user exactly when their title differs from the filename.
+/// after an automatic title (or an attempt at one). Without the flag — older
+/// records, and new ones before their first notes — the meeting counts as
+/// named by the user exactly when its title differs from the filename.
 pub fn title_is_auto(record: &Record) -> bool {
     if let Some(by_user) = record.get("title_by_user").and_then(|v| v.as_bool()) {
         return !by_user;

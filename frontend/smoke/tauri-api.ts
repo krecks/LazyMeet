@@ -5,7 +5,7 @@
 // against a fake backend instead of the Rust one. Unknown commands resolve to
 // null, so a new command at boot shows up as a smoke failure rather than a
 // crash in the real app.
-import { config, models } from "./fixtures";
+import { config, models, speakers } from "./fixtures";
 
 export const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
 
@@ -13,10 +13,7 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   calls.push({ cmd, args });
   if (cmd === "get_setup") return { ready: true, items: [] };
   if (cmd === "list_meetings") return [];
-  // `#speakers` screenshots the Known speakers page with a few saved voices.
-  if (cmd === "get_speakers") {
-    return location.hash === "#speakers" ? ["Anna Berger", "Jonas Keller", "Mara Lindqvist", "Tomás Ortega", "Yuki Sato"] : [];
-  }
+  if (cmd === "get_speakers") return speakers();
   if (cmd === "get_config" || cmd === "put_config") return config();
   if (cmd === "get_models") return models();
   if (cmd === "remove_model") return { ok: true };

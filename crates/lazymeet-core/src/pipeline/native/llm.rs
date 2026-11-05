@@ -2,6 +2,7 @@
 //! transcripts (port of `summarize.py`).
 
 use super::*;
+use crate::pipeline::clean_title;
 
 /// Tokens reserved for the model's response plus prompt scaffolding. The
 /// answer budget (`ANSWER_TOKENS`) plus the format/language instruction has to
@@ -16,6 +17,16 @@ const ANSWER_TOKENS: usize = 1600;
 /// decodes); chunking is what llama.cpp's own examples do.
 const PREFILL_CHUNK: usize = 512;
 
+/// What a meeting title looks like — shared by the summary's JSON format and
+/// the title-only pass, so both name meetings the same way. (A macro because
+/// `concat!` only takes literals.)
+macro_rules! title_rule {
+    () => {
+        "3-8 words naming what the meeting was about, like a calendar entry (e.g. \
+        \"Q3 pricing review with Acme\"); no date, no quotes, no file name, no trailing period."
+    };
+}
+
 /// Fixed response-format instruction, appended after the (user-editable)
 /// SUMMARY_PROMPT so a customized prompt can't break summary parsing.
 /// `summary`/`summary_long` are two lengths of the same story, and every list
@@ -23,18 +34,20 @@ const PREFILL_CHUNK: usize = 512;
 /// notes scannable and still complete.
 /// The title rule lives here rather than in the editable prompt so a custom
 /// prompt still names the meeting.
-pub(super) const FORMAT: &str = "Respond with ONLY a JSON object of this exact shape, with no \
-    prose and no code fences: {\"title\": string, \"summary\": string, \"summary_long\": \
-    string, \"takeaways\": [{\"short\": string, \"detail\": string}], \"action_items\": \
-    [{\"short\": string, \"detail\": string}]}. title: 3-8 words naming what the meeting was \
-    about, like a calendar entry (e.g. \"Q3 pricing review with Acme\"); no date, no quotes, no \
-    file name, no trailing period.";
+pub(super) const FORMAT: &str = concat!(
+    "Respond with ONLY a JSON object of this exact shape, with no prose and no code fences: \
+    {\"title\": string, \"summary\": string, \"summary_long\": string, \"takeaways\": \
+    [{\"short\": string, \"detail\": string}], \"action_items\": [{\"short\": string, \
+    \"detail\": string}]}. title: ",
+    title_rule!(),
+);
 
 /// Title-only pass over existing notes (meetings processed before titles).
-const TITLE_SYSTEM: &str = "You name meetings. Given a meeting's notes, reply with ONLY a \
-    title of 3-8 words naming what the meeting was about, like a calendar entry (e.g. \
-    \"Q3 pricing review with Acme\"). No date, no quotes, no file name, no trailing period, \
-    nothing else.";
+const TITLE_SYSTEM: &str = concat!(
+    "You name meetings. Given a meeting's notes, reply with ONLY the title, nothing else. \
+    The title: ",
+    title_rule!(),
+);
 
 const NOTES_SYSTEM: &str =
     "You are a meeting assistant. Turn this portion of a meeting transcript into compact \
@@ -371,10 +384,7 @@ fn parse_summary(content: &str) -> Summary {
             .unwrap_or_default()
     };
     Summary {
-        title: data
-            .get("title")
-            .map(|v| super::super::clean_title(&text_of(v)))
-            .unwrap_or_default(),
+        title: data.get("title").map(|v| clean_title(&text_of(v))).unwrap_or_default(),
         summary: data.get("summary").map(text_of).unwrap_or_default(),
         summary_long: data.get("summary_long").map(text_of).unwrap_or_default(),
         takeaways: items("takeaways"),
@@ -426,5 +436,5 @@ pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String
     let lang = lang_instruction(ctx, &notes);
     let answer =
         llm.chat(&format!("{TITLE_SYSTEM} {lang}"), &format!("Notes:\n{notes}\n\n{lang}"), 48)?;
-    Ok(super::super::clean_title(&strip_thinking(&answer)))
+    Ok(clean_title(&strip_thinking(&answer)))
 }
