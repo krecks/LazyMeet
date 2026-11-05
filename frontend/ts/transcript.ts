@@ -2,7 +2,7 @@
 // Transcript
 // --------------------------------------------------------------------------
 import { $, call } from "./core";
-import { confirmThen, disarm, el, escapeHtml, fmtTs, iconBtn, showToast } from "./helpers";
+import { confirmThen, disarm, el, escapeHtml, fmtSpan, fmtTs, iconBtn, showToast } from "./helpers";
 import { editError, renderResult } from "./meeting";
 import { playSegment, renameSpeaker, startSegmentEdit, stopSegmentPlayback } from "./player";
 import { consumePendingScroll } from "./search";
@@ -16,9 +16,20 @@ export function buildColorMap(segments: { speaker: string }[]): Record<string, s
   return map;
 }
 
+/// Seconds each speaker talked, from the segments' spans.
+export function talkTimes(segments: { speaker: string; start: number; end: number }[]): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const s of segments) {
+    totals[s.speaker] = (totals[s.speaker] || 0) + Math.max(0, (s.end || 0) - (s.start || 0));
+  }
+  return totals;
+}
+
 export function renderLegend(m, colorOf, readOnly) {
   const legend = $("speaker-legend");
   legend.innerHTML = "";
+  const talk = talkTimes(m.segments || []);
+  const totalTalk = Object.values(talk).reduce((a, b) => a + b, 0);
   for (const id of Object.keys(colorOf)) {
     const recognized = (m.recognized || []).includes(id);
     const confirmed = (m.confirmed || []).includes(id);
@@ -37,6 +48,13 @@ export function renderLegend(m, colorOf, readOnly) {
     input.setAttribute("list", "speaker-names");
     input.addEventListener("change", () => renameSpeaker(m.id, id, input.value));
     chip.appendChild(input);
+    if (totalTalk > 0) {
+      const secs = talk[id] || 0;
+      const share = el("span", "talk-time");
+      share.textContent = `${fmtSpan(secs)} · ${Math.round((secs / totalTalk) * 100)} %`;
+      share.title = `${name} spoke for ${fmtSpan(secs)} of the transcribed speech`;
+      chip.appendChild(share);
+    }
     if (readOnly) {
       legend.appendChild(chip);
       continue; // no verify buttons on a snapshot

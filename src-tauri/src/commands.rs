@@ -60,7 +60,9 @@ pub async fn download_model(ctx: State<'_, App>, step: String, id: String) -> Ap
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn remove_model(ctx: State<'_, App>, step: String, id: String) -> ApiResult<Value> {
-    api::remove_model(&ctx, &step, &id)
+    // May wait a few seconds for a background title pass to end.
+    let ctx = ctx.inner().clone();
+    blocking(move || api::remove_model(&ctx, &step, &id)).await
 }
 
 // --- Meetings ---------------------------------------------------------------
@@ -287,7 +289,9 @@ pub async fn delete_speaker(ctx: State<'_, App>, name: String) -> ApiResult<Valu
 /// processing, or a benchmark is already running.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn run_benchmark(ctx: State<'_, App>, path: Option<String>) -> ApiResult<Value> {
-    lazymeet_core::bench::start(&ctx, path.map(PathBuf::from))
+    // May wait a few seconds for a background title pass to end.
+    let ctx = ctx.inner().clone();
+    blocking(move || lazymeet_core::bench::start(&ctx, path.map(PathBuf::from))).await
 }
 
 // --- Data management ----------------------------------------------------------

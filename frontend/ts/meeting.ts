@@ -9,6 +9,7 @@ import {
   editorActions,
   el,
   fmtDate,
+  fmtSpan,
   iconBtn,
   showToast,
   wireEditorKeys,
@@ -245,8 +246,7 @@ function renderTimings(t) {
     node.classList.add("hidden");
     return;
   }
-  const fmt = (s) =>
-    s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(1)}s`;
+  const fmt = fmtSpan;
   // Speakers covers diarization plus voice matching; sub-50ms stages are noise.
   const breakdown = [
     { name: "transcription", secs: t.transcribe },

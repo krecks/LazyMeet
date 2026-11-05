@@ -110,6 +110,36 @@ fn backfill_titles_only_untouched_legacy_meetings() {
 }
 
 #[test]
+fn a_claim_waits_out_the_title_backfill_instead_of_refusing() {
+    let app = TestApp::fake();
+    let mut ids = Vec::new();
+    for i in 0..4 {
+        let id = app.upload(&format!("call{i}.mp4"), b"fake video bytes");
+        app.wait_terminal(&id);
+        make_legacy(&app, &id, &format!("call{i}.mp4"));
+        ids.push(id);
+    }
+    jobs::queue_title_backfill(&app.ctx);
+
+    // The benchmark / model removal claim succeeds during the backfill...
+    assert_eq!(jobs::claim_machine(&app.ctx, jobs::TITLE_WAIT), Ok(()));
+    assert!(!jobs::is_busy(&app.ctx), "no title pass runs while the claim holds");
+    // ...and a second claim is still refused while the first holds.
+    assert!(jobs::claim_machine(&app.ctx, std::time::Duration::ZERO).is_err());
+    jobs::release_from_benchmark(&app.ctx);
+
+    // The rest of the backfill runs after the release.
+    wait_idle(&app);
+    for _ in 0..200 {
+        if ids.iter().all(|id| api::get_meeting(&app.ctx, id).unwrap()["title"] == FAKE_TITLE) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("backfill did not finish after the claim was released");
+}
+
+#[test]
 fn model_titles_are_cleaned() {
     assert_eq!(clean_title("\"Q3 pricing review with Acme.\""), "Q3 pricing review with Acme");
     assert_eq!(clean_title("Title: **Hiring sync**\nextra line"), "Hiring sync");

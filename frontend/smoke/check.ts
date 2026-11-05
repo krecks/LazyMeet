@@ -222,8 +222,11 @@ const MEETING = {
   takeaways: [{ short: "Diarization works.", detail: "Runs end to end." }],
   action_items: [{ short: "Anna: ship it", detail: "" }],
   timings: { extract: 1, transcribe: 124, diarize: 20, identify: 11, summarize: 22, total: 178 },
-  segments: [{ start: 0, end: 2, speaker: "spk_0", text: "Hello." }],
-  speakers: { spk_0: "Anna" },
+  segments: [
+    { start: 0, end: 2, speaker: "spk_0", text: "Hello." },
+    { start: 2, end: 8, speaker: "spk_1", text: "Hi Anna, all good here." },
+  ],
+  speakers: { spk_0: "Anna", spk_1: "Ben" },
   recognized: [],
   confirmed: [],
   has_audio: false,
@@ -237,6 +240,8 @@ function checkNotes(problems: string[]) {
   if (document.querySelectorAll("#summary-long-text p").length !== 2) problems.push("long summary paragraphs");
   const timings = document.getElementById("timings-note")!.textContent || "";
   if (!timings.startsWith("Took 2m 58s — transcription 2m 04s")) problems.push(`timings line: ${timings}`);
+  const talk = [...document.querySelectorAll("#speaker-legend .talk-time")].map((n) => n.textContent);
+  if (talk.join(" | ") !== "2.0s · 25 % | 6.0s · 75 %") problems.push(`talk time: ${talk.join(" | ")}`);
   if (document.querySelector("#takeaways .item-detail")?.textContent !== "Runs end to end.") {
     problems.push("takeaway detail missing");
   }

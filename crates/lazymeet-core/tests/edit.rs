@@ -34,6 +34,15 @@ fn title_rename_flows_everywhere() {
     let listed = api::list_meetings(&app.ctx);
     let entry = listed.as_array().unwrap().iter().find(|m| m["id"].as_str() == Some(mid)).unwrap();
     assert_eq!(entry["title"], "Weekly Standup");
+    // the sidebar can sort by length and show how many people spoke
+    let last_end = meeting["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["end"].as_f64().unwrap())
+        .fold(0.0, f64::max);
+    assert_eq!(entry["duration"].as_f64(), Some(last_end));
+    assert!(entry["speaker_count"].as_u64().unwrap() >= 1);
 
     let (md, filename) = api::export_meeting(&app.ctx, mid).unwrap();
     assert!(md.starts_with("# Weekly Standup"));

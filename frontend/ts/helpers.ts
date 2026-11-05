@@ -107,6 +107,12 @@ export function fmtTs(seconds) {
 
 export const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/// A duration for people: "45.2s" under a minute, else "12m 05s"
+/// (minutes keep counting past the hour, like the timings line).
+export function fmtSpan(s: number): string {
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(1)}s`;
+}
+
 export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);

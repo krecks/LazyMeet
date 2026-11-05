@@ -12,9 +12,9 @@
 use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -78,8 +78,21 @@ pub enum Job {
 #[derive(Default)]
 pub struct JobsState {
     queue: Mutex<VecDeque<(String, Job)>>,
-    active: Mutex<Option<String>>,
+    active: Mutex<Option<Active>>,
+    /// Claims (benchmark, model removal) waiting for a title pass to end;
+    /// while non-zero, no new title pass starts.
+    claim_pending: AtomicUsize,
 }
+
+/// The meeting the worker is on, and whether it's only a background title
+/// pass (which a claim may wait out instead of being refused).
+struct Active {
+    id: String,
+    title: bool,
+}
+
+/// How long a claim waits for a running title pass (a few seconds each).
+pub const TITLE_WAIT: Duration = Duration::from_secs(30);
 
 /// Queue a meeting for processing; starts immediately if nothing is running.
 ///
@@ -128,8 +141,14 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
             return;
         }
         let mut queue = ctx.jobs.queue.lock().unwrap();
+        let claim_pending = ctx.jobs.claim_pending.load(Ordering::SeqCst) > 0;
         let mut picked = None;
         while let Some((meeting_id, job)) = queue.pop_front() {
+            // Title passes queue last; a waiting claim keeps them waiting.
+            if claim_pending && matches!(job, Job::Title) {
+                queue.push_front((meeting_id, job));
+                break;
+            }
             // Skip entries deleted while they waited.
             let record = store::get_meeting(&ctx.paths, &ctx.locks, &meeting_id);
             let status = record.as_ref().and_then(|r| r.get("status")).and_then(|v| v.as_str());
@@ -138,7 +157,7 @@ pub fn pump_queue(ctx: &Arc<Ctx>) {
                 _ => status == Some("queued"),
             };
             if runnable {
-                *active = Some(meeting_id.clone());
+                *active = Some(Active { id: meeting_id.clone(), title: matches!(job, Job::Title) });
                 picked = Some((meeting_id, job));
                 break;
             }
@@ -158,14 +177,37 @@ pub fn is_busy(ctx: &Ctx) -> bool {
 /// Why the benchmark can't take the machine now, or None once it has: set
 /// under the queue's lock, so a meeting and a benchmark never overlap.
 pub fn claim_for_benchmark(ctx: &Ctx) -> Option<&'static str> {
-    let active = ctx.jobs.active.lock().unwrap();
-    if active.is_some() {
-        return Some("a recording is being processed — run the benchmark once it finishes");
-    }
-    if ctx.bench_running.swap(true, Ordering::SeqCst) {
-        return Some("a benchmark is already running");
-    }
-    None
+    claim_machine(ctx, TITLE_WAIT).err()
+}
+
+/// Take the machine for the benchmark or a model removal: refused while a
+/// meeting is processed or another claim holds it. A background title pass
+/// is waited out (up to `wait`) instead, and no new one starts meanwhile.
+/// Release with `release_from_benchmark`.
+pub fn claim_machine(ctx: &Ctx, wait: Duration) -> Result<(), &'static str> {
+    ctx.jobs.claim_pending.fetch_add(1, Ordering::SeqCst);
+    let deadline = Instant::now() + wait;
+    let result = loop {
+        {
+            let active = ctx.jobs.active.lock().unwrap();
+            match active.as_ref() {
+                None => {
+                    break if ctx.bench_running.swap(true, Ordering::SeqCst) {
+                        Err("a benchmark is already running")
+                    } else {
+                        Ok(())
+                    };
+                }
+                Some(a) if !a.title || Instant::now() >= deadline => {
+                    break Err("a recording is being processed — try again once it finishes");
+                }
+                Some(_) => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    ctx.jobs.claim_pending.fetch_sub(1, Ordering::SeqCst);
+    result
 }
 
 /// Give the machine back after a benchmark and start any meeting that
@@ -178,7 +220,7 @@ pub fn release_from_benchmark(ctx: &Arc<Ctx>) {
 fn finish_active(ctx: &Arc<Ctx>, meeting_id: &str) {
     {
         let mut active = ctx.jobs.active.lock().unwrap();
-        if active.as_deref() == Some(meeting_id) {
+        if active.as_ref().is_some_and(|a| a.id == meeting_id) {
             *active = None;
         }
     }

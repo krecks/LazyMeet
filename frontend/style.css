@@ -766,6 +766,7 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   width: 8rem;
   font-size: 0.82rem;
 }
+.legend .talk-time { color: var(--text-muted); font-size: 0.74rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .legend .badge-recognized {
   font-size: 0.64rem;
   font-weight: 700;

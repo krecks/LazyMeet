@@ -566,6 +566,19 @@ pub fn reject_speaker(
     Ok(Some(record))
 }
 
+/// (seconds the transcript spans, distinct speakers in it) — 0, 0 until a
+/// meeting has a transcript.
+fn transcript_stats(rec: &Record) -> (f64, usize) {
+    let Some(segments) = rec.get("segments").and_then(|v| v.as_array()) else {
+        return (0.0, 0);
+    };
+    let duration =
+        segments.iter().filter_map(|s| s.get("end").and_then(|v| v.as_f64())).fold(0.0, f64::max);
+    let speakers: std::collections::HashSet<&str> =
+        segments.iter().filter_map(|s| s.get("speaker").and_then(|v| v.as_str())).collect();
+    (duration, speakers.len())
+}
+
 pub fn list_meetings(paths: &Paths, locks: &StoreLocks) -> Vec<Record> {
     let _g = locks.meetings.lock().unwrap();
     let mut items: Vec<Record> = Vec::new();
@@ -592,6 +605,9 @@ pub fn list_meetings(paths: &Paths, locks: &StoreLocks) -> Vec<Record> {
         item.insert("title".into(), title);
         item.insert("status".into(), rec.get("status").cloned().unwrap_or(Value::Null));
         item.insert("created_at".into(), rec.get("created_at").cloned().unwrap_or(Value::Null));
+        let (duration, speaker_count) = transcript_stats(&rec);
+        item.insert("duration".into(), json!(duration));
+        item.insert("speaker_count".into(), json!(speaker_count));
         items.push(item);
     }
     items.sort_by(|a, b| {

@@ -942,9 +942,17 @@ pub fn remove_model(ctx: &Arc<Ctx>, step: &str, model_id: &str) -> ApiResult<()>
     if let Some(reason) = removal_blocker(&entry, &active, downloading, &first_run_markers()) {
         return Err(ApiError::conflict(reason));
     }
-    if crate::jobs::is_busy(ctx) || ctx.bench_running.load(Ordering::SeqCst) {
+    // Hold the machine while deleting, so no meeting or benchmark starts
+    // reading the files halfway through.
+    if crate::jobs::claim_machine(ctx, crate::jobs::TITLE_WAIT).is_err() {
         return Err(ApiError::conflict("wait until the recording or benchmark has finished"));
     }
+    let result = delete_model_files(ctx, &entry);
+    crate::jobs::release_from_benchmark(ctx);
+    result
+}
+
+fn delete_model_files(ctx: &Arc<Ctx>, entry: &CatalogEntry) -> ApiResult<()> {
     let root = &ctx.paths.models_dir;
     for file in model_files(&entry.spec) {
         let path = root.join(&file);
