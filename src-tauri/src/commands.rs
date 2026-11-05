@@ -250,6 +250,25 @@ pub async fn reprocess_meeting(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn split_segment(
+    ctx: State<'_, App>,
+    meeting_id: String,
+    index: usize,
+    at: usize,
+) -> ApiResult<Value> {
+    api::split_segment(&ctx, &meeting_id, index, at)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn merge_segments(
+    ctx: State<'_, App>,
+    meeting_id: String,
+    index: usize,
+) -> ApiResult<Value> {
+    api::merge_segments(&ctx, &meeting_id, index)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn delete_meetings(ctx: State<'_, App>, meeting_ids: Vec<String>) -> ApiResult<Value> {
     api::delete_meetings(&ctx, &meeting_ids)
 }

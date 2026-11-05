@@ -540,6 +540,7 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .bulk-count { font-size: 0.8rem; font-weight: 600; margin-right: auto; }
 .bulk-bar input { flex: 1 1 100%; order: 1; font-size: 0.82rem; }
 .btn.small { padding: 0.28rem 0.6rem; font-size: 0.8rem; }
+.seg-tools { display: flex; gap: 1rem; margin: 0.3rem 0 0.1rem; font-size: 0.8rem; }
 .folder-path {
   max-width: 22rem;
   overflow: hidden;

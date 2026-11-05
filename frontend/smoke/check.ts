@@ -290,6 +290,23 @@ async function checkNotes(problems: string[]) {
     .find((b) => b.textContent === "Cancel")
     ?.click();
   if (document.getElementById("summary-long-block")!.hidden) problems.push("long summary not restored");
+  // The segment editor splits at the cursor (in characters) and merges.
+  document.querySelector<HTMLElement>('#transcript [aria-label="Edit segment"]')!.click();
+  const segBox = document.querySelector<HTMLTextAreaElement>("#transcript .editor textarea");
+  if (!segBox) problems.push("segment editor did not open");
+  else {
+    const tools = [...document.querySelectorAll<HTMLButtonElement>("#transcript .seg-tools button")];
+    if (tools.map((b) => b.textContent).join(",") !== "Split at cursor,Merge with next") {
+      problems.push(`segment tools: ${tools.map((b) => b.textContent).join(",")}`);
+    }
+    segBox.setSelectionRange(3, 3);
+    tools[0].click();
+    await new Promise((r) => setTimeout(r, 10));
+    const split = calls.filter((c) => c.cmd === "split_segment").pop();
+    if (split?.args?.at !== 3 || split?.args?.index !== 0) problems.push(`split call: ${JSON.stringify(split?.args)}`);
+    state.editing = null;
+    renderResult(MEETING);
+  }
   // Regenerate notes opens a panel with the template and language.
   document.getElementById("regen-notes-btn")!.click();
   await new Promise((r) => setTimeout(r, 30));

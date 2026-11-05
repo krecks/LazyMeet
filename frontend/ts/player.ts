@@ -161,7 +161,50 @@ export function startSegmentEdit(index, segEl) {
   };
   const actions = editorActions(commit, cancel);
   actions.insertBefore(select, actions.firstChild);
-  editor.appendChild(actions);
+  // Split at the cursor / merge with the next segment. Pending edits in the
+  // box are saved first, so neither throws away what was typed.
+  const saveFirst = async () => {
+    const body: Record<string, string> = {};
+    const text = ta.value.trim();
+    if (text && text !== seg.text) body.text = text;
+    if (select.value !== seg.speaker) body.speaker = select.value;
+    if (Object.keys(body).length) {
+      await call("patch_segment", { meeting_id: state.currentMeeting.id, index, fields: body });
+    }
+  };
+  const structural = async (cmd: string, args: Record<string, unknown>) => {
+    try {
+      await saveFirst();
+      const m = await call(cmd, { meeting_id: state.currentMeeting.id, index, ...args });
+      cleanup();
+      finishEdit(m);
+    } catch (e) {
+      showToast(editError(e));
+    }
+  };
+  const tools = el("div", "seg-tools");
+  const split = el("button", "link-btn");
+  split.type = "button";
+  split.textContent = "Split at cursor";
+  split.title = "Make two segments, the second starting at the cursor";
+  // Characters, not UTF-16 units, and counted in the trimmed text the
+  // backend stores.
+  split.addEventListener("mousedown", (e) => e.preventDefault()); // keep the cursor
+  split.addEventListener("click", () => {
+    const before = ta.value.slice(0, ta.selectionStart);
+    const lead = ta.value.length - ta.value.trimStart().length;
+    structural("split_segment", { at: Math.max(0, [...before].length - lead) });
+  });
+  tools.appendChild(split);
+  if (index < state.currentMeeting.segments.length - 1) {
+    const merge = el("button", "link-btn");
+    merge.type = "button";
+    merge.textContent = "Merge with next";
+    merge.title = "Join this segment and the one after it (keeps this speaker)";
+    merge.addEventListener("click", () => structural("merge_segments", {}));
+    tools.appendChild(merge);
+  }
+  editor.append(tools, actions);
   wireEditorKeys(ta, commit, cancel);
   segEl.appendChild(editor);
   ta.focus();

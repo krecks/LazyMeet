@@ -560,6 +560,23 @@ pub fn patch_segment(
     Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
 }
 
+/// Split transcript segment `index` at character `at` (counted in
+/// characters, as the editor's cursor is).
+pub fn split_segment(ctx: &Ctx, meeting_id: &str, index: usize, at: usize) -> ApiResult<Value> {
+    let updated = store::split_segment(&ctx.paths, &ctx.locks, meeting_id, index, at)
+        .map_err(status_conflict)?
+        .ok_or_else(|| ApiError::not_found("meeting not found"))?;
+    Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
+}
+
+/// Merge transcript segment `index` with the next one.
+pub fn merge_segments(ctx: &Ctx, meeting_id: &str, index: usize) -> ApiResult<Value> {
+    let updated = store::merge_segments(&ctx.paths, &ctx.locks, meeting_id, index)
+        .map_err(status_conflict)?
+        .ok_or_else(|| ApiError::not_found("meeting not found"))?;
+    Ok(Value::Object(store::public_meeting(&ctx.paths, &updated)))
+}
+
 /// Bulk transcript text edit — one locked write for all listed segments
 /// (the frontend's search & replace). Unlike `patch_segment`, an edit may
 /// leave a segment empty: replacing a phrase with nothing is legitimate, and
@@ -698,6 +715,7 @@ fn status_conflict(e: StoreError) -> ApiError {
         StoreError::UnknownSpeaker => ApiError::invalid("unknown speaker id"),
         StoreError::SegmentOutOfRange => ApiError::not_found("segment not found"),
         StoreError::NotRecognized => ApiError::conflict("speaker was not auto-recognized"),
+        StoreError::BadSplit => ApiError::invalid("split inside the text, not at its start or end"),
     }
 }
 

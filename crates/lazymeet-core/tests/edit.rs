@@ -312,3 +312,56 @@ fn concurrent_segment_edits_both_survive() {
     assert_eq!(record["segments"][0]["text"], "edit 0");
     assert_eq!(record["segments"][1]["text"], "edit 1");
 }
+
+// --------------------------------------------------------------------------
+// Split and merge
+// --------------------------------------------------------------------------
+
+#[test]
+fn split_then_merge_round_trips() {
+    let app = TestApp::fake();
+    let meeting = process_meeting(&app, "split.mp4");
+    let mid = meeting["id"].as_str().unwrap();
+    let mid_seg = &meeting["segments"][0];
+    api::patch_segment(&app.ctx, mid, 0, &changes("text", json!("Grüße an alle. Next topic.")))
+        .unwrap();
+    let (start, end) = (mid_seg["start"].as_f64().unwrap(), mid_seg["end"].as_f64().unwrap());
+    let n = meeting["segments"].as_array().unwrap().len();
+
+    // Split after "Grüße an alle." (14 characters, not bytes).
+    let split = api::split_segment(&app.ctx, mid, 0, 14).unwrap();
+    let segs = split["segments"].as_array().unwrap();
+    assert_eq!(segs.len(), n + 1);
+    assert_eq!(segs[0]["text"], "Grüße an alle.");
+    assert_eq!(segs[1]["text"], "Next topic.");
+    assert_eq!(segs[0]["speaker"], segs[1]["speaker"]);
+    let cut = segs[0]["end"].as_f64().unwrap();
+    assert_eq!(segs[1]["start"].as_f64().unwrap(), cut);
+    assert!(start < cut && cut < end, "cut {cut} inside {start}..{end}");
+    let expected = start + (end - start) * 14.0 / 26.0;
+    assert!((cut - expected).abs() < 1e-9, "proportional to characters");
+
+    let merged = api::merge_segments(&app.ctx, mid, 0).unwrap();
+    let segs = merged["segments"].as_array().unwrap();
+    assert_eq!(segs.len(), n);
+    assert_eq!(segs[0]["text"], "Grüße an alle. Next topic.");
+    assert_eq!(segs[0]["start"].as_f64().unwrap(), start);
+    assert_eq!(segs[0]["end"].as_f64().unwrap(), end);
+}
+
+#[test]
+fn split_and_merge_refuse_bad_positions() {
+    let app = TestApp::fake();
+    let meeting = process_meeting(&app, "split.mp4");
+    let mid = meeting["id"].as_str().unwrap();
+    let n = meeting["segments"].as_array().unwrap().len();
+    assert_eq!(api::split_segment(&app.ctx, mid, 0, 0).unwrap_err().code, 422, "nothing before");
+    assert_eq!(
+        api::split_segment(&app.ctx, mid, 0, 10_000).unwrap_err().code,
+        422,
+        "nothing after"
+    );
+    assert_eq!(api::split_segment(&app.ctx, mid, n, 3).unwrap_err().code, 404);
+    assert_eq!(api::merge_segments(&app.ctx, mid, n - 1).unwrap_err().code, 404, "no next segment");
+    assert_eq!(api::merge_segments(&app.ctx, "nope", 0).unwrap_err().code, 404);
+}

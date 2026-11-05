@@ -34,6 +34,8 @@ pub enum StoreError {
     UnknownSpeaker,
     /// Segment index out of range.
     SegmentOutOfRange,
+    /// A split point that would leave one half without text.
+    BadSplit,
     /// Confirm/reject on a speaker that was not auto-recognized.
     NotRecognized,
 }
@@ -304,6 +306,92 @@ pub fn update_segment(
     }
     let _ = atomic_write_json(&meeting_path(paths, meeting_id), &Value::Object(record.clone()));
     Ok(Some(record))
+}
+
+/// Run `edit` on a finished meeting's segment list under the lock and save.
+fn edit_segments(
+    paths: &Paths,
+    locks: &StoreLocks,
+    meeting_id: &str,
+    edit: impl FnOnce(&mut Vec<Value>) -> Result<(), StoreError>,
+) -> Result<Option<Record>, StoreError> {
+    let _g = locks.meetings.lock().unwrap();
+    let Some(mut record) = get_meeting_unlocked(paths, meeting_id) else {
+        return Ok(None);
+    };
+    if record.get("status").and_then(|v| v.as_str()) != Some("done") {
+        let status = record.get("status").and_then(|v| v.as_str()).map(String::from);
+        return Err(StoreError::StatusConflict(status));
+    }
+    let segments = record
+        .get_mut("segments")
+        .and_then(|v| v.as_array_mut())
+        .ok_or(StoreError::SegmentOutOfRange)?;
+    edit(segments)?;
+    let _ = atomic_write_json(&meeting_path(paths, meeting_id), &Value::Object(record.clone()));
+    Ok(Some(record))
+}
+
+/// Split segment `index` at character `at` of its text. There are no word
+/// timings, so the split time is placed in proportion to the characters.
+/// Both halves keep the speaker (re-assign one after if needed).
+pub fn split_segment(
+    paths: &Paths,
+    locks: &StoreLocks,
+    meeting_id: &str,
+    index: usize,
+    at: usize,
+) -> Result<Option<Record>, StoreError> {
+    edit_segments(paths, locks, meeting_id, |segments| {
+        let seg = segments.get(index).ok_or(StoreError::SegmentOutOfRange)?.clone();
+        let text = seg.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let total = text.chars().count();
+        let head: String = text.chars().take(at).collect();
+        let tail: String = text.chars().skip(at).collect();
+        let (head, tail) = (head.trim(), tail.trim());
+        if head.is_empty() || tail.is_empty() {
+            return Err(StoreError::BadSplit);
+        }
+        let start = seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let end = seg.get("end").and_then(|v| v.as_f64()).unwrap_or(start);
+        let cut = start + (end - start) * at.min(total) as f64 / total.max(1) as f64;
+        let mut first = seg.clone();
+        let mut second = seg;
+        if let (Some(a), Some(b)) = (first.as_object_mut(), second.as_object_mut()) {
+            a.insert("text".into(), json!(head));
+            a.insert("end".into(), json!(cut));
+            b.insert("text".into(), json!(tail));
+            b.insert("start".into(), json!(cut));
+        }
+        segments[index] = first;
+        segments.insert(index + 1, second);
+        Ok(())
+    })
+}
+
+/// Merge segment `index` with the one after it: one segment spanning both,
+/// texts joined, the first one's speaker.
+pub fn merge_segments(
+    paths: &Paths,
+    locks: &StoreLocks,
+    meeting_id: &str,
+    index: usize,
+) -> Result<Option<Record>, StoreError> {
+    edit_segments(paths, locks, meeting_id, |segments| {
+        if index + 1 >= segments.len() {
+            return Err(StoreError::SegmentOutOfRange);
+        }
+        let next = segments.remove(index + 1);
+        let seg = segments[index].as_object_mut().ok_or(StoreError::SegmentOutOfRange)?;
+        let text =
+            |v: &Value| v.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+        let joined = format!("{} {}", text(&Value::Object(seg.clone())), text(&next));
+        seg.insert("text".into(), json!(joined.trim()));
+        if let Some(end) = next.get("end").cloned() {
+            seg.insert("end".into(), end);
+        }
+        Ok(())
+    })
 }
 
 /// Bulk variant of `update_segment` for search & replace: every edit is

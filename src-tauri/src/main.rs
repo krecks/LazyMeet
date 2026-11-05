@@ -83,6 +83,8 @@ fn main() {
             commands::export_meeting,
             commands::export_meetings,
             commands::delete_meetings,
+            commands::split_segment,
+            commands::merge_segments,
             commands::tag_meetings,
             commands::get_speakers,
             commands::rename_known_speaker,
