@@ -320,21 +320,76 @@ fn replace_name(text: &str, old: &str, new: &str) -> String {
 
 /// Rewrite one speaker's display name inside the generated notes.
 fn rename_in_notes(record: &mut Record, old: &str, new: &str) {
-    if let Some(Value::String(s)) = record.get("summary") {
-        let replaced = replace_name(s, old, new);
-        record.insert("summary".into(), json!(replaced));
-    }
-    for key in ["takeaways", "action_items"] {
-        if let Some(Value::Array(items)) = record.get(key) {
-            let replaced: Vec<Value> = items
-                .iter()
-                .map(|v| match v.as_str() {
-                    Some(s) => json!(replace_name(s, old, new)),
-                    None => v.clone(),
-                })
-                .collect();
+    for key in ["summary", "summary_long"] {
+        if let Some(Value::String(s)) = record.get(key) {
+            let replaced = replace_name(s, old, new);
             record.insert(key.into(), json!(replaced));
         }
+    }
+    for key in ["takeaways", "action_items"] {
+        let items = note_items(record.get(key));
+        if items.is_empty() {
+            continue;
+        }
+        let replaced: Vec<Value> = items
+            .iter()
+            .map(|v| {
+                let short = v.get("short").and_then(|s| s.as_str()).unwrap_or("");
+                let detail = v.get("detail").and_then(|s| s.as_str()).unwrap_or("");
+                json!({
+                    "short": replace_name(short, old, new),
+                    "detail": replace_name(detail, old, new),
+                })
+            })
+            .collect();
+        record.insert(key.into(), json!(replaced));
+    }
+}
+
+/// One notes list normalized to `[{short, detail}]`.
+///
+/// Records written before the short/detail split store plain strings, and the
+/// notes API accepts both shapes, so every reader goes through here instead
+/// of assuming one. Nothing is rewritten on disk: `public_meeting` applies the
+/// same normalization on the way out, which is what the UI and the search
+/// index see.
+pub fn note_items(value: Option<&Value>) -> Vec<Value> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(note_item).collect())
+        .unwrap_or_default()
+}
+
+fn note_item(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(s) => {
+            let s = s.trim();
+            (!s.is_empty()).then(|| json!({"short": s, "detail": ""}))
+        }
+        Value::Object(o) => {
+            let field =
+                |k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+            let mut short = field("short");
+            let mut detail = field("detail");
+            // A model that answers `{detail: "..."}` only still yields a line.
+            if short.is_empty() {
+                short = std::mem::take(&mut detail);
+            }
+            if short == detail {
+                detail.clear();
+            }
+            (!short.is_empty()).then(|| json!({"short": short, "detail": detail}))
+        }
+        _ => None,
+    }
+}
+
+/// The display text of a note item, for search hits and exports.
+pub fn note_text(item: &Value) -> String {
+    let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
+    match item.get("detail").and_then(|v| v.as_str()).filter(|d| !d.is_empty()) {
+        Some(detail) => format!("{short} — {detail}"),
+        None => short.to_string(),
     }
 }
 
@@ -636,14 +691,13 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
             }
         }
         for (key, kind) in [("takeaways", "takeaway"), ("action_items", "action_item")] {
-            for (i, item) in
-                rec.get(key).and_then(|v| v.as_array()).into_iter().flatten().enumerate()
-            {
-                let Some(text) = item.as_str() else { continue };
-                let n = occurrences(text);
+            for (i, item) in note_items(rec.get(key)).iter().enumerate() {
+                let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
+                let detail = item.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                let n = occurrences(short) + occurrences(detail);
                 if n > 0 {
                     push(
-                        json!({"kind": kind, "index": i, "text": text}),
+                        json!({"kind": kind, "index": i, "text": note_text(item)}),
                         n,
                         &mut hits,
                         &mut count,
@@ -723,6 +777,14 @@ pub fn public_meeting(paths: &Paths, record: &Record) -> Record {
         .or_else(|| record.get("filename").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
         .unwrap_or("Meeting");
     out.insert("title".into(), json!(title));
+    // Notes are always handed out as [{short, detail}] — older records stored
+    // plain strings and the UI should not have to know that.
+    for key in ["takeaways", "action_items"] {
+        out.insert(key.into(), Value::Array(note_items(record.get(key))));
+    }
+    if !out.get("summary_long").map(|v| v.is_string()).unwrap_or(false) {
+        out.insert("summary_long".into(), json!(""));
+    }
     // whether segment playback is possible (recording still on disk)
     out.insert("has_audio".into(), json!(audio_path(paths, record).is_some()));
     out

@@ -70,7 +70,8 @@ fn put_config_rejects_invalid() {
     for body in [
         obj(&[("SPEAKER_THRESHOLD", json!(1.5))]),
         obj(&[("SPEAKER_THRESHOLD", json!(-0.1))]),
-        obj(&[("NUM_THREADS", json!(0))]),
+        obj(&[("NUM_THREADS", json!(-1))]),
+        obj(&[("NUM_THREADS", json!(config::max_threads() + 1))]),
         obj(&[("MIN_SPEAKER_SECONDS", json!(9999))]),
         obj(&[("KEEP_AUDIO", json!("sometimes"))]),
     ] {
@@ -112,12 +113,33 @@ fn summary_prompt_round_trip() {
 }
 
 #[test]
-fn num_threads_default_tracks_cores() {
+fn num_threads_defaults_to_auto_and_tracks_cores() {
     let cores = std::thread::available_parallelism().map(|n| n.get() as i64).unwrap_or(8);
     let maximum = config::max_threads();
-    let default = config::default_value("NUM_THREADS").as_i64().unwrap();
     assert_eq!(maximum, cores.min(16));
-    assert_eq!(default, (cores * 3 / 4).clamp(1, maximum));
+    // The saved default is "auto"; the resolved count is 75 % of the cores,
+    // capped, so the same config.json works on a 4-core laptop and a 32-core
+    // workstation without pinning either to a thread count.
+    assert_eq!(config::default_value("NUM_THREADS"), json!(config::AUTO_THREADS));
+    assert_eq!(config::auto_threads(), (cores * 3 / 4).clamp(1, maximum));
+    let auto = config::Config::from_overrides(&Default::default());
+    assert!(auto.auto_threads());
+    assert_eq!(auto.num_threads(), config::auto_threads());
+    // An explicit value is honored (and still clamped to the machine).
+    let mut overrides = serde_json::Map::new();
+    overrides.insert("NUM_THREADS".into(), json!(1));
+    let pinned = config::Config::from_overrides(&overrides);
+    assert!(!pinned.auto_threads());
+    assert_eq!(pinned.num_threads(), 1);
+}
+
+#[test]
+fn config_payload_reports_auto_threads() {
+    let app = TestApp::fake();
+    let data = api::config_payload(&app.ctx);
+    assert_eq!(data["cores"], json!(config::cpu_count()));
+    assert_eq!(data["auto_threads"], json!(config::auto_threads()));
+    assert_eq!(data["limits"]["NUM_THREADS"]["min"], json!(0.0));
 }
 
 #[test]

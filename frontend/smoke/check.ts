@@ -88,6 +88,15 @@ async function checkSettings(problems: string[], hidden: (id: string) => boolean
     if (row(gone)) problems.push(`${gone} row still rendered`);
   }
   if (!row("SUMMARY_PROVIDER")) problems.push("summary compute row missing");
+  // Threads: "Auto" is the default and comes first, the counts follow.
+  const threads = q<HTMLSelectElement>("#cfg-NUM_THREADS");
+  if (!threads) problems.push("CPU threads select missing");
+  else {
+    if (threads.options[0]?.value !== "0") problems.push("CPU threads: Auto is not first");
+    if (!/Auto — 7 of 10 threads/.test(threads.options[0].textContent || ""))
+      problems.push(`CPU threads: Auto label is "${threads.options[0].textContent}"`);
+    if (threads.options.length !== 13) problems.push(`CPU threads has ${threads.options.length} options`);
+  }
   // Classic-model sliders only with pyannote.
   if (!row("DIAR_THRESHOLD")?.hidden) problems.push("pyannote slider visible with Nemotron");
   q<HTMLElement>('[data-model-id="pyannote-3.0"]')!.click();

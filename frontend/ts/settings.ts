@@ -16,6 +16,11 @@ interface ConfigMeta {
   languagesOf?: string;
   providers?: boolean;
   textarea?: boolean;
+  /**
+   * A thread count: a select with "Auto" first (the backend resolves it to
+   * 75 % of the cores) and every explicit count after it.
+   */
+  threads?: boolean;
   toggle?: boolean;
   number?: boolean;
   step?: number;
@@ -95,8 +100,8 @@ const CONFIG_META: Record<string, ConfigMeta> = {
   NUM_THREADS: {
     section: "config-advanced",
     label: "CPU threads",
-    help: "Threads for transcription and speaker separation (and the summary when it runs on the CPU). More finish faster but occupy more of the computer.",
-    number: true,
+    help: "Threads for transcription and speaker separation (and the summary when it runs on the CPU). Auto takes three quarters of the cores and leaves the machine responsive; pick a number to override it.",
+    threads: true,
   },
   SUMMARY_PROMPT: {
     section: "config-advanced",
@@ -375,6 +380,24 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     describe(input);
     sw.append(input, el("span", "track"));
     control.appendChild(sw);
+  } else if (meta.threads) {
+    // Auto is the default and the only sane choice for most people; the
+    // explicit counts stay available for the "leave two cores for Zoom" case.
+    const select = document.createElement("select");
+    select.dataset.numeric = "1";
+    describe(select);
+    const current = String(cfg.values[name] ?? "0");
+    const auto = Number(cfg.auto_threads || 0);
+    const cores = Number(cfg.cores || 0);
+    const autoLabel = cores
+      ? `Auto — ${auto} of ${cores} threads (75 % of the cores)`
+      : `Auto — ${auto} threads (75 % of the cores)`;
+    select.appendChild(new Option(autoLabel, "0", false, current === "0"));
+    const most = Number(limits.max) || auto || 1;
+    for (let n = 1; n <= most; n += 1) {
+      select.appendChild(new Option(`${n} thread${n === 1 ? "" : "s"}`, String(n), false, current === String(n)));
+    }
+    control.appendChild(select);
   } else if (meta.number) {
     const input = document.createElement("input");
     input.type = "number";
@@ -710,7 +733,9 @@ function formValues(): Record<string, unknown> {
   for (const input of controls) {
     if (input.disabled) continue;
     const name = input.dataset.config;
-    if (input.tagName === "SELECT" || input.type === "hidden") out[name] = input.value;
+    if (input.tagName === "SELECT" || input.type === "hidden") {
+      out[name] = (input as HTMLSelectElement).dataset?.numeric ? parseInt(input.value, 10) : input.value;
+    }
     else if (input.tagName === "TEXTAREA") out[name] = input.value.trim();
     else if (input.type === "checkbox") out[name] = (input as HTMLInputElement).checked;
     else if (input.type === "number") out[name] = parseInt(input.value, 10);

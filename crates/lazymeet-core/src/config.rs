@@ -114,7 +114,7 @@ pub struct TunableSpec {
     pub max: Option<f64>,
 }
 
-fn cpu_count() -> i64 {
+pub fn cpu_count() -> i64 {
     std::thread::available_parallelism().map(|n| n.get() as i64).unwrap_or(8)
 }
 
@@ -123,10 +123,16 @@ pub fn max_threads() -> i64 {
     cpu_count().min(16)
 }
 
-/// max(1, min(max_threads, cores*3/4)) — fast but leaves the machine responsive.
-fn default_threads() -> i64 {
+/// The "Auto" thread count: 75 % of the cores, at most `max_threads`. More
+/// threads than that buy nothing on these models (they stop scaling around
+/// the physical core count) while still occupying the whole machine.
+pub fn auto_threads() -> i64 {
     (cpu_count() * 3 / 4).clamp(1, max_threads())
 }
+
+/// The `NUM_THREADS` value meaning "pick for me": resolved at use time, so a
+/// saved config keeps following the machine it runs on.
+pub const AUTO_THREADS: i64 = 0;
 
 /// Same order as Python's TUNABLES dict (the settings UI relies on it).
 pub fn tunables() -> Vec<TunableSpec> {
@@ -156,7 +162,14 @@ pub fn tunables() -> Vec<TunableSpec> {
             Some(600.0),
         ),
         t("SUMMARY_PROVIDER", "LAZYMEET_SUMMARY_PROVIDER", Kind::Str, None, None),
-        t("NUM_THREADS", "LAZYMEET_NUM_THREADS", Kind::Int, Some(1.0), Some(max_threads() as f64)),
+        // 0 = auto (75 % of the cores), resolved by `Config::num_threads`.
+        t(
+            "NUM_THREADS",
+            "LAZYMEET_NUM_THREADS",
+            Kind::Int,
+            Some(AUTO_THREADS as f64),
+            Some(max_threads() as f64),
+        ),
         t("KEEP_AUDIO", "LAZYMEET_KEEP_AUDIO", Kind::Bool, None, None),
     ]
 }
@@ -165,8 +178,28 @@ pub fn tunables() -> Vec<TunableSpec> {
 /// JSON response format and the notes-language instruction are appended by
 /// the pipeline and are NOT part of this prompt, so editing it can't break
 /// summary parsing or the language setting.
-pub const DEFAULT_SUMMARY_PROMPT: &str = "You are a meeting assistant. Given a transcript with \
-    speaker labels, produce a concise summary, the key takeaways, and concrete action items.";
+///
+/// Written for small models: one rule per line, the anti-hallucination rule
+/// first, and an explicit shape for every field. The short/long split is what
+/// keeps the notes scannable and still detailed — a single paragraph prompt
+/// makes 4B models produce either a bare list or a wall of text.
+pub const DEFAULT_SUMMARY_PROMPT: &str = "You are an expert meeting note-taker. You read a \
+transcript with speaker labels and write the notes someone who missed the meeting needs.\n\n\
+Rules:\n\
+- Use only what the transcript says. Never invent facts, names, numbers, owners, or deadlines.\n\
+- Use the speakers' names exactly as written; say \"the team\" only when nobody is named.\n\
+- Keep exact figures, dates, product names and decisions instead of paraphrasing them away.\n\
+- Skip small talk, filler and anything that was merely mentioned in passing.\n\
+- Write plain prose in the strings: no markdown, no bullet characters, no headings.\n\n\
+What to write:\n\
+- summary: 2-3 sentences — what the meeting was about and what came out of it.\n\
+- summary_long: 2-4 short paragraphs, in order, covering the topics discussed, the \
+reasoning and trade-offs, any disagreement, and the decisions reached.\n\
+- takeaways: 3-6 points. short is one line (max ~15 words) stating the outcome; detail \
+adds the context, number or reason behind it (1-2 sentences).\n\
+- action_items: only concrete commitments (a named person does something). short is \
+\"Owner: verb + object\" (~15 words); detail carries the deadline, dependency and how it \
+was agreed. Leave this list empty rather than inventing owners or dates.";
 
 pub fn default_value(name: &str) -> Value {
     match name {
@@ -182,7 +215,7 @@ pub fn default_value(name: &str) -> Value {
         "DIAR_THRESHOLD" => json!(0.7),
         "SPEAKER_MERGE_THRESHOLD" => json!(0.6),
         "MIN_SPEAKER_SECONDS" => json!(15.0),
-        "NUM_THREADS" => json!(default_threads()),
+        "NUM_THREADS" => json!(AUTO_THREADS),
         "KEEP_AUDIO" => json!(true),
         _ => Value::Null,
     }
@@ -321,8 +354,17 @@ impl Config {
     pub fn min_speaker_seconds(&self) -> f64 {
         self.f64_of("MIN_SPEAKER_SECONDS")
     }
+    /// The thread count to actually run with: `AUTO_THREADS` resolves to 75 %
+    /// of the cores here, so the saved value stays machine-independent.
     pub fn num_threads(&self) -> i64 {
-        self.values["NUM_THREADS"].as_i64().unwrap_or(1)
+        match self.values["NUM_THREADS"].as_i64().unwrap_or(AUTO_THREADS) {
+            AUTO_THREADS => auto_threads(),
+            n => n.clamp(1, max_threads()),
+        }
+    }
+    /// Whether `NUM_THREADS` is left on "Auto".
+    pub fn auto_threads(&self) -> bool {
+        self.values["NUM_THREADS"].as_i64().unwrap_or(AUTO_THREADS) == AUTO_THREADS
     }
     /// The summarizer runs on the GPU when SUMMARY_PROVIDER is "gpu".
     pub fn use_gpu(&self) -> bool {

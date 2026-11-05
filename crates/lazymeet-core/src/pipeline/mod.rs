@@ -46,11 +46,37 @@ pub struct MergedSegment {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One takeaway or action item: a scannable one-liner plus the detail behind
+/// it. Older meetings store plain strings; `store::note_items` reads both.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct NoteItem {
+    /// The one-line point shown in the list.
+    pub short: String,
+    /// 1-2 sentences of context, numbers, deadline; may be empty.
+    #[serde(default)]
+    pub detail: String,
+}
+
+impl NoteItem {
+    pub fn new(short: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self { short: short.into(), detail: detail.into() }
+    }
+
+    /// A bare line (no detail) — used for older records and user-added rows.
+    pub fn line(text: impl Into<String>) -> Self {
+        Self { short: text.into(), detail: String::new() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Summary {
+    /// The at-a-glance paragraph (2-3 sentences).
     pub summary: String,
-    pub takeaways: Vec<String>,
-    pub action_items: Vec<String>,
+    /// The detailed narrative; empty on records from before it existed.
+    #[serde(default)]
+    pub summary_long: String,
+    pub takeaways: Vec<NoteItem>,
+    pub action_items: Vec<NoteItem>,
 }
 
 pub type Voiceprints = BTreeMap<String, Vec<f64>>;

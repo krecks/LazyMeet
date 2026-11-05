@@ -610,7 +610,28 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   font-family: var(--font-sans);
 }
 .note-list.actions li::before { content: "☐"; }
-.note-list li .item-text { flex: 1; overflow-wrap: anywhere; }
+.note-list li .item-body { flex: 1; min-width: 0; }
+.note-list li .item-text { display: block; overflow-wrap: anywhere; }
+/* The detail behind a takeaway/action item: same voice, one step quieter, so
+   the one-liners stay scannable and the context is still there. */
+.note-list li .item-detail {
+  display: block;
+  margin-top: 0.18rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.note-list li .item-editor { flex: 1; min-width: 0; }
+.note-list li .item-editor input,
+.note-list li .item-editor textarea {
+  width: 100%;
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  resize: vertical;
+}
+.note-list li .item-editor textarea { margin-top: 0.3rem; font-size: 0.88rem; }
 .note-list li .item-actions { display: flex; gap: 0.1rem; opacity: 0; transition: opacity 0.12s; align-self: center; }
 .note-list li:hover .item-actions, .note-list li .item-actions:focus-within { opacity: 1; }
 .note-list li.list-empty::before { content: none; }
@@ -618,6 +639,44 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
 
 .add-row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
 .add-row input { flex: 1; font-size: 0.9rem; }
+
+/* The long summary — the same story as #summary-text, one level deeper. */
+.summary-long { margin-top: 0.7rem; }
+.summary-long > summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  list-style: none;
+  padding: 0.15rem 0;
+}
+.summary-long > summary::-webkit-details-marker { display: none; }
+.summary-long > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  transition: transform 0.12s;
+}
+.summary-long[open] > summary::before { content: "▾"; }
+.summary-long > summary:hover { color: var(--text); }
+.summary-long > div {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--text);
+  padding-top: 0.2rem;
+}
+.summary-long > div p { margin: 0 0 0.6rem; }
+.summary-long > div p:last-child { margin-bottom: 0; }
+
+/* Where the time went on the last run (from the record's `timings`). */
+.timings-note {
+  margin: 1.1rem 0 0;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
 
 /* inline editors (summary, list items, segments, title) */
 .editor { margin: 0.2rem 0; }

@@ -183,18 +183,35 @@ export async function renameSpeaker(meetingId, diarizedId, newName) {
 // --------------------------------------------------------------------------
 // Copy to clipboard
 // --------------------------------------------------------------------------
+// Notes items are `{short, detail}` (the backend normalizes older plain
+// strings for us); `detail` is optional and may be empty.
+export function noteLine(item) {
+  if (typeof item === "string") return item;
+  return (item && item.short) || "";
+}
+
+export function noteDetail(item) {
+  if (!item || typeof item === "string") return "";
+  const detail = item.detail || "";
+  return detail === noteLine(item) ? "" : detail;
+}
+
 export function notesAsText(m) {
   const lines = [`# ${m.title || m.filename}`, ""];
   if (m.summary) lines.push(m.summary, "");
-  if (m.takeaways && m.takeaways.length) {
-    lines.push("Key takeaways:");
-    m.takeaways.forEach((t) => lines.push(`- ${t}`));
+  if (m.summary_long) lines.push(m.summary_long, "");
+  const list = (heading, items, checkbox) => {
+    if (!items || !items.length) return;
+    lines.push(heading);
+    items.forEach((item) => {
+      lines.push(`${checkbox ? "- [ ] " : "- "}${noteLine(item)}`);
+      const detail = noteDetail(item);
+      if (detail) lines.push(`  ${detail}`);
+    });
     lines.push("");
-  }
-  if (m.action_items && m.action_items.length) {
-    lines.push("Action items:");
-    m.action_items.forEach((a) => lines.push(`- [ ] ${a}`));
-  }
+  };
+  list("Key takeaways:", m.takeaways, false);
+  list("Action items:", m.action_items, true);
   return lines.join("\n").trim();
 }
 

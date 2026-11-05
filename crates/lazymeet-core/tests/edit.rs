@@ -104,18 +104,36 @@ fn content_edit_on_done_meeting() {
         mid,
         &obj(&[
             ("summary", json!("We agreed on the plan.")),
+            ("summary_long", json!("Long version.")),
             ("takeaways", json!(["Ship it", "  ", "", "Test it  "])),
-            ("action_items", json!(["Alice: deploy"])),
+            (
+                "action_items",
+                json!([
+                    {"short": "Alice: deploy", "detail": "After the freeze, on Friday."}
+                ]),
+            ),
         ]),
     )
     .unwrap();
     assert_eq!(data["summary"], "We agreed on the plan.");
-    assert_eq!(data["takeaways"], json!(["Ship it", "Test it"])); // empties dropped, stripped
-    assert_eq!(data["action_items"], json!(["Alice: deploy"]));
+    assert_eq!(data["summary_long"], "Long version.");
+    // empties dropped, strings upgraded to the {short, detail} shape
+    assert_eq!(
+        data["takeaways"],
+        json!([
+            {"short": "Ship it", "detail": ""},
+            {"short": "Test it", "detail": ""}
+        ])
+    );
+    assert_eq!(
+        data["action_items"],
+        json!([{"short": "Alice: deploy", "detail": "After the freeze, on Friday."}])
+    );
 
     let (md, _) = api::export_meeting(&app.ctx, mid).unwrap();
     assert!(md.contains("We agreed on the plan."));
-    assert!(md.contains("- [ ] Alice: deploy"));
+    assert!(md.contains("Long version."));
+    assert!(md.contains("- [ ] Alice: deploy\n  After the freeze, on Friday."));
 }
 
 #[test]

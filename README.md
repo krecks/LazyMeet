@@ -65,6 +65,12 @@ the spoken language, so it needs one set (in Settings or per recording):
    and summary. Rename `Speaker 1/2/3` to real names; those names are remembered
    and auto-applied to the same voices next time.
 
+Each meeting's notes have a short and a long form: a 2-3 sentence summary plus
+an expandable **In detail** narrative, and key takeaways and action items that
+carry a one-line point with the context, numbers and deadlines behind it.
+Everything is editable, and the notes can be regenerated with another model
+without re-transcribing.
+
 You install nothing else — ffmpeg, the models, and the LLM are all bundled or
 auto-downloaded.
 
@@ -102,8 +108,8 @@ saved voices in the **Known speakers** panel.
 
 Measured on a real 28.5-minute, 1.23 GB OBS recording (HEVC 1728×1122@60,
 167 transcript segments, full notes produced) on an **Apple M1 Pro with the
-default settings** (7 CPU threads: ~75 % of cores). End to end the recording
-processes in **~2.6 minutes — about 11× faster than realtime**:
+default settings** (threads on *Auto*: 75 % of the cores). End to end the
+recording processes in **~2.6 minutes — about 11× faster than realtime**:
 
 - **Transcription and diarization run concurrently.** They read the same
   decoded audio with disjoint models and run side by side: Nemotron gets
@@ -143,6 +149,11 @@ right). It runs your selected models over five minutes of audio the way a
 meeting runs them and estimates how long an hour of meeting takes on your
 machine; where the summary can run on the GPU or the CPU it times both and
 can switch to the faster one.
+
+Every processed meeting also stores the wall-clock seconds it spent per stage
+(`timings` on the record), shown as one muted line under the notes: "Took
+3m 12s — transcription 2m 04s · speakers 31s · summary 22s". That is a real
+profile of your machine on a real recording, without running anything extra.
 
 ## Privacy
 
@@ -240,7 +251,7 @@ Environment variables (all optional):
 | `LAZYMEET_DIAR_MODEL` | `nemotron-3-diarization` | Diarizer: `nemotron-3-diarization` (up to 8 speakers) or `pyannote-3.0` (classic) |
 | `LAZYMEET_MERGE_THRESHOLD` | `0.6` | Voiceprint similarity at which over-split diarized labels merge |
 | `LAZYMEET_MIN_SPEAKER_SECONDS` | `15` | Classic diarizer only: speakers with less speech fold into the closest main voice |
-| `LAZYMEET_NUM_THREADS` | ~75% of cores | ONNX/LLM CPU threads |
+| `LAZYMEET_NUM_THREADS` | auto (75 % of cores) | ONNX/LLM CPU threads; `0` = auto |
 | `LAZYMEET_ASR_URL` / `LAZYMEET_LLM_URL` / … | release URLs | Override model downloads |
 | `LAZYMEET_KEEP_AUDIO` | `1` | `1` = keep only the audio track for playback (video files are deleted after processing); `0` = delete recordings entirely (disables segment playback) |
 | `LAZYMEET_FAKE` | unset | `1` = stubbed pipeline for dev/tests |

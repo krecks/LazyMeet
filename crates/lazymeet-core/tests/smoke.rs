@@ -16,6 +16,14 @@ fn full_lifecycle() {
     assert!(!meeting["segments"].as_array().unwrap().is_empty());
     assert!(!meeting["speakers"].as_object().unwrap().is_empty());
     assert!(!meeting["summary"].as_str().unwrap().is_empty());
+    // The notes carry a long variant and {short, detail} items; the run's
+    // per-stage timings are stored on the record for the UI.
+    assert!(!meeting["summary_long"].as_str().unwrap().is_empty());
+    assert!(!meeting["takeaways"][0]["short"].as_str().unwrap().is_empty());
+    assert!(!meeting["takeaways"][0]["detail"].as_str().unwrap().is_empty());
+    for key in ["extract", "transcribe", "diarize", "identify", "summarize", "total"] {
+        assert!(meeting["timings"][key].is_number(), "timings.{key} missing");
+    }
     assert!(meeting.get("voiceprints").is_none());
     assert!(meeting.get("worker_pid").is_none());
 
@@ -119,10 +127,14 @@ fn rename_updates_generated_notes() {
     names.insert("spk_0".into(), json!("Anna"));
     store::merge_speaker_names(&app.ctx.paths, &app.ctx.locks, mid, &names).unwrap();
     let meeting = store::get_meeting(&app.ctx.paths, &app.ctx.locks, mid).unwrap();
-    // "Speaker 10" must survive the "Speaker 1" rename untouched.
+    // "Speaker 10" must survive the "Speaker 1" rename untouched — in the
+    // short line and in the detail text alike.
     assert_eq!(meeting["summary"], "Anna briefs Speaker 10 on the launch.");
-    assert_eq!(meeting["takeaways"], json!(["Anna owns the rollout."]));
-    assert_eq!(meeting["action_items"], json!(["Anna sends the recap to Speaker 10."]));
+    assert_eq!(meeting["takeaways"], json!([{"short": "Anna owns the rollout.", "detail": ""}]));
+    assert_eq!(
+        meeting["action_items"],
+        json!([{"short": "Anna sends the recap to Speaker 10.", "detail": ""}])
+    );
 }
 
 #[test]

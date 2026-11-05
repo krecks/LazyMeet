@@ -89,17 +89,30 @@ pub fn voiceprints(turns: &[Turn]) -> Voiceprints {
 }
 
 pub fn summary() -> Summary {
+    use super::NoteItem;
     Summary {
         summary: "Weekly sync covering the transcription pipeline. The diarization step is \
                   complete and the speaker library is the remaining item before Friday."
             .into(),
+        summary_long: "The team reviewed the transcription pipeline and confirmed that the \
+                       diarization step is done. The speaker library is the only open \
+                       deliverable; it has to land before Friday's demo. The demo recording \
+                       is sent to the team right after this meeting."
+            .into(),
         takeaways: vec![
-            "Diarization step is implemented.".into(),
-            "Speaker library is the next deliverable.".into(),
+            NoteItem::new(
+                "Diarization step is implemented.",
+                "Speaker separation was the last pipeline stage without a working model; it \
+                 now runs end to end.",
+            ),
+            NoteItem::new(
+                "Speaker library is the next deliverable.",
+                "Named voices need to persist across recordings before the demo.",
+            ),
         ],
         action_items: vec![
-            "Add the speaker library before Friday.".into(),
-            "Send the demo recording to the team.".into(),
+            NoteItem::new("Add the speaker library before Friday.", "Blocks the demo; due Friday."),
+            NoteItem::new("Send the demo recording to the team.", "Sent after this meeting."),
         ],
     }
 }

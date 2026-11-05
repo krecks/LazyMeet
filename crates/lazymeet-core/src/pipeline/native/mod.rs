@@ -431,7 +431,11 @@ mod tests {
             "summary: {}\ntakeaways: {:#?}\naction items: {:#?}",
             summary.summary, summary.takeaways, summary.action_items
         );
-        let text = format!("{} {}", summary.summary, summary.takeaways.join(" "));
+        let text = format!(
+            "{} {}",
+            summary.summary,
+            summary.takeaways.iter().map(|t| t.short.as_str()).collect::<Vec<_>>().join(" ")
+        );
         assert_eq!(detect_language(&text), Some("de"), "notes are not German: {text}");
     }
 }

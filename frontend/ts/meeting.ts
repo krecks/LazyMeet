@@ -14,7 +14,7 @@ import {
   wireEditorKeys,
 } from "./helpers";
 import { refreshMeetings, renderMeetingList } from "./meetings";
-import { copyText, notesAsText, releasePlayer, transcriptAsText } from "./player";
+import { copyText, noteDetail, noteLine, notesAsText, releasePlayer, transcriptAsText } from "./player";
 import { hideSearchResults, searchOpen } from "./search";
 import { state } from "./state";
 import { buildColorMap, renderLegend, renderTranscript } from "./transcript";
@@ -205,15 +205,57 @@ export function renderResult(m) {
   // version on screen is a snapshot — never editable.
   const editable = m.status === "done" && !viewed;
   $("summary-text").textContent = shown.summary || "";
+  renderSummaryLong(shown.summary_long);
   $("summary-edit-btn").classList.toggle("hidden", !editable);
   $("summary-edit-btn").onclick = startSummaryEdit;
   renderNoteList(shown, "takeaways", "takeaways", editable);
   renderNoteList(shown, "action-items", "action_items", editable);
+  renderTimings(viewed ? null : m.timings);
 
   const colorOf = buildColorMap(shown.segments || []);
   renderLegend(shown, colorOf, !!viewed);
   renderTranscript(shown, colorOf, editable);
   renderHistory(m, latestV);
+}
+
+/// The long summary: paragraphs of the same story as `summary`, rendered in
+/// a collapsible block so the top of the page stays scannable. Older meetings
+/// have none — the block is hidden rather than shown empty.
+function renderSummaryLong(text) {
+  const block = $("summary-long-block");
+  const body = $("summary-long-text");
+  body.innerHTML = "";
+  const paragraphs = String(text || "")
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  block.hidden = !paragraphs.length;
+  for (const text of paragraphs) {
+    const p = document.createElement("p");
+    p.textContent = text;
+    body.appendChild(p);
+  }
+}
+
+/// "Took 3m 12s — transcription 2m 04s · speakers 31s · summary 22s" — where
+/// the time actually went, from the timings the worker stores per run.
+function renderTimings(t) {
+  const node = $("timings-note");
+  if (!t || !(t.total > 0)) {
+    node.classList.add("hidden");
+    return;
+  }
+  const fmt = (s) =>
+    s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(1)}s`;
+  const parts = [
+    ["transcription", t.transcribe],
+    ["speakers", (t.diarize || 0) + (t.identify || 0)],
+    ["summary", t.summarize],
+  ]
+    .filter(([, s]) => s > 0.05)
+    .map(([name, s]) => `${name} ${fmt(s)}`);
+  node.textContent = `Took ${fmt(t.total)}${parts.length ? ` — ${parts.join(" · ")}` : ""}`;
+  node.classList.remove("hidden");
 }
 
 /// Queue a regeneration; the meeting-updated event flow takes over from there.
@@ -365,14 +407,25 @@ function startSummaryEdit() {
   if (state.editing || !state.currentMeeting) return;
   state.editing = "summary";
   const p = $("summary-text");
+  const longBlock = $("summary-long-block");
   p.classList.add("hidden");
   $("summary-edit-btn").classList.add("hidden");
   const editor = el("div", "editor");
+  const label = (text) => {
+    const s = el("span", "editor-label muted small");
+    s.textContent = text;
+    return s;
+  };
   const ta = document.createElement("textarea");
-  ta.rows = 6;
+  ta.rows = 4;
   ta.value = state.currentMeeting.summary || "";
   ta.setAttribute("aria-label", "Summary");
-  editor.appendChild(ta);
+  const longTa = document.createElement("textarea");
+  longTa.rows = 8;
+  longTa.value = state.currentMeeting.summary_long || "";
+  longTa.setAttribute("aria-label", "Detailed summary");
+  longTa.placeholder = "Optional: the long version — topics, reasoning, decisions.";
+  editor.append(label("Summary"), ta, label("In detail"), longTa);
   const cleanup = () => {
     editor.remove();
     p.classList.remove("hidden");
@@ -381,7 +434,7 @@ function startSummaryEdit() {
     try {
       const m = await call("patch_meeting", {
         meeting_id: state.currentMeeting.id,
-        fields: { summary: ta.value },
+        fields: { summary: ta.value, summary_long: longTa.value },
       });
       cleanup();
       finishEdit(m);
@@ -395,7 +448,8 @@ function startSummaryEdit() {
   };
   editor.appendChild(editorActions(commit, cancel));
   wireEditorKeys(ta, commit, cancel);
-  p.parentNode.insertBefore(editor, p.nextSibling);
+  wireEditorKeys(longTa, commit, cancel);
+  p.parentNode.insertBefore(editor, longBlock.nextSibling);
   ta.focus();
 }
 
@@ -408,11 +462,21 @@ function renderNoteList(m, elId, field, editable) {
     li.textContent = "None";
     ul.appendChild(li);
   }
-  items.forEach((text, i) => {
+  items.forEach((item, i) => {
     const li = document.createElement("li");
+    // Every item is {short, detail}: a scannable line plus the context behind
+    // it. The backend normalizes older plain-string records to that shape.
+    const body = el("div", "item-body");
     const span = el("span", "item-text");
-    span.textContent = text;
-    li.appendChild(span);
+    span.textContent = noteLine(item);
+    body.appendChild(span);
+    const detail = noteDetail(item);
+    if (detail) {
+      const d = el("span", "item-detail");
+      d.textContent = detail;
+      body.appendChild(d);
+    }
+    li.appendChild(body);
     if (editable) {
       const actions = el("span", "item-actions");
       actions.appendChild(iconBtn("i-pencil", "Edit", () => startItemEdit(field, i, li, span)));
@@ -438,7 +502,7 @@ function renderNoteList(m, elId, field, editable) {
     const submit = () => {
       const value = input.value.trim();
       if (!value) return;
-      saveList(field, [...items, value]);
+      saveList(field, [...items, { short: value, detail: "" }]);
     };
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -455,14 +519,24 @@ function renderNoteList(m, elId, field, editable) {
 function startItemEdit(field, index, li, span) {
   if (state.editing || !state.currentMeeting) return;
   state.editing = `${field}:${index}`;
+  const item = (state.currentMeeting[field] || [])[index];
   span.classList.add("hidden");
+  li.querySelectorAll(".item-detail").forEach((d) => d.classList.add("hidden"));
   const actions = li.querySelector(".item-actions");
   if (actions) actions.classList.add("hidden");
+  const editor = el("div", "editor item-editor");
   const input = document.createElement("input");
   input.type = "text";
-  input.className = "item-text";
-  input.value = state.currentMeeting[field][index];
-  li.insertBefore(input, span);
+  input.value = noteLine(item);
+  input.setAttribute("aria-label", field === "takeaways" ? "Takeaway" : "Action item");
+  const detailInput = document.createElement("textarea");
+  detailInput.rows = 2;
+  detailInput.className = "item-detail-input";
+  detailInput.value = noteDetail(item);
+  detailInput.placeholder = "Detail (optional): context, numbers, deadline…";
+  detailInput.setAttribute("aria-label", "Detail");
+  editor.append(input, detailInput);
+  li.insertBefore(editor, span);
   input.focus();
 
   let settled = false;
@@ -472,20 +546,28 @@ function startItemEdit(field, index, li, span) {
     fn();
   };
   const commit = () => {
-    const value = input.value.trim();
-    if (!value || value === state.currentMeeting[field][index]) {
+    const short = input.value.trim();
+    const detail = detailInput.value.trim();
+    if (!short || (short === noteLine(item) && detail === noteDetail(item))) {
       settle(() => finishEdit(null));
       return;
     }
-    const items = [...state.currentMeeting[field]];
-    items[index] = value;
+    const items = [...(state.currentMeeting[field] || [])];
+    items[index] = { short, detail };
     settle(() => saveList(field, items, true));
   };
+  const cancel = () => settle(() => finishEdit(null));
+  editor.appendChild(editorActions(commit, cancel));
+  // Enter in the one-liner saves; in the detail box it starts a new line and
+  // ⌘↵ saves (wireEditorKeys), so a multi-sentence detail stays possible.
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") commit();
-    if (e.key === "Escape") settle(() => finishEdit(null));
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commit();
+    }
+    if (e.key === "Escape") cancel();
   });
-  input.addEventListener("blur", commit);
+  wireEditorKeys(detailInput, commit, cancel);
 }
 
 async function saveList(field, items, viaFinishEdit = false) {

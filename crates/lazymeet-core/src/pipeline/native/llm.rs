@@ -3,18 +3,34 @@
 
 use super::*;
 
-/// Tokens reserved for the model's response plus prompt scaffolding.
-const RESERVE: usize = 2560;
+/// Tokens reserved for the model's response plus prompt scaffolding. The
+/// answer budget (`ANSWER_TOKENS`) plus the format/language instruction has to
+/// fit inside it, or a long meeting would push the prompt out of the window.
+const RESERVE: usize = 3072;
+/// Room for summary + summary_long + up to 6 detailed takeaways and action
+/// items (~1300 tokens in practice; the rest is headroom for verbose models).
+const ANSWER_TOKENS: usize = 1600;
+/// Prompt tokens decoded per `llama_decode` call. One call for the whole
+/// prompt forces llama.cpp to allocate a compute buffer for every token at
+/// once (a 13k-token meeting spikes memory and is slower than a few 512-token
+/// decodes); chunking is what llama.cpp's own examples do.
+const PREFILL_CHUNK: usize = 512;
 
 /// Fixed response-format instruction, appended after the (user-editable)
 /// SUMMARY_PROMPT so a customized prompt can't break summary parsing.
-pub(super) const FORMAT: &str = "Respond with ONLY a JSON object of the form \
-    {\"summary\": str, \"takeaways\": [str], \"action_items\": [str]}.";
+/// `summary`/`summary_long` are two lengths of the same story, and every list
+/// item carries a one-line `short` plus a `detail` — that is what makes the
+/// notes scannable and still complete.
+pub(super) const FORMAT: &str = "Respond with ONLY a JSON object of this exact shape, with no \
+    prose and no code fences: {\"summary\": string, \"summary_long\": string, \"takeaways\": \
+    [{\"short\": string, \"detail\": string}], \"action_items\": [{\"short\": string, \
+    \"detail\": string}]}.";
 
 const NOTES_SYSTEM: &str =
-    "You are a meeting assistant. Summarize this portion of a meeting transcript \
-    into concise bullet notes capturing decisions, topics, and any action items. \
-    Return plain text bullets only.";
+    "You are a meeting assistant. Turn this portion of a meeting transcript into compact \
+    notes: topics, decisions, exact numbers and dates, open questions, and every commitment \
+    (who does what by when). Keep the speakers' names. Return plain text bullets only, no \
+    preamble.";
 
 fn language_name(code: &str) -> &str {
     super::super::LANGUAGE_NAMES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or(code)
@@ -188,7 +204,17 @@ impl Llm {
         prompt.push_str("<think>\n\n</think>\n\n");
 
         let tokens = self.model.str_to_token(&prompt, AddBos::Always).map_err(|e| e.to_string())?;
-        let n_batch = (tokens.len() + max_tokens + 32).max(512) as u32;
+        let needed = tokens.len() + max_tokens + 8;
+        if needed > self.n_ctx as usize {
+            return Err(format!(
+                "prompt does not fit the context window ({} + {max_tokens} tokens > {})",
+                tokens.len(),
+                self.n_ctx
+            ));
+        }
+        // Fixed: llama.cpp requires n_batch >= n_ubatch (512), so a smaller
+        // batch for short prompts would be rejected at context creation.
+        let n_batch = PREFILL_CHUNK as u32;
         let mut ctx = self
             .model
             .new_context(
@@ -201,13 +227,19 @@ impl Llm {
             )
             .map_err(|e| format!("llm context: {e}"))?;
 
+        // Prefill in chunks: logits are requested only for the last prompt
+        // token, so every chunk before it decodes without an output head.
         let mut batch = LlamaBatch::new(n_batch as usize, 1);
         let last_idx = tokens.len() as i32 - 1;
-        for (i, token) in (0i32..).zip(&tokens) {
-            batch.add(*token, i, &[0], i == last_idx).map_err(|e| e.to_string())?;
-        }
         let started = std::time::Instant::now();
-        ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+        for (chunk_no, chunk) in tokens.chunks(n_batch as usize).enumerate() {
+            batch.clear();
+            for (k, token) in chunk.iter().enumerate() {
+                let i = chunk_no as i32 * n_batch as i32 + k as i32;
+                batch.add(*token, i, &[0], i == last_idx).map_err(|e| e.to_string())?;
+            }
+            ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+        }
         let prefill_secs = started.elapsed().as_secs_f64();
         let started = std::time::Instant::now();
 
@@ -279,6 +311,7 @@ fn strip_thinking(content: &str) -> String {
 }
 
 fn parse_summary(content: &str) -> Summary {
+    use super::super::NoteItem;
     let content = strip_thinking(content);
     let candidate = match (content.find('{'), content.rfind('}')) {
         (Some(a), Some(b)) if b > a => &content[a..=b],
@@ -289,34 +322,50 @@ fn parse_summary(content: &str) -> Summary {
     let Some(Value::Object(data)) = data else {
         return Summary {
             summary: content.trim().to_string(),
+            summary_long: String::new(),
             takeaways: vec![],
             action_items: vec![],
         };
     };
-    let strings = |key: &str| -> Vec<String> {
+    // `text_of` accepts the plain-string form older prompts (and some models)
+    // produce, so a schema slip costs the detail, never the whole note.
+    let text_of = |v: &Value| -> String {
+        match v {
+            Value::String(s) => s.trim().to_string(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        }
+    };
+    let items = |key: &str| -> Vec<NoteItem> {
         data.get(key)
             .and_then(|v| v.as_array())
             .map(|a| {
                 a.iter()
-                    .map(|x| match x.as_str() {
-                        Some(s) => s.to_string(),
-                        None => x.to_string(),
+                    .filter_map(|x| match x {
+                        Value::String(s) => {
+                            let s = s.trim();
+                            (!s.is_empty()).then(|| NoteItem::line(s))
+                        }
+                        Value::Object(o) => {
+                            let short = o.get("short").map(text_of).unwrap_or_default();
+                            let detail = o.get("detail").map(text_of).unwrap_or_default();
+                            // Some models put the whole point in `detail`.
+                            let short = if short.is_empty() { detail.clone() } else { short };
+                            let detail = if short == detail { String::new() } else { detail };
+                            (!short.is_empty()).then_some(NoteItem { short, detail })
+                        }
+                        _ => None,
                     })
-                    .filter(|s| !s.trim().is_empty())
+                    .take(20)
                     .collect()
             })
             .unwrap_or_default()
     };
     Summary {
-        summary: data
-            .get("summary")
-            .map(|v| match v.as_str() {
-                Some(s) => s.trim().to_string(),
-                None => v.to_string(),
-            })
-            .unwrap_or_default(),
-        takeaways: strings("takeaways"),
-        action_items: strings("action_items"),
+        summary: data.get("summary").map(text_of).unwrap_or_default(),
+        summary_long: data.get("summary_long").map(text_of).unwrap_or_default(),
+        takeaways: items("takeaways"),
+        action_items: items("action_items"),
     }
 }
 
@@ -346,12 +395,12 @@ pub fn summarize(
         let mut notes = Vec::new();
         for chunk in chunk_lines(&llm, &lines, budget) {
             let note =
-                llm.chat(&format!("{NOTES_SYSTEM} {lang}"), &format!("{chunk}\n\n{lang}"), 512)?;
+                llm.chat(&format!("{NOTES_SYSTEM} {lang}"), &format!("{chunk}\n\n{lang}"), 640)?;
             notes.push(strip_thinking(&note));
         }
         let combined = llm.truncate_to_tokens(&notes.join("\n"), budget);
         format!("Meeting notes:\n{combined}\n\n{lang}")
     };
-    let response = llm.chat(&format!("{task} {FORMAT} {lang}"), &body, 1024)?;
+    let response = llm.chat(&format!("{task} {FORMAT} {lang}"), &body, ANSWER_TOKENS)?;
     Ok(parse_summary(&response))
 }

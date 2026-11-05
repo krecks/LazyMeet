@@ -56,6 +56,10 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         // Set by env var, which outranks config.json — the UI locks these.
         "env_locked": config::env_locked(),
         "limits": limits,
+        // What "Auto" threads resolve to on this machine, so the settings UI
+        // can label the option "Auto (7 of 10 threads)" instead of guessing.
+        "cores": config::cpu_count(),
+        "auto_threads": config::auto_threads(),
         // Spoken/notes languages as (code, name); "auto" is added by the UI.
         "languages": LANGUAGE_NAMES,
         // Backends this build offers for the summarizer (Metal GPU and CPU
@@ -368,20 +372,15 @@ pub fn patch_meeting(ctx: &Ctx, meeting_id: &str, fields: &Map<String, Value>) -
         changes.insert("summary".into(), json!(v.as_str().unwrap_or_default().trim()));
         content_edit = true;
     }
+    if let Some(v) = fields.get("summary_long") {
+        changes.insert("summary_long".into(), json!(v.as_str().unwrap_or_default().trim()));
+        content_edit = true;
+    }
     for key in ["takeaways", "action_items"] {
         if let Some(v) = fields.get(key) {
-            let items: Vec<String> = v
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(String::from)
-                        .take(100)
-                        .collect()
-                })
-                .unwrap_or_default();
+            // Plain strings (the old shape) and {short, detail} objects both
+            // arrive here; store::note_items normalizes and drops empties.
+            let items: Vec<Value> = store::note_items(Some(v)).into_iter().take(100).collect();
             changes.insert(key.into(), json!(items));
             content_edit = true;
         }
@@ -603,24 +602,31 @@ fn to_markdown(record: &store::Record) -> String {
     {
         out.push_str(&format!("## Summary\n\n{summary}\n\n"));
     }
-    if let Some(takeaways) =
-        record.get("takeaways").and_then(|v| v.as_array()).filter(|a| !a.is_empty())
+    if let Some(detail) =
+        record.get("summary_long").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
     {
-        out.push_str("## Key takeaways\n\n");
-        for t in takeaways {
-            out.push_str(&format!("- {}\n", t.as_str().unwrap_or_default()));
+        out.push_str(&format!("## In detail\n\n{detail}\n\n"));
+    }
+    let list = |out: &mut String, key: &str, heading: &str, checkbox: bool| {
+        let items = store::note_items(record.get(key));
+        if items.is_empty() {
+            return;
+        }
+        out.push_str(&format!("## {heading}\n\n"));
+        for item in &items {
+            let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
+            let detail = item.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+            let mark = if checkbox { "- [ ] " } else { "- " };
+            out.push_str(&format!("{mark}{short}\n"));
+            if !detail.is_empty() {
+                // Indented continuation keeps the list item intact.
+                out.push_str(&format!("  {detail}\n"));
+            }
         }
         out.push('\n');
-    }
-    if let Some(items) =
-        record.get("action_items").and_then(|v| v.as_array()).filter(|a| !a.is_empty())
-    {
-        out.push_str("## Action items\n\n");
-        for a in items {
-            out.push_str(&format!("- [ ] {}\n", a.as_str().unwrap_or_default()));
-        }
-        out.push('\n');
-    }
+    };
+    list(&mut out, "takeaways", "Key takeaways", false);
+    list(&mut out, "action_items", "Action items", true);
     out.push_str("## Transcript\n\n");
     if let Some(segments) = record.get("segments").and_then(|v| v.as_array()) {
         for seg in segments {

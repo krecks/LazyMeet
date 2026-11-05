@@ -14,12 +14,51 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
 use crate::pipeline::{self, PipelineCtx};
 use crate::{store, Ctx};
+
+/// Seconds spent per pipeline stage, stored on the meeting record as
+/// `timings`. The UI shows them under the notes; they are the cheapest
+/// profiling there is — a real run, on the user's machine, for free.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Timing {
+    #[serde(default)]
+    pub extract: f64,
+    #[serde(default)]
+    pub transcribe: f64,
+    #[serde(default)]
+    pub diarize: f64,
+    #[serde(default)]
+    pub identify: f64,
+    #[serde(default)]
+    pub summarize: f64,
+    #[serde(default)]
+    pub total: f64,
+}
+
+impl Timing {
+    /// Tenths of a second — enough resolution to spot a bottleneck, no noise.
+    fn round(v: f64) -> f64 {
+        (v * 10.0).round() / 10.0
+    }
+
+    pub fn to_value(&self) -> Value {
+        json!({
+            "extract": Self::round(self.extract),
+            "transcribe": Self::round(self.transcribe),
+            "diarize": Self::round(self.diarize),
+            "identify": Self::round(self.identify),
+            "summarize": Self::round(self.summarize),
+            "total": Self::round(self.total),
+        })
+    }
+}
 
 /// What the worker should do for a queued meeting.
 pub enum Job {
@@ -254,6 +293,7 @@ fn record_snapshot(record: &store::Record) -> Value {
     let f = |k: &str| record.get(k).cloned().unwrap_or(Value::Null);
     json!({
         "summary": f("summary"),
+        "summary_long": f("summary_long"),
         "takeaways": f("takeaways"),
         "action_items": f("action_items"),
         "segments": f("segments"),
@@ -357,6 +397,9 @@ fn run_full(
     action: &str,
 ) -> Result<(), String> {
     let num_speakers = record.get("num_speakers").and_then(|v| v.as_i64()).unwrap_or(-1);
+    // Wall-clock seconds per stage, saved on the record so the UI can show
+    // where the time went (and a slow machine is visible without a profiler).
+    let mut timings = Timing::default();
     // User-selected spans to transcribe (null/absent = the whole file). Kept
     // on the record so queued resumes and re-transcriptions honor them too.
     let ranges: Option<Vec<pipeline::TimeRange>> = record
@@ -378,18 +421,29 @@ fn run_full(
     let is_video = !crate::config::is_audio_file(upload_path);
     let playback = ctx.paths.uploads_dir().join(meeting_id).join(crate::config::PLAYBACK_FILENAME);
     let want_playback = config.keep_audio() && is_video;
+    let t = Instant::now();
     pipeline::extract_audio(pctx, upload_path, &wav, want_playback.then_some(&*playback))?;
+    timings.extract = t.elapsed().as_secs_f64();
     if is_video && (!config.keep_audio() || playback.is_file()) {
         let _ = std::fs::remove_file(upload_path);
     }
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("transcribing"))]));
+    let t = Instant::now();
     let (segments, turns) =
         pipeline::transcribe_and_diarize(pctx, &wav, num_speakers, ranges.as_deref(), || {
+            // This fires between the two stages: the time so far is the ASR
+            // share, the remainder of the call is diarization.
+            timings.transcribe = t.elapsed().as_secs_f64();
             update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
         })?;
+    if timings.transcribe == 0.0 {
+        timings.transcribe = t.elapsed().as_secs_f64();
+    }
+    timings.diarize = (t.elapsed().as_secs_f64() - timings.transcribe).max(0.0);
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
+    let t = Instant::now();
     let voiceprints = pipeline::compute_voiceprints(pctx, &wav, &turns)?;
     // Folding short speakers into the closest main voice cleans up the
     // classic diarizer's over-clustering. Nemotron tracks speakers itself and
@@ -408,6 +462,7 @@ fn run_full(
     let library = store::load_speaker_library(&ctx.paths, &ctx.locks);
     let (speakers, recognized) =
         pipeline::match_speakers(&voiceprints, &library, config.speaker_threshold());
+    timings.identify = t.elapsed().as_secs_f64();
 
     let merged = pipeline::assign_speakers(&segments, &turns);
 
@@ -431,14 +486,25 @@ fn run_full(
 
     // A summary failure (e.g. an unusually long meeting) must not throw
     // away the transcript — mark the meeting done with a note instead.
-    let (summary, takeaways, action_items) = match pipeline::summarize(pctx, &merged, &speakers) {
-        Ok(result) => (result.summary, result.takeaways, result.action_items),
-        Err(exc) => (format!("(Automatic summary unavailable: {exc})"), vec![], vec![]),
+    let t = Instant::now();
+    let summary = match pipeline::summarize(pctx, &merged, &speakers) {
+        Ok(result) => result,
+        Err(exc) => pipeline::Summary {
+            summary: format!("(Automatic summary unavailable: {exc})"),
+            ..Default::default()
+        },
     };
+    timings.summarize = t.elapsed().as_secs_f64();
+    timings.total = timings.extract
+        + timings.transcribe
+        + timings.diarize
+        + timings.identify
+        + timings.summarize;
     let snapshot = json!({
-        "summary": summary,
-        "takeaways": takeaways,
-        "action_items": action_items,
+        "summary": summary.summary,
+        "summary_long": summary.summary_long,
+        "takeaways": summary.takeaways,
+        "action_items": summary.action_items,
         "segments": seg_value,
         "speakers": Value::Object(speakers.clone()),
     });
@@ -455,9 +521,11 @@ fn run_full(
         false,
         obj(&[
             ("status", json!("done")),
-            ("summary", json!(summary)),
-            ("takeaways", json!(takeaways)),
-            ("action_items", json!(action_items)),
+            ("summary", json!(summary.summary)),
+            ("summary_long", json!(summary.summary_long)),
+            ("takeaways", json!(summary.takeaways)),
+            ("action_items", json!(summary.action_items)),
+            ("timings", timings.to_value()),
             ("error", Value::Null),
             ("rejob", Value::Null),
             ("versions", versions),
@@ -504,7 +572,18 @@ fn resummarize(
     let speakers = record.get("speakers").and_then(|v| v.as_object()).cloned().unwrap_or_default();
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("summarizing"))]));
+    let t = Instant::now();
     let result = pipeline::summarize(pctx, &merged, &speakers)?;
+    let mut timings = record
+        .get("timings")
+        .and_then(|v| serde_json::from_value::<Timing>(v.clone()).ok())
+        .unwrap_or_default();
+    timings.summarize = t.elapsed().as_secs_f64();
+    timings.total = timings.extract
+        + timings.transcribe
+        + timings.diarize
+        + timings.identify
+        + timings.summarize;
 
     // The transcript is untouched, so the new version keeps its ASR model.
     let asr = record
@@ -516,6 +595,7 @@ fn resummarize(
         .unwrap_or(Value::Null);
     let snapshot = json!({
         "summary": result.summary,
+        "summary_long": result.summary_long,
         "takeaways": result.takeaways,
         "action_items": result.action_items,
         "segments": record.get("segments").cloned().unwrap_or(json!([])),
@@ -529,8 +609,10 @@ fn resummarize(
         obj(&[
             ("status", json!("done")),
             ("summary", json!(result.summary)),
+            ("summary_long", json!(result.summary_long)),
             ("takeaways", json!(result.takeaways)),
             ("action_items", json!(result.action_items)),
+            ("timings", timings.to_value()),
             ("error", Value::Null),
             ("rejob", Value::Null),
             ("versions", versions),

@@ -25,7 +25,7 @@ const DEFAULTS = {
   SPEAKER_MERGE_THRESHOLD: 0.6,
   MIN_SPEAKER_SECONDS: 15,
   SUMMARY_PROVIDER: "gpu",
-  NUM_THREADS: 7,
+  NUM_THREADS: 0,
   KEEP_AUDIO: true,
 };
 const LIMITS = {
@@ -33,7 +33,7 @@ const LIMITS = {
   DIAR_THRESHOLD: { min: 0, max: 1 },
   SPEAKER_MERGE_THRESHOLD: { min: 0, max: 1 },
   MIN_SPEAKER_SECONDS: { min: 0, max: 600 },
-  NUM_THREADS: { min: 1, max: 12 },
+  NUM_THREADS: { min: 0, max: 12 },
   SUMMARY_PROMPT: { min: null, max: 2000 },
 };
 
@@ -44,6 +44,8 @@ export function config() {
     defaults: { ...DEFAULTS },
     env_locked: [],
     limits: LIMITS,
+    cores: 10,
+    auto_threads: 7,
     languages: LANGUAGES,
     compute_options: { SUMMARY_PROVIDER: ["cpu", "gpu"] },
   };
