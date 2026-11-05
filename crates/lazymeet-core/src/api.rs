@@ -57,7 +57,7 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         "env_locked": config::env_locked(),
         "limits": limits,
         // What "Auto" threads resolve to on this machine, so the settings UI
-        // can label the option "Auto (7 of 10 threads)" instead of guessing.
+        // can label the option "Auto — 7 of 10 threads" instead of guessing.
         "cores": config::cpu_count(),
         "auto_threads": config::auto_threads(),
         // Spoken/notes languages as (code, name); "auto" is added by the UI.
@@ -356,6 +356,11 @@ pub fn get_meeting_audio_path(ctx: &Ctx, meeting_id: &str) -> ApiResult<Value> {
     Ok(json!({"path": path, "filename": name}))
 }
 
+/// Longest notes text a PATCH may store. Generous for a hand-written summary,
+/// but a runaway paste would otherwise land in the record, in every version
+/// snapshot, in every `meeting-updated` event and in the search index.
+const MAX_NOTE_CHARS: usize = 20_000;
+
 /// PATCH /api/meetings/{id}: title in any status; summary/takeaways/action
 /// items only once "done".
 pub fn patch_meeting(ctx: &Ctx, meeting_id: &str, fields: &Map<String, Value>) -> ApiResult<Value> {
@@ -368,13 +373,23 @@ pub fn patch_meeting(ctx: &Ctx, meeting_id: &str, fields: &Map<String, Value>) -
         changes.insert("title".into(), json!(title));
     }
     let mut content_edit = false;
-    if let Some(v) = fields.get("summary") {
-        changes.insert("summary".into(), json!(v.as_str().unwrap_or_default().trim()));
-        content_edit = true;
-    }
-    if let Some(v) = fields.get("summary_long") {
-        changes.insert("summary_long".into(), json!(v.as_str().unwrap_or_default().trim()));
-        content_edit = true;
+    for key in ["summary", "summary_long"] {
+        if let Some(v) = fields.get(key) {
+            // Reject instead of coercing: `as_str().unwrap_or_default()` would
+            // turn a malformed value into an empty string and silently erase
+            // the note the user asked to keep.
+            let text = v
+                .as_str()
+                .ok_or_else(|| ApiError::invalid(format!("{key} must be a string")))?
+                .trim();
+            if text.chars().count() > MAX_NOTE_CHARS {
+                return Err(ApiError::invalid(format!(
+                    "{key} must be at most {MAX_NOTE_CHARS} characters"
+                )));
+            }
+            changes.insert(key.into(), json!(text));
+            content_edit = true;
+        }
     }
     for key in ["takeaways", "action_items"] {
         if let Some(v) = fields.get(key) {
@@ -613,10 +628,10 @@ fn to_markdown(record: &store::Record) -> String {
             return;
         }
         out.push_str(&format!("## {heading}\n\n"));
+        let mark = if checkbox { "- [ ] " } else { "- " };
         for item in &items {
-            let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
-            let detail = item.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-            let mark = if checkbox { "- [ ] " } else { "- " };
+            let field = |k: &str| item.get(k).and_then(|v| v.as_str()).unwrap_or("");
+            let (short, detail) = (field("short"), field("detail"));
             out.push_str(&format!("{mark}{short}\n"));
             if !detail.is_empty() {
                 // Indented continuation keeps the list item intact.

@@ -4,6 +4,7 @@
 import { closePrepare, openPrepare } from "../ts/prepare";
 import { onBenchProgress, openBench } from "../ts/bench";
 import { openSettings } from "../ts/settings";
+import { LIMITS } from "./fixtures";
 
 export async function runSmokeChecks(): Promise<void> {
   const problems: string[] = [];
@@ -95,7 +96,10 @@ async function checkSettings(problems: string[], hidden: (id: string) => boolean
     if (threads.options[0]?.value !== "0") problems.push("CPU threads: Auto is not first");
     if (!/Auto — 7 of 10 threads/.test(threads.options[0].textContent || ""))
       problems.push(`CPU threads: Auto label is "${threads.options[0].textContent}"`);
-    if (threads.options.length !== 13) problems.push(`CPU threads has ${threads.options.length} options`);
+    // Auto + one option per explicit thread count.
+    const expected = LIMITS.NUM_THREADS.max + 1;
+    if (threads.options.length !== expected)
+      problems.push(`CPU threads has ${threads.options.length} options, expected ${expected}`);
   }
   // Classic-model sliders only with pyannote.
   if (!row("DIAR_THRESHOLD")?.hidden) problems.push("pyannote slider visible with Nemotron");

@@ -214,14 +214,14 @@ impl Llm {
         }
         // Fixed: llama.cpp requires n_batch >= n_ubatch (512), so a smaller
         // batch for short prompts would be rejected at context creation.
-        let n_batch = PREFILL_CHUNK as u32;
+        let n_batch = PREFILL_CHUNK;
         let mut ctx = self
             .model
             .new_context(
                 backend,
                 LlamaContextParams::default()
                     .with_n_ctx(NonZeroU32::new(self.n_ctx))
-                    .with_n_batch(n_batch)
+                    .with_n_batch(n_batch as u32)
                     .with_n_threads(self.threads)
                     .with_n_threads_batch(self.threads),
             )
@@ -229,14 +229,15 @@ impl Llm {
 
         // Prefill in chunks: logits are requested only for the last prompt
         // token, so every chunk before it decodes without an output head.
-        let mut batch = LlamaBatch::new(n_batch as usize, 1);
+        let mut batch = LlamaBatch::new(n_batch, 1);
         let last_idx = tokens.len() as i32 - 1;
         let started = std::time::Instant::now();
-        for (chunk_no, chunk) in tokens.chunks(n_batch as usize).enumerate() {
+        let mut pos = 0i32;
+        for chunk in tokens.chunks(n_batch) {
             batch.clear();
-            for (k, token) in chunk.iter().enumerate() {
-                let i = chunk_no as i32 * n_batch as i32 + k as i32;
-                batch.add(*token, i, &[0], i == last_idx).map_err(|e| e.to_string())?;
+            for token in chunk {
+                batch.add(*token, pos, &[0], pos == last_idx).map_err(|e| e.to_string())?;
+                pos += 1;
             }
             ctx.decode(&mut batch).map_err(|e| e.to_string())?;
         }
@@ -246,7 +247,10 @@ impl Llm {
         let mut sampler =
             LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::dist(42)]);
         let mut out: Vec<u8> = Vec::new();
-        let mut n_cur = batch.n_tokens();
+        // Positions are absolute: the KV cache already holds every prompt
+        // token, so generation starts after the whole prompt — not after the
+        // last chunk, which is all `batch` still holds.
+        let mut n_cur = tokens.len() as i32;
         let mut n_gen = 0usize;
         loop {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
@@ -320,12 +324,7 @@ fn parse_summary(content: &str) -> Summary {
     let data: Option<Value> =
         serde_json::from_str(&content).ok().or_else(|| serde_json::from_str(candidate).ok());
     let Some(Value::Object(data)) = data else {
-        return Summary {
-            summary: content.trim().to_string(),
-            summary_long: String::new(),
-            takeaways: vec![],
-            action_items: vec![],
-        };
+        return Summary { summary: content.trim().to_string(), ..Default::default() };
     };
     // `text_of` accepts the plain-string form older prompts (and some models)
     // produce, so a schema slip costs the detail, never the whole note.
@@ -344,7 +343,7 @@ fn parse_summary(content: &str) -> Summary {
                     .filter_map(|x| match x {
                         Value::String(s) => {
                             let s = s.trim();
-                            (!s.is_empty()).then(|| NoteItem::line(s))
+                            (!s.is_empty()).then_some(NoteItem::line(s))
                         }
                         Value::Object(o) => {
                             let short = o.get("short").map(text_of).unwrap_or_default();

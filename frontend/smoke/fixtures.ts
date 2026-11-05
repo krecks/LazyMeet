@@ -28,7 +28,7 @@ const DEFAULTS = {
   NUM_THREADS: 0,
   KEEP_AUDIO: true,
 };
-const LIMITS = {
+export const LIMITS = {
   SPEAKER_THRESHOLD: { min: 0, max: 1 },
   DIAR_THRESHOLD: { min: 0, max: 1 },
   SPEAKER_MERGE_THRESHOLD: { min: 0, max: 1 },

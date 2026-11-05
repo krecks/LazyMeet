@@ -230,9 +230,9 @@ function renderSummaryLong(text) {
     .map((p) => p.trim())
     .filter(Boolean);
   block.hidden = !paragraphs.length;
-  for (const text of paragraphs) {
+  for (const para of paragraphs) {
     const p = document.createElement("p");
-    p.textContent = text;
+    p.textContent = para;
     body.appendChild(p);
   }
 }
@@ -247,14 +247,16 @@ function renderTimings(t) {
   }
   const fmt = (s) =>
     s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(1)}s`;
-  const parts = [
-    ["transcription", t.transcribe],
-    ["speakers", (t.diarize || 0) + (t.identify || 0)],
-    ["summary", t.summarize],
+  // Speakers covers diarization plus voice matching; sub-50ms stages are noise.
+  const breakdown = [
+    { name: "transcription", secs: t.transcribe },
+    { name: "speakers", secs: (t.diarize || 0) + (t.identify || 0) },
+    { name: "summary", secs: t.summarize },
   ]
-    .filter(([, s]) => s > 0.05)
-    .map(([name, s]) => `${name} ${fmt(s)}`);
-  node.textContent = `Took ${fmt(t.total)}${parts.length ? ` — ${parts.join(" · ")}` : ""}`;
+    .filter((stage) => stage.secs > 0.05)
+    .map((stage) => `${stage.name} ${fmt(stage.secs)}`);
+  const took = `Took ${fmt(t.total)}`;
+  node.textContent = breakdown.length ? `${took} — ${breakdown.join(" · ")}` : took;
   node.classList.remove("hidden");
 }
 
@@ -411,10 +413,12 @@ function startSummaryEdit() {
   p.classList.add("hidden");
   $("summary-edit-btn").classList.add("hidden");
   const editor = el("div", "editor");
+  // The summary and its long form are two lengths of one edit, so each box
+  // gets its own small caption.
   const label = (text) => {
-    const s = el("span", "editor-label muted small");
-    s.textContent = text;
-    return s;
+    const caption = el("span", "muted small");
+    caption.textContent = text;
+    return caption;
   };
   const ta = document.createElement("textarea");
   ta.rows = 4;

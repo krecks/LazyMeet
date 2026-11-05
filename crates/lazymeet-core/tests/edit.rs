@@ -137,6 +137,32 @@ fn content_edit_on_done_meeting() {
 }
 
 #[test]
+fn content_edit_rejects_bad_summary_values() {
+    let app = TestApp::fake();
+    let meeting = process_meeting(&app, "edit.mp4");
+    let mid = meeting["id"].as_str().unwrap();
+    let before = api::get_meeting(&app.ctx, mid).unwrap();
+
+    // A malformed value must not be coerced into "" and wipe the note.
+    for bad in [json!(42), json!(null), json!(["a"]), json!({"short": "a"})] {
+        for key in ["summary", "summary_long"] {
+            let err = api::patch_meeting(&app.ctx, mid, &changes(key, bad.clone())).unwrap_err();
+            assert_eq!(err.code, 422, "{key} = {bad} should be rejected");
+        }
+    }
+    // Too long is rejected too; the notes are untouched either way.
+    let huge = "x".repeat(20_001);
+    let err = api::patch_meeting(&app.ctx, mid, &changes("summary_long", json!(huge))).unwrap_err();
+    assert_eq!(err.code, 422);
+    assert_eq!(api::get_meeting(&app.ctx, mid).unwrap()["summary"], before["summary"]);
+
+    // The cap itself is fine.
+    let ok = "y".repeat(20_000);
+    let updated = api::patch_meeting(&app.ctx, mid, &changes("summary_long", json!(ok))).unwrap();
+    assert_eq!(updated["summary_long"].as_str().unwrap().len(), 20_000);
+}
+
+#[test]
 fn content_edit_blocked_while_processing_or_error() {
     let app = TestApp::fake();
     let record =

@@ -162,7 +162,6 @@ pub fn tunables() -> Vec<TunableSpec> {
             Some(600.0),
         ),
         t("SUMMARY_PROVIDER", "LAZYMEET_SUMMARY_PROVIDER", Kind::Str, None, None),
-        // 0 = auto (75 % of the cores), resolved by `Config::num_threads`.
         t(
             "NUM_THREADS",
             "LAZYMEET_NUM_THREADS",

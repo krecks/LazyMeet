@@ -187,12 +187,14 @@ export async function renameSpeaker(meetingId, diarizedId, newName) {
 // strings for us); `detail` is optional and may be empty.
 export function noteLine(item) {
   if (typeof item === "string") return item;
-  return (item && item.short) || "";
+  // `detail` only as a fallback: the backend promotes it to `short`, so this
+  // only matters for records written by hand.
+  return item?.short || item?.detail || "";
 }
 
 export function noteDetail(item) {
-  if (!item || typeof item === "string") return "";
-  const detail = item.detail || "";
+  const detail = item?.detail || "";
+  // A `detail` that just repeats the line adds nothing to show.
   return detail === noteLine(item) ? "" : detail;
 }
 

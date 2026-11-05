@@ -657,7 +657,6 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; }
   content: "▸";
   display: inline-block;
   width: 1em;
-  transition: transform 0.12s;
 }
 .summary-long[open] > summary::before { content: "▾"; }
 .summary-long > summary:hover { color: var(--text); }

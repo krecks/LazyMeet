@@ -386,16 +386,16 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     const select = document.createElement("select");
     select.dataset.numeric = "1";
     describe(select);
-    const current = String(cfg.values[name] ?? "0");
+    const current = Number(cfg.values[name] ?? 0);
     const auto = Number(cfg.auto_threads || 0);
     const cores = Number(cfg.cores || 0);
     const autoLabel = cores
       ? `Auto — ${auto} of ${cores} threads (75 % of the cores)`
       : `Auto — ${auto} threads (75 % of the cores)`;
-    select.appendChild(new Option(autoLabel, "0", false, current === "0"));
-    const most = Number(limits.max) || auto || 1;
-    for (let n = 1; n <= most; n += 1) {
-      select.appendChild(new Option(`${n} thread${n === 1 ? "" : "s"}`, String(n), false, current === String(n)));
+    select.appendChild(new Option(autoLabel, "0", false, current === 0));
+    const maxThreads = Number(limits.max) || auto || 1;
+    for (let n = 1; n <= maxThreads; n += 1) {
+      select.appendChild(new Option(`${n} thread${n === 1 ? "" : "s"}`, String(n), false, current === n));
     }
     control.appendChild(select);
   } else if (meta.number) {

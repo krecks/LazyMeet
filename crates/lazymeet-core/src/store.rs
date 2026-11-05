@@ -334,11 +334,9 @@ fn rename_in_notes(record: &mut Record, old: &str, new: &str) {
         let replaced: Vec<Value> = items
             .iter()
             .map(|v| {
-                let short = v.get("short").and_then(|s| s.as_str()).unwrap_or("");
-                let detail = v.get("detail").and_then(|s| s.as_str()).unwrap_or("");
                 json!({
-                    "short": replace_name(short, old, new),
-                    "detail": replace_name(detail, old, new),
+                    "short": replace_name(note_field(v, "short"), old, new),
+                    "detail": replace_name(note_field(v, "detail"), old, new),
                 })
             })
             .collect();
@@ -360,11 +358,17 @@ pub fn note_items(value: Option<&Value>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// A note item's text field; "" when it is absent (always the case for
+/// `detail` on records from before the split).
+fn note_field<'a>(item: &'a Value, key: &str) -> &'a str {
+    item.get(key).and_then(|v| v.as_str()).unwrap_or("")
+}
+
 fn note_item(value: &Value) -> Option<Value> {
     match value {
         Value::String(s) => {
             let s = s.trim();
-            (!s.is_empty()).then(|| json!({"short": s, "detail": ""}))
+            (!s.is_empty()).then_some(json!({"short": s, "detail": ""}))
         }
         Value::Object(o) => {
             let field =
@@ -378,7 +382,7 @@ fn note_item(value: &Value) -> Option<Value> {
             if short == detail {
                 detail.clear();
             }
-            (!short.is_empty()).then(|| json!({"short": short, "detail": detail}))
+            (!short.is_empty()).then_some(json!({"short": short, "detail": detail}))
         }
         _ => None,
     }
@@ -386,7 +390,7 @@ fn note_item(value: &Value) -> Option<Value> {
 
 /// The display text of a note item, for search hits and exports.
 pub fn note_text(item: &Value) -> String {
-    let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
+    let short = note_field(item, "short");
     match item.get("detail").and_then(|v| v.as_str()).filter(|d| !d.is_empty()) {
         Some(detail) => format!("{short} — {detail}"),
         None => short.to_string(),
@@ -692,9 +696,8 @@ pub fn search_meetings(paths: &Paths, locks: &StoreLocks, query: &str) -> Vec<Re
         }
         for (key, kind) in [("takeaways", "takeaway"), ("action_items", "action_item")] {
             for (i, item) in note_items(rec.get(key)).iter().enumerate() {
-                let short = item.get("short").and_then(|v| v.as_str()).unwrap_or("");
-                let detail = item.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-                let n = occurrences(short) + occurrences(detail);
+                let n = occurrences(note_field(item, "short"))
+                    + occurrences(note_field(item, "detail"));
                 if n > 0 {
                     push(
                         json!({"kind": kind, "index": i, "text": note_text(item)}),
@@ -782,7 +785,7 @@ pub fn public_meeting(paths: &Paths, record: &Record) -> Record {
     for key in ["takeaways", "action_items"] {
         out.insert(key.into(), Value::Array(note_items(record.get(key))));
     }
-    if !out.get("summary_long").map(|v| v.is_string()).unwrap_or(false) {
+    if !out.get("summary_long").is_some_and(|v| v.is_string()) {
         out.insert("summary_long".into(), json!(""));
     }
     // whether segment playback is possible (recording still on disk)

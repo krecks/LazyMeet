@@ -27,19 +27,13 @@ use crate::{store, Ctx};
 /// `timings`. The UI shows them under the notes; they are the cheapest
 /// profiling there is — a real run, on the user's machine, for free.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Timing {
-    #[serde(default)]
     pub extract: f64,
-    #[serde(default)]
     pub transcribe: f64,
-    #[serde(default)]
     pub diarize: f64,
-    #[serde(default)]
     pub identify: f64,
-    #[serde(default)]
     pub summarize: f64,
-    #[serde(default)]
-    pub total: f64,
 }
 
 impl Timing {
@@ -49,13 +43,20 @@ impl Timing {
     }
 
     pub fn to_value(&self) -> Value {
+        let extract = Self::round(self.extract);
+        let transcribe = Self::round(self.transcribe);
+        let diarize = Self::round(self.diarize);
+        let identify = Self::round(self.identify);
+        let summarize = Self::round(self.summarize);
         json!({
-            "extract": Self::round(self.extract),
-            "transcribe": Self::round(self.transcribe),
-            "diarize": Self::round(self.diarize),
-            "identify": Self::round(self.identify),
-            "summarize": Self::round(self.summarize),
-            "total": Self::round(self.total),
+            "extract": extract,
+            "transcribe": transcribe,
+            "diarize": diarize,
+            "identify": identify,
+            "summarize": summarize,
+            // Summed from the rounded parts, so the breakdown the UI prints
+            // adds up to the total it prints next to it.
+            "total": Self::round(extract + transcribe + diarize + identify + summarize),
         })
     }
 }
@@ -430,17 +431,18 @@ fn run_full(
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("transcribing"))]));
     let t = Instant::now();
+    // The callback fires between the two stages, so the time up to it is the
+    // ASR share and the rest of the call is diarization. If it never fires,
+    // the whole span counts as transcription and diarization as zero.
+    let mut asr_share = 0.0;
     let (segments, turns) =
         pipeline::transcribe_and_diarize(pctx, &wav, num_speakers, ranges.as_deref(), || {
-            // This fires between the two stages: the time so far is the ASR
-            // share, the remainder of the call is diarization.
-            timings.transcribe = t.elapsed().as_secs_f64();
+            asr_share = t.elapsed().as_secs_f64();
             update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("diarizing"))]));
         })?;
-    if timings.transcribe == 0.0 {
-        timings.transcribe = t.elapsed().as_secs_f64();
-    }
-    timings.diarize = (t.elapsed().as_secs_f64() - timings.transcribe).max(0.0);
+    let transcribed_and_diarized = t.elapsed().as_secs_f64();
+    timings.transcribe = if asr_share > 0.0 { asr_share } else { transcribed_and_diarized };
+    timings.diarize = (transcribed_and_diarized - timings.transcribe).max(0.0);
 
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("identifying"))]));
     let t = Instant::now();
@@ -495,11 +497,6 @@ fn run_full(
         },
     };
     timings.summarize = t.elapsed().as_secs_f64();
-    timings.total = timings.extract
-        + timings.transcribe
-        + timings.diarize
-        + timings.identify
-        + timings.summarize;
     let snapshot = json!({
         "summary": summary.summary,
         "summary_long": summary.summary_long,
@@ -574,16 +571,14 @@ fn resummarize(
     update_and_emit(ctx, meeting_id, false, obj(&[("status", json!("summarizing"))]));
     let t = Instant::now();
     let result = pipeline::summarize(pctx, &merged, &speakers)?;
+    // The stored stage times stay as they are: they describe how long the
+    // transcript took to produce, and a notes-only run did not redo any of
+    // that. Only `summarize` is re-timed, and `total` is the sum of the parts.
     let mut timings = record
         .get("timings")
         .and_then(|v| serde_json::from_value::<Timing>(v.clone()).ok())
         .unwrap_or_default();
     timings.summarize = t.elapsed().as_secs_f64();
-    timings.total = timings.extract
-        + timings.transcribe
-        + timings.diarize
-        + timings.identify
-        + timings.summarize;
 
     // The transcript is untouched, so the new version keeps its ASR model.
     let asr = record
