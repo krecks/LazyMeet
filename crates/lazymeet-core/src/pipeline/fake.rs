@@ -118,6 +118,23 @@ pub fn summary() -> Summary {
     }
 }
 
+/// The fake notes for a config: the default notes, plus — when a template,
+/// notes language or vocabulary is set — a line naming them, so tests can
+/// see the choice reached the summarizer.
+pub fn summary_for(config: &crate::config::Config) -> Summary {
+    let mut out = summary();
+    let template = config.notes_template();
+    let lang = config.summary_language();
+    let vocab = config.vocabulary();
+    if template != "general" || lang != "auto" || !vocab.is_empty() {
+        out.summary_long.push_str(&format!(
+            "\n\n[fake notes: template={template}, language={lang}, vocabulary={}]",
+            vocab.join("|")
+        ));
+    }
+    out
+}
+
 /// Write a tiny valid (silent) 16 kHz mono 16-bit WAV so downstream stubs have
 /// a real file.
 pub fn write_silent_wav(out_wav: &Path) -> std::io::Result<()> {

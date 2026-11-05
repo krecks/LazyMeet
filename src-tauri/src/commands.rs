@@ -78,15 +78,19 @@ pub async fn create_meeting(
     num_speakers: i64,
     ranges: Option<Vec<(f64, f64)>>,
     language: Option<String>,
+    notes_template: Option<String>,
+    notes_language: Option<String>,
 ) -> ApiResult<Value> {
     let ctx = ctx.inner().clone();
+    let notes = api::NotesOptions { template: notes_template, language: notes_language };
     blocking(move || {
-        api::create_meeting(
+        api::create_meeting_with(
             &ctx,
             &PathBuf::from(path),
             num_speakers,
             ranges.as_deref(),
             language.as_deref(),
+            &notes,
         )
     })
     .await
@@ -238,8 +242,11 @@ pub async fn reprocess_meeting(
     ctx: State<'_, App>,
     meeting_id: String,
     mode: String,
+    notes_template: Option<String>,
+    notes_language: Option<String>,
 ) -> ApiResult<Value> {
-    api::reprocess_meeting(&ctx, &meeting_id, &mode)
+    let notes = api::NotesOptions { template: notes_template, language: notes_language };
+    api::reprocess_meeting_with(&ctx, &meeting_id, &mode, &notes)
 }
 
 #[tauri::command(rename_all = "snake_case")]

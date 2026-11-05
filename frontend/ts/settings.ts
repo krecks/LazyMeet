@@ -24,6 +24,12 @@ interface ConfigMeta {
   toggle?: boolean;
   /** A folder path: shown read-only, set with the native folder picker. */
   folder?: boolean;
+  /** The notes templates the backend offers (config payload). */
+  templates?: boolean;
+  /** For a textarea: the label of a "restore the default" link (none if unset). */
+  restore?: string;
+  /** For a textarea: visible rows (default 5). */
+  rows?: number;
   number?: boolean;
   step?: number;
   /** Shown only while this holds for the form's current values. */
@@ -87,6 +93,19 @@ const CONFIG_META: Record<string, ConfigMeta> = {
     help: "The language the notes are written in. “Match the meeting” detects the language from the transcript; pick one explicitly if a meeting mixes languages.",
     languages: "Match the meeting",
   },
+  NOTES_TEMPLATE: {
+    section: "config-summary",
+    label: "Kind of meeting",
+    help: "What the notes focus on by default — a stand-up goes person by person, an interview captures answers and concerns, a sales call needs, budget and next steps. The prep screen and “Regenerate notes” can pick another per meeting.",
+    templates: true,
+  },
+  VOCABULARY: {
+    section: "config-summary",
+    label: "Names and terms",
+    help: "One per line: people, products, companies and jargon the notes and titles must spell exactly. Transcription can mishear rare names; the summary model fixes them when it writes the notes.",
+    textarea: true,
+    rows: 4,
+  },
   SUMMARY_PROVIDER: {
     section: "config-summary",
     label: "Summary compute",
@@ -116,6 +135,7 @@ const CONFIG_META: Record<string, ConfigMeta> = {
     label: "System prompt",
     help: "The instruction the summary model follows when it reads the transcript — edit it to change the tone or focus of the notes. The response format and the notes-language instruction are always appended, so they can't be broken here.",
     textarea: true,
+    restore: "Restore the default prompt",
   },
 };
 
@@ -367,19 +387,29 @@ function configRow(cfg, models, name: string, meta: ConfigMeta) {
     row.classList.add("stacked");
     const ta = document.createElement("textarea");
     describe(ta);
-    ta.rows = 5;
+    ta.rows = meta.rows || 5;
     ta.value = cfg.values[name];
     if (limits.max) ta.maxLength = limits.max;
-    const restore = el("button", "link-btn");
-    restore.type = "button";
-    restore.textContent = "Restore the default prompt";
-    restore.disabled = locked;
-    restore.addEventListener("click", () => {
-      ta.value = cfg.defaults[name] || "";
-      onFormInput();
-    });
-    control.append(ta, restore);
+    control.append(ta);
+    if (meta.restore) {
+      const restore = el("button", "link-btn");
+      restore.type = "button";
+      restore.textContent = meta.restore;
+      restore.disabled = locked;
+      restore.addEventListener("click", () => {
+        ta.value = cfg.defaults[name] || "";
+        onFormInput();
+      });
+      control.append(restore);
+    }
     parts = [label, help, control];
+  } else if (meta.templates) {
+    const select = document.createElement("select");
+    describe(select);
+    for (const t of cfg.notes_templates || []) {
+      select.appendChild(new Option(t.label, t.id, false, t.id === cfg.values[name]));
+    }
+    control.appendChild(select);
   } else if (meta.folder) {
     // The value lives in a hidden input; the visible field just shows it.
     const value = document.createElement("input");

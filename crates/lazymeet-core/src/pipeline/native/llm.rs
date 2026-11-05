@@ -408,6 +408,9 @@ pub fn summarize(
     let custom = ctx.config.summary_prompt();
     let task = custom.trim();
     let task = if task.is_empty() { config::DEFAULT_SUMMARY_PROMPT } else { task };
+    // The template's focus and the vocabulary go after the (editable) task
+    // and before the fixed format, so neither can break parsing.
+    let guidance = config::notes_guidance(ctx.config);
 
     // The language order is repeated at the END of every user message: small
     // models weigh trailing instructions far more than the system prompt.
@@ -417,14 +420,17 @@ pub fn summarize(
         // Map-reduce for long meetings.
         let mut notes = Vec::new();
         for chunk in chunk_lines(&llm, &lines, budget) {
-            let note =
-                llm.chat(&format!("{NOTES_SYSTEM} {lang}"), &format!("{chunk}\n\n{lang}"), 640)?;
+            let note = llm.chat(
+                &format!("{NOTES_SYSTEM} {guidance} {lang}"),
+                &format!("{chunk}\n\n{lang}"),
+                640,
+            )?;
             notes.push(strip_thinking(&note));
         }
         let combined = llm.truncate_to_tokens(&notes.join("\n"), budget);
         format!("Meeting notes:\n{combined}\n\n{lang}")
     };
-    let response = llm.chat(&format!("{task} {FORMAT} {lang}"), &body, ANSWER_TOKENS)?;
+    let response = llm.chat(&format!("{task} {guidance} {FORMAT} {lang}"), &body, ANSWER_TOKENS)?;
     Ok(parse_summary(&response))
 }
 
@@ -434,7 +440,16 @@ pub fn title_from_notes(ctx: &PipelineCtx, notes: &str) -> Result<String, String
     let llm = Llm::load(ctx)?;
     let notes = llm.truncate_to_tokens(notes, 3000);
     let lang = lang_instruction(ctx, &notes);
-    let answer =
-        llm.chat(&format!("{TITLE_SYSTEM} {lang}"), &format!("Notes:\n{notes}\n\n{lang}"), 48)?;
+    let vocab = ctx.config.vocabulary();
+    let spelling = if vocab.is_empty() {
+        String::new()
+    } else {
+        format!("Spell these names exactly like this: {}.", vocab.join(", "))
+    };
+    let answer = llm.chat(
+        &format!("{TITLE_SYSTEM} {spelling} {lang}"),
+        &format!("Notes:\n{notes}\n\n{lang}"),
+        48,
+    )?;
     Ok(clean_title(&strip_thinking(&answer)))
 }

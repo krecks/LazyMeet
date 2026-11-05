@@ -10,6 +10,7 @@ import { selectMeeting } from "./meeting";
 import { refreshMeetings } from "./meetings";
 import { fillLanguageSelect } from "./settings";
 import { state } from "./state";
+import { fillNotesSelects, readNotesSelects } from "./notesopts";
 
 let prep = null; // { path, filename, duration, peaks, ranges, probeFailed,
 //                    hoverIndex, view: {start, end} | null (zoom window),
@@ -104,7 +105,10 @@ export async function openPrepare(path, keepBatch = false) {
   $("prepare").classList.remove("hidden");
   // Within a batch, the speakers and language picked for the previous file
   // carry over; a fresh open starts on the saved defaults.
-  if (!keepBatch || batch.total - batch.rest.length === 1) syncPrepLanguage();
+  if (!keepBatch || batch.total - batch.rest.length === 1) {
+    syncPrepLanguage();
+    fillNotesSelects($("prep-template") as HTMLSelectElement, $("prep-notes-language") as HTMLSelectElement);
+  }
   renderBatch();
   $("prep-nopreview").classList.add("hidden");
   $("prep-video").classList.remove("audio-only", "hidden");
@@ -244,6 +248,7 @@ function prepSettings() {
   return {
     num_speakers: Number.isNaN(numSpeakers) ? -1 : numSpeakers,
     language: ($("prep-language") as HTMLSelectElement)?.value || "auto",
+    ...readNotesSelects($("prep-template") as HTMLSelectElement, $("prep-notes-language") as HTMLSelectElement),
   };
 }
 

@@ -222,7 +222,7 @@
                   <svg class="icon"><use href="#i-pencil" /></svg>
                 </button>
                 <button class="icon-btn subtle" id="regen-notes-btn"
-                  title="Regenerate the notes with the current summary model"
+                  title="Regenerate the notes — pick the kind of meeting and the language" aria-haspopup="dialog"
                   aria-label="Regenerate notes">
                   <svg class="icon"><use href="#i-refresh" /></svg>
                 </button>
@@ -374,6 +374,14 @@
           <select id="prep-language"></select>
         </label>
         <span id="prep-language-note" class="muted small hidden" aria-live="polite"></span>
+        <label class="speakers-field" title="What the notes focus on — a stand-up goes person by person, a sales call captures needs, budget and next steps.">
+          <span class="field-label">Notes</span>
+          <select id="prep-template"></select>
+        </label>
+        <label class="speakers-field" title="The language the notes are written in.">
+          <span class="field-label">Notes in</span>
+          <select id="prep-notes-language"></select>
+        </label>
         <span class="prep-spacer"></span>
         <span id="prep-hint" class="muted small hidden" aria-live="polite">Select at least one segment</span>
         <button id="prep-cancel" class="btn ghost" type="button">Cancel</button>

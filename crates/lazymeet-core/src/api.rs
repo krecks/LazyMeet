@@ -69,6 +69,11 @@ pub fn config_payload(ctx: &Ctx) -> Value {
         "compute_options": {
             "SUMMARY_PROVIDER": config::summary_provider_options(),
         },
+        // Notes templates as {id, label}, in menu order.
+        "notes_templates": config::NOTES_TEMPLATES
+            .iter()
+            .map(|(id, label, _)| json!({"id": id, "label": label}))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -94,6 +99,9 @@ pub fn put_config(ctx: &Arc<Ctx>, fields: &Map<String, Value>) -> ApiResult<Valu
         if !models::llm_catalog().iter().any(|e| e.id == id) {
             return Err(ApiError::invalid("unknown summary model"));
         }
+    }
+    if let Some(v) = fields.get("NOTES_TEMPLATE").filter(|v| !v.is_null()) {
+        check_template(v.as_str().unwrap_or_default())?;
     }
     if let Some(v) = fields.get("WATCH_DIR").filter(|v| !v.is_null()) {
         let dir = std::path::Path::new(v.as_str().unwrap_or_default().trim());
@@ -206,6 +214,60 @@ pub fn create_meeting(
     ranges: Option<&[pipeline::TimeRange]>,
     language: Option<&str>,
 ) -> ApiResult<Value> {
+    create_meeting_with(ctx, src, num_speakers, ranges, language, &NotesOptions::default())
+}
+
+/// Per-meeting notes choices from the prep screen or "Regenerate notes":
+/// None = the saved setting.
+#[derive(Default, Debug, Clone)]
+pub struct NotesOptions {
+    pub template: Option<String>,
+    pub language: Option<String>,
+}
+
+impl NotesOptions {
+    fn validate(&self) -> ApiResult<()> {
+        if let Some(t) = &self.template {
+            check_template(t)?;
+        }
+        if let Some(lang) = &self.language {
+            if lang != "auto" && !supported_languages().contains(&lang.as_str()) {
+                return Err(ApiError::invalid("unsupported notes language"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The record fields that carry them (only the ones that were chosen).
+    fn record_fields(&self) -> Map<String, Value> {
+        let mut out = Map::new();
+        if let Some(t) = &self.template {
+            out.insert("notes_template".into(), json!(t));
+        }
+        if let Some(lang) = &self.language {
+            out.insert("notes_language".into(), json!(lang));
+        }
+        out
+    }
+}
+
+fn check_template(id: &str) -> ApiResult<()> {
+    if config::NOTES_TEMPLATES.iter().any(|(t, _, _)| *t == id) {
+        Ok(())
+    } else {
+        Err(ApiError::invalid("unknown notes template"))
+    }
+}
+
+pub fn create_meeting_with(
+    ctx: &Arc<Ctx>,
+    src: &Path,
+    num_speakers: i64,
+    ranges: Option<&[pipeline::TimeRange]>,
+    language: Option<&str>,
+    notes: &NotesOptions,
+) -> ApiResult<Value> {
+    notes.validate()?;
     if !src.is_file() {
         return Err(ApiError::invalid("file not found"));
     }
@@ -234,6 +296,10 @@ pub fn create_meeting(
         language,
     )?;
     let id = record["id"].as_str().unwrap().to_string();
+    let notes_fields = notes.record_fields();
+    if !notes_fields.is_empty() {
+        store::update_meeting(&ctx.paths, &ctx.locks, &id, false, notes_fields);
+    }
     let upload_dir = ctx.paths.uploads_dir().join(&id);
     std::fs::create_dir_all(&upload_dir)?;
     let dest = upload_dir.join(&filename);
@@ -297,6 +363,18 @@ pub fn probe_media(ctx: &Ctx, src: &Path) -> ApiResult<Value> {
 /// settings. mode "notes": summarize the existing transcript again; mode
 /// "transcription": run the whole pipeline again over the kept audio.
 pub fn reprocess_meeting(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str) -> ApiResult<Value> {
+    reprocess_meeting_with(ctx, meeting_id, mode, &NotesOptions::default())
+}
+
+/// Like `reprocess_meeting`; a template or notes language chosen here is
+/// stored on the meeting first, so this run and later ones use it.
+pub fn reprocess_meeting_with(
+    ctx: &Arc<Ctx>,
+    meeting_id: &str,
+    mode: &str,
+    notes: &NotesOptions,
+) -> ApiResult<Value> {
+    notes.validate()?;
     let record = store::get_meeting(&ctx.paths, &ctx.locks, meeting_id)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;
     let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("");
@@ -324,6 +402,10 @@ pub fn reprocess_meeting(ctx: &Arc<Ctx>, meeting_id: &str, mode: &str) -> ApiRes
         }
         _ => return Err(ApiError::invalid("mode must be \"notes\" or \"transcription\"")),
     };
+    let notes_fields = notes.record_fields();
+    if !notes_fields.is_empty() {
+        store::update_meeting(&ctx.paths, &ctx.locks, meeting_id, false, notes_fields);
+    }
     let record = jobs::queue_rejob(ctx, meeting_id, mode, job)
         .ok_or_else(|| ApiError::not_found("meeting not found"))?;
     Ok(Value::Object(store::public_meeting(&ctx.paths, &record)))

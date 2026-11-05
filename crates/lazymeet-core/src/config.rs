@@ -172,7 +172,69 @@ pub fn tunables() -> Vec<TunableSpec> {
         t("KEEP_AUDIO", "LAZYMEET_KEEP_AUDIO", Kind::Bool, None, None),
         // A folder whose new recordings are imported on their own ("" = off).
         t("WATCH_DIR", "LAZYMEET_WATCH_DIR", Kind::Str, None, Some(1000.0)),
+        // What kind of meeting the notes are written for (NOTES_TEMPLATES).
+        t("NOTES_TEMPLATE", "LAZYMEET_NOTES_TEMPLATE", Kind::Str, None, None),
+        // Names and terms, one per line, the notes must spell exactly.
+        t("VOCABULARY", "LAZYMEET_VOCABULARY", Kind::Str, None, Some(2000.0)),
     ]
+}
+
+/// Most vocabulary terms handed to the summarizer.
+pub const MAX_VOCABULARY: usize = 100;
+
+/// Notes templates: (id, label, what the notes should focus on). The focus
+/// is added to the summary prompt; the JSON shape stays the same, so every
+/// template fills the same notes view.
+pub const NOTES_TEMPLATES: &[(&str, &str, &str)] = &[
+    ("general", "General meeting", ""),
+    (
+        "one_on_one",
+        "One-on-one",
+        "This is a one-on-one. Focus on how each person is doing, feedback given in either         direction, growth and career topics, blockers, and what each person agreed to follow up on.",
+    ),
+    (
+        "standup",
+        "Stand-up",
+        "This is a stand-up. In summary_long, go person by person: what they did, what they do         next, and what blocks them. Takeaways are the blockers and risks; action items are the         help that was promised.",
+    ),
+    (
+        "interview",
+        "Interview",
+        "This is an interview. Capture the interviewee's background, their answers to the main         questions in their own terms, strengths and concerns that were raised, and the agreed         next steps. Never judge the interviewee beyond what was said.",
+    ),
+    (
+        "lecture",
+        "Lecture or talk",
+        "This is a lecture or talk. Summarize the main ideas, definitions, examples and         conclusions in the order they were presented. Takeaways are the key ideas to remember;         action items are only assignments, readings or deadlines that were given.",
+    ),
+    (
+        "sales",
+        "Sales or customer call",
+        "This is a sales or customer call. Capture the customer's needs and pain points, budget,         timeline, decision makers, objections, competitors mentioned, and the agreed next steps         with their owners.",
+    ),
+];
+
+/// The focus text of a template id ("" for general or unknown ids).
+pub fn template_guidance(id: &str) -> &'static str {
+    NOTES_TEMPLATES.iter().find(|(t, _, _)| *t == id).map(|(_, _, g)| *g).unwrap_or("")
+}
+
+/// The extra instructions the summarizer gets for this config: the
+/// template's focus and the vocabulary to spell exactly ("" when neither).
+pub fn notes_guidance(config: &Config) -> String {
+    let mut parts = Vec::new();
+    let focus = template_guidance(&config.notes_template());
+    if !focus.is_empty() {
+        parts.push(focus.to_string());
+    }
+    let vocab = config.vocabulary();
+    if !vocab.is_empty() {
+        parts.push(format!(
+            "These names and terms may occur; when they do, spell them exactly like this             (the transcript may have misheard them): {}.",
+            vocab.join(", ")
+        ));
+    }
+    parts.join(" ")
 }
 
 /// Default summarizer system prompt (user-editable via SUMMARY_PROMPT). The
@@ -219,6 +281,8 @@ pub fn default_value(name: &str) -> Value {
         "NUM_THREADS" => json!(AUTO_THREADS),
         "KEEP_AUDIO" => json!(true),
         "WATCH_DIR" => json!(""),
+        "NOTES_TEMPLATE" => json!("general"),
+        "VOCABULARY" => json!(""),
         _ => Value::Null,
     }
 }
@@ -374,6 +438,21 @@ impl Config {
     }
     pub fn summary_provider(&self) -> String {
         self.str_of("SUMMARY_PROVIDER")
+    }
+    /// The notes template id (one of NOTES_TEMPLATES).
+    pub fn notes_template(&self) -> String {
+        self.str_of("NOTES_TEMPLATE")
+    }
+    /// The vocabulary as a list: one term per line, blanks dropped, at most
+    /// MAX_VOCABULARY terms.
+    pub fn vocabulary(&self) -> Vec<String> {
+        self.str_of("VOCABULARY")
+            .lines()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .take(MAX_VOCABULARY)
+            .map(String::from)
+            .collect()
     }
     /// The watch folder setting as written ("" when off).
     pub fn watch_dir(&self) -> String {

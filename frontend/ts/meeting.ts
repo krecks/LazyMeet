@@ -4,6 +4,7 @@
 // --------------------------------------------------------------------------
 import { $, STAGES, call } from "./core";
 import { exportMeeting, pickExportFormat } from "./exports";
+import { type NotesChoice, openRegenPanel } from "./notesopts";
 import {
   confirmThen,
   disarm,
@@ -182,8 +183,7 @@ export function renderResult(m) {
   regenNotesBtn.classList.toggle("hidden", !!viewed || !(m.segments || []).length);
   retranscribeBtn.classList.toggle("hidden", !!viewed || !m.has_audio);
   regenNotesBtn.onclick = () =>
-    confirmThen(regenNotesBtn, "Click again to replace the current notes", () =>
-      reprocess(m.id, "notes"));
+    openRegenPanel(regenNotesBtn, m, (choice) => reprocess(m.id, "notes", choice));
   retranscribeBtn.onclick = () =>
     confirmThen(retranscribeBtn, "Click again to replace transcript, speakers, and notes", () =>
       reprocess(m.id, "transcription"));
@@ -256,9 +256,9 @@ function renderTimings(t) {
 }
 
 /// Queue a regeneration; the meeting-updated event flow takes over from there.
-async function reprocess(meetingId, mode) {
+async function reprocess(meetingId, mode, notes: NotesChoice | null = null) {
   try {
-    await call("reprocess_meeting", { meeting_id: meetingId, mode });
+    await call("reprocess_meeting", { meeting_id: meetingId, mode, ...(notes || {}) });
     showToast(mode === "notes" ? "Regenerating the notes…" : "Re-transcribing the recording…", 3000, true);
   } catch (e) {
     showToast(

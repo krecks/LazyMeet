@@ -119,7 +119,7 @@ export async function runSmokeChecks(): Promise<void> {
     problems.push("settings check threw: " + e.message);
   }
   try {
-    checkNotes(problems);
+    await checkNotes(problems);
   } catch (e: any) {
     problems.push("notes check threw: " + e.message);
   }
@@ -256,7 +256,7 @@ const MEETING = {
   versions: [],
 };
 
-function checkNotes(problems: string[]) {
+async function checkNotes(problems: string[]) {
   state.activeId = MEETING.id;
   state.currentMeeting = MEETING;
   renderResult(MEETING);
@@ -290,6 +290,21 @@ function checkNotes(problems: string[]) {
     .find((b) => b.textContent === "Cancel")
     ?.click();
   if (document.getElementById("summary-long-block")!.hidden) problems.push("long summary not restored");
+  // Regenerate notes opens a panel with the template and language.
+  document.getElementById("regen-notes-btn")!.click();
+  await new Promise((r) => setTimeout(r, 30));
+  const panel = document.querySelector(".regen-panel");
+  if (!panel) problems.push("regenerate panel did not open");
+  else {
+    const [tpl] = panel.querySelectorAll("select");
+    (tpl as HTMLSelectElement).value = "standup";
+    [...panel.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Regenerate")!.click();
+    await new Promise((r) => setTimeout(r, 10));
+    const regen = calls.filter((c) => c.cmd === "reprocess_meeting").pop();
+    if (regen?.args?.notes_template !== "standup" || regen?.args?.mode !== "notes") {
+      problems.push(`regenerate call: ${JSON.stringify(regen?.args)}`);
+    }
+  }
   // Export opens a format menu; the pick goes to the backend and is remembered.
   document.getElementById("export-btn")!.click();
   const formats = [...document.querySelectorAll<HTMLButtonElement>(".menu .menu-item")];
@@ -378,6 +393,10 @@ async function checkBatchPrepare(problems: string[], hidden: (id: string) => boo
   if (!hidden("prep-rest")) problems.push("'Transcribe all' shown on the last file");
   document.getElementById("prep-transcribe")!.click();
   await settle();
+  const first = created()[before]?.args || {};
+  if (first.notes_template !== "general" || first.notes_language !== "auto") {
+    problems.push(`notes options not sent: ${JSON.stringify(first)}`);
+  }
   const paths = created().slice(before).map((c) => c.args!.path);
   if (paths.join(",") !== "/tmp/a.mp4,/tmp/c.mkv") problems.push(`queued: ${paths.join(",")}`);
   if (!hidden("prepare")) problems.push("prepare still open after the batch");

@@ -371,6 +371,7 @@ fn versions_with(
     action: &str,
     asr_model: Value,
     summary_model: Value,
+    notes_template: Value,
     snapshot: Value,
 ) -> Value {
     let mut versions =
@@ -396,6 +397,7 @@ fn versions_with(
         "action": action,
         "asr_model": asr_model,
         "summary_model": summary_model,
+        "notes_template": notes_template,
         "snapshot": snapshot,
     }));
     Value::Array(versions)
@@ -410,6 +412,13 @@ pub fn run_worker(ctx: &Arc<Ctx>, meeting_id: &str, job: &Job) {
     // this meeting (it's stored on the record, so re-transcriptions keep it).
     if let Some(lang) = record.get("language").and_then(|v| v.as_str()) {
         config.override_value("ASR_LANGUAGE", json!(lang));
+    }
+    // Likewise the notes template and notes language picked for it.
+    if let Some(template) = record.get("notes_template").and_then(|v| v.as_str()) {
+        config.override_value("NOTES_TEMPLATE", json!(template));
+    }
+    if let Some(lang) = record.get("notes_language").and_then(|v| v.as_str()) {
+        config.override_value("SUMMARY_LANGUAGE", json!(lang));
     }
 
     let pctx = PipelineCtx {
@@ -670,6 +679,7 @@ fn run_full(
         action,
         json!(config.asr_model()),
         json!(config.summary_model()),
+        json!(config.notes_template()),
         snapshot,
     );
     let done = done_changes(ctx, meeting_id, &summary, &timings, versions);
@@ -742,7 +752,14 @@ fn resummarize(
         "segments": record.get("segments").cloned().unwrap_or(json!([])),
         "speakers": Value::Object(speakers.clone()),
     });
-    let versions = versions_with(record, "notes", asr, json!(config.summary_model()), snapshot);
+    let versions = versions_with(
+        record,
+        "notes",
+        asr,
+        json!(config.summary_model()),
+        json!(config.notes_template()),
+        snapshot,
+    );
     let done = done_changes(ctx, meeting_id, &result, &timings, versions);
     update_and_emit(ctx, meeting_id, false, done);
     Ok(())

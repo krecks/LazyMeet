@@ -317,7 +317,7 @@ pub fn summarize(
     speakers: &Map<String, Value>,
 ) -> Result<Summary, String> {
     if ctx.fake {
-        return Ok(fake::summary());
+        return Ok(fake::summary_for(ctx.config));
     }
     native_only(ctx, |_| native_impl::summarize(ctx, segments, speakers))
 }

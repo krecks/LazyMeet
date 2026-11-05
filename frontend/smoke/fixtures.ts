@@ -28,6 +28,8 @@ const DEFAULTS = {
   NUM_THREADS: 0,
   KEEP_AUDIO: true,
   WATCH_DIR: "",
+  NOTES_TEMPLATE: "general",
+  VOCABULARY: "",
 };
 export const LIMITS = {
   SPEAKER_THRESHOLD: { min: 0, max: 1 },
@@ -36,6 +38,7 @@ export const LIMITS = {
   MIN_SPEAKER_SECONDS: { min: 0, max: 600 },
   NUM_THREADS: { min: 0, max: 12 },
   SUMMARY_PROMPT: { min: null, max: 2000 },
+  VOCABULARY: { min: null, max: 2000 },
 };
 
 export function config() {
@@ -49,6 +52,14 @@ export function config() {
     auto_threads: 7,
     languages: LANGUAGES,
     compute_options: { SUMMARY_PROVIDER: ["cpu", "gpu"] },
+    notes_templates: [
+      { id: "general", label: "General meeting" },
+      { id: "one_on_one", label: "One-on-one" },
+      { id: "standup", label: "Stand-up" },
+      { id: "interview", label: "Interview" },
+      { id: "lecture", label: "Lecture or talk" },
+      { id: "sales", label: "Sales or customer call" },
+    ],
   };
 }
 
