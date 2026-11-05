@@ -1951,7 +1951,7 @@ dependencies = [
 
 [[package]]
 name = "lazymeet"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "lazymeet-core",
  "serde",
@@ -1963,7 +1963,7 @@ dependencies = [
 
 [[package]]
 name = "lazymeet-core"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bzip2 0.4.4",
  "chrono",
